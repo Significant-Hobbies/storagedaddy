@@ -22,7 +22,7 @@ jobs:
         working-directory: scripts
 
   shared_candidate:
-    uses: sass-maker/saas-maker/.github/workflows/daddy-macos-candidate.yml@7a3b78acbcd523bb968ff19e1b3ae9427d022b91
+    uses: sass-maker/saas-maker/.github/workflows/daddy-macos-candidate.yml@3ce0419bbb906396d6bfd03351b4c444b10f2c54
     with:
       app: storagedaddy
-      tooling-ref: 7a3b78acbcd523bb968ff19e1b3ae9427d022b91
+      tooling-ref: 3ce0419bbb906396d6bfd03351b4c444b10f2c54
