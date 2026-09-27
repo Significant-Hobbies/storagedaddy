@@ -24,6 +24,9 @@ Open the DMG and drag the app into Applications. Start with Scan My Caches or ch
 ## Cleanup and size measurements
 A scan deletes nothing. Add candidates, review the list, then explicitly confirm moving them to Trash. The app does not empty Trash automatically. On-disk means allocated storage; logical means the content size reported to apps. Shared APFS blocks, snapshots and inaccessible files can make totals differ from macOS Storage. Allocated bytes do not guarantee space reclaimed. A folder scan is a useful starting point on Macs with limited memory.
 
+## Mac System Data
+Apple's System Data is a Storage category for files that do not fit a more specific category; it is not one folder or a total storagedaddy can reproduce. It can include caches, logs and other system resources. [Download storagedaddy](https://storage.daddyrad.com/download) to scan a disk or folder for readable large files, then use Developer Insights to inspect builds and caches before adding any cleanup candidates. Protected locations, snapshots and shared APFS storage can make the scan total differ from macOS Storage. Review each choice before moving anything to Trash; allocated bytes do not guarantee reclaimed space. See [Apple's storage guidance](https://support.apple.com/102624).
+
 ## AI session archives
 Powered by Memory Pack. Choose sessions by modification date and save to Desktop or another location. Exports retain prompts, replies and recognized session details in a compact ZIP. Tool payloads, attachments, reasoning and unsupported records may be omitted. These are lossy reading and analysis archives, not resumable session backups. Originals remain until a separate, confirmed cleanup. The app validates the ZIP and content hash before offering review of verified originals. Compression savings vary by session; there is no guaranteed ratio or exhaustive session-discovery claim.
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050706">
-  <meta name="description" content="Open-source Mac storage analyzer for developers. Explore disk usage, caches and AI sessions, then review cleanup. Free forever.">
+  <meta name="description" content="Free, open-source Mac disk space analyzer for developers. Find large files, builds and caches, then review cleanup before moving anything to Trash.">
   <link rel="canonical" href="https://storage.daddyrad.com/">
   <link rel="icon" href="assets/StorageDaddy.png" type="image/png">
   <meta property="og:type" content="website">
@@ -26,7 +26,7 @@
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"storagedaddy","url":"https://storage.daddyrad.com/","description":"Open-source Mac storage analyzer for developers. Explore disk usage, caches and AI sessions, then review cleanup. Free forever.","license":"https://github.com/sarthakagrawal927/storagedaddy/blob/main/LICENSE","sameAs":["https://github.com/sarthakagrawal927/storagedaddy"]}</script>
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"storagedaddy","url":"https://storage.daddyrad.com/","description":"Open-source Mac storage analyzer for developers. Explore disk usage, caches and AI sessions, then review cleanup. Free forever.","applicationCategory":"UtilitiesApplication","operatingSystem":"macOS 14 or later, Apple silicon","downloadUrl":"https://storage.daddyrad.com/download","license":"https://github.com/sarthakagrawal927/storagedaddy/blob/main/LICENSE","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"sameAs":["https://github.com/sarthakagrawal927/storagedaddy"]}</script>
   <script defer src="clarity.js"></script>
-  <title>storagedaddy — free Mac storage analyzer &amp; cleanup</title>
+  <title>Free Mac Disk Space Analyzer for Developers | storagedaddy</title>
   <link rel="stylesheet" href="style.css">
   <!-- App Health uses an origin-bound public browser key; empty means disabled. -->
   <script defer src="/analytics.js" data-key="ahk_pub_adfb05266428d4c0a81ef91f7df191c353fc7a2891f36c22a0a586028412f436" data-project="app-3262e567-f7cc-48bc-a528-4e3845185b41"></script>
@@ -151,7 +151,7 @@
         <details><summary>Is cleanup automatic?</summary><p>No. You can select recognized caches for review, and moving anything to Trash requires a separate confirmation. Trash is still yours to empty.</p></details>
         <details><summary>What does an AI archive include?</summary><p>Recognized Codex and Claude sessions can be exported as a compact, date-filtered reading and analysis archive. The ZIP and content hash are validated before you review originals. It is intentionally lossy: tool payloads, attachments, and reasoning may be omitted, and the result cannot resume the original session. Originals stay in place until a separate cleanup confirmation.</p></details>
         <details><summary>How do I install it?</summary><p>Download the DMG, open it, then drag storagedaddy into Applications. Open the app and choose a disk or folder to scan. This beta supports Apple silicon Macs with macOS 14 or later; Intel Macs are not supported.</p></details>
-        <details><summary>Why can totals differ from macOS Storage?</summary><p>A scan reports readable files in the area you chose. Protected folders, snapshots and shared APFS storage can make this different from whole-volume usage. On-disk allocation is not a promise of reclaimable space. Start with a folder scan on Macs with limited memory.</p></details>
+        <details><summary>Why is Mac System Data large, and can storagedaddy show it?</summary><p>Apple uses System Data for files that do not fit a more specific Storage category, including caches, logs and other system resources. It is a category, not a folder that storagedaddy can reproduce. Scan a disk or folder to find readable large files; Developer Insights can highlight builds and caches worth reviewing. Protected locations, snapshots and shared APFS storage can make the scan total differ from macOS Storage. Review every cleanup choice, and do not assume allocated bytes will become free space. <a href="https://support.apple.com/102624">See Apple’s storage guidance.</a> On Macs with limited memory, <a href="/download">download storagedaddy</a> and start with a folder scan.</p></details>
         <details><summary>Is storagedaddy free and open source?</summary><p>Everyone who downloads during early access gets all future versions free forever. There is no trial expiry, account, checkout or subscription. The published source remains available under the MIT license. <a href="https://github.com/sarthakagrawal927/storagedaddy">Read the code, report an issue, or contribute on GitHub.</a> Third-party libraries and provider artwork retain their own terms; see the repository notices.</p></details>
       </div></div>
     </section>
