@@ -17,7 +17,7 @@ function secure(response) {
   result.headers.set('X-Content-Type-Options', 'nosniff');
   result.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   // Fleet's hosted widgets use shadow-root styles and bundled data-URI logos.
-  result.headers.set('Content-Security-Policy', "default-src 'none'; img-src 'self' data: https://*.clarity.ms https://c.bing.com; style-src 'self' 'unsafe-inline'; script-src 'self' https://ingest.sassmaker.com https://sassmaker.com https://*.clarity.ms https://c.bing.com; connect-src https://ingest.sassmaker.com https://sassmaker.com https://*.clarity.ms https://c.bing.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; frame-src https://health.sassmaker.com");
+  result.headers.set('Content-Security-Policy', "default-src 'none'; img-src 'self' data: https://*.clarity.ms https://c.bing.com; style-src 'self' 'unsafe-inline'; script-src 'self' https://ingest.sassmaker.com https://sassmaker.com https://*.clarity.ms https://c.bing.com; connect-src https://ingest.sassmaker.com https://sassmaker.com https://api.sassmaker.com https://*.clarity.ms https://c.bing.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; frame-src https://health.sassmaker.com");
   return result;
 }
 export default {

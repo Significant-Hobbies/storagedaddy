@@ -26,6 +26,7 @@ test('root landing and relative assets map to packaged assets without duplicate 
  assert.equal(e.events.length,1); assert.equal(e.events[0].blobs[0],'page_view');
  assert.match(response.headers.get('content-security-policy'), /https:\/\/\*\.clarity\.ms/);
  assert.match(response.headers.get('content-security-policy'), /https:\/\/c\.bing\.com/);
+ assert.match(response.headers.get('content-security-policy'), /connect-src[^;]*https:\/\/api\.sassmaker\.com/);
 });
 test('legacy landing and download links redirect to the corrected domain without counting', async () => {
  for (const [path,target] of [['/storagedaddy','/'],['/storagedaddy/','/'],['/storagedaddy/download','/download'],['/storagedaddy/assets/StorageDaddy.png','/assets/StorageDaddy.png']]) {
