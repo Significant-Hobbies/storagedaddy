@@ -5,15 +5,14 @@
   if (!key?.startsWith('ahk_pub_') || document.documentElement.dataset.storageDaddyAnalytics) return;
   if (/bot\b|crawler|spider|slurp|facebookexternalhit|ChatGPT-User|HeadlessChrome|curl\/|wget\//i.test(navigator.userAgent)) return;
   document.documentElement.dataset.storageDaddyAnalytics = 'true';
-  let queuedClicks = 0;
+  const queuedEvents = [];
 
   function deliver() {
     const tracker = window.appHealth;
     if (!tracker) return;
     try {
-      while (queuedClicks > 0) {
-        queuedClicks--;
-        tracker.track('download.clicked');
+      while (queuedEvents.length > 0) {
+        tracker.track(queuedEvents.shift());
       }
       // Navigation and downloads never wait for analytics.
       Promise.resolve(tracker.flush()).catch(() => {});
@@ -25,8 +24,13 @@
     if (!anchor) return;
     let url;
     try { url = new URL(anchor.href, location.href); } catch { return; }
-    if (url.origin !== location.origin || url.pathname !== '/download') return;
-    queuedClicks = Math.min(20, queuedClicks + 1);
+    const eventName = url.origin === location.origin && url.pathname === '/download'
+      ? 'download.clicked'
+      : url.origin === 'https://github.com' && url.pathname === '/sarthakagrawal927/storagedaddy'
+        ? 'source_opened'
+        : null;
+    if (!eventName || queuedEvents.length >= 20) return;
+    queuedEvents.push(eventName);
     deliver();
   }
   document.addEventListener('click', downloadClick, { passive: true });

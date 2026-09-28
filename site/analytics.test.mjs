@@ -62,6 +62,14 @@ test('ignores non-download links and does not capture query or private values', 
   assert.equal(t.calls.some((value) => value.includes('private') || value.includes('?')), false);
 });
 
+test('records the public source repository click without recording its URL', () => {
+  const t = tracker();
+  const h = harness({ tracker: t });
+  h.dispatch('click', { button: 0, target: h.anchor('https://github.com/sarthakagrawal927/storagedaddy') });
+  h.dispatch('click', { button: 0, target: h.anchor('https://github.com/sarthakagrawal927/storagedaddy/issues/new?title=private') });
+  assert.deepEqual(t.calls, ['source_opened']);
+});
+
 test('does not initialize without a public key or for bots', () => {
   const missing = harness({ key: '' });
   assert.equal(missing.appended.length, 0);
