@@ -247,7 +247,7 @@ enum ApplicationSort: String, CaseIterable {
 
     nonisolated private static func discover() throws -> [InstalledApplication] {
         let manager = FileManager.default
-        let roots = [URL(fileURLWithPath: "/Applications"), manager.homeDirectoryForCurrentUser.appendingPathComponent("Applications"), URL(fileURLWithPath: "/System/Applications"), URL(fileURLWithPath: "/System/Library/CoreServices/Applications")]
+        let roots = AppReferenceDiscovery.standardRoots(home: manager.homeDirectoryForCurrentUser)
         var found: [String: InstalledApplication] = [:]
         for root in roots {
             try Task.checkCancellation()

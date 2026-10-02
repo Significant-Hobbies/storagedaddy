@@ -55,11 +55,11 @@ struct DiskBuddyApp: App {
 }
 
 enum Workspace: String, CaseIterable, Identifiable {
-    case aiSessions = "AI Sessions", developer = "Developer Insights", explore = "Explore", applications = "Applications", snapshots = "Snapshots", cleanup = "Cleanup", acknowledgments = "Acknowledgments", dashboard = "Dashboard"
+    case aiSessions = "AI Sessions", developer = "Developer Insights", explore = "Explore", applications = "Applications", snapshots = "Snapshots", duplicates = "Duplicates", projects = "Projects", appData = "App Data", cleanup = "Cleanup", acknowledgments = "Acknowledgments", dashboard = "Dashboard"
     var id: String { rawValue }
     var title: String { switch self { case .explore: "Storage"; case .cleanup: "Review Cleanup"; case .snapshots: "History"; default: rawValue } }
-    var requiresScan: Bool { [.developer, .cleanup].contains(self) }
-    var icon: String { switch self { case .aiSessions: "bubble.left.and.text.bubble.right.fill"; case .developer: "terminal"; case .explore: "internaldrive.fill"; case .applications: "app.badge"; case .snapshots: "clock.arrow.circlepath"; case .cleanup: "trash"; case .acknowledgments: "heart.text.square"; case .dashboard: "speedometer" } }
+    var requiresScan: Bool { [.developer, .cleanup, .duplicates, .projects, .appData].contains(self) }
+    var icon: String { switch self { case .aiSessions: "bubble.left.and.text.bubble.right.fill"; case .developer: "terminal"; case .explore: "internaldrive.fill"; case .applications: "app.badge"; case .snapshots: "clock.arrow.circlepath"; case .duplicates: "doc.on.doc"; case .projects: "folder.badge.gearshape"; case .appData: "questionmark.folder"; case .cleanup: "trash"; case .acknowledgments: "heart.text.square"; case .dashboard: "speedometer" } }
 }
 
 enum StorageSection: String, CaseIterable, Identifiable {
@@ -74,11 +74,9 @@ enum MapMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var icon: String { switch self { case .folders: "folder"; case .sunburst: "circle.dotted.circle"; case .flame: "chart.bar.xaxis"; case .bubbles: "circle.grid.3x3"; case .mindMap: "point.3.connected.trianglepath.dotted"; case .top: "chart.bar.fill"; case .age: "calendar"; case .types: "tag"; case .treemap: "rectangle.split.3x3" } }
 }
-struct AgeSummary: Sendable {
-    var count = 0
-    var bytes: Int64 = 0
-    var largest: NodeRanking
-    init(allocated: Bool = true) { largest = NodeRanking(limit: 4, allocated: allocated) }
+enum MapMeasure: String, CaseIterable, Identifiable {
+    case bytes = "Bytes", files = "File entries"
+    var id: String { rawValue }
 }
 
 /// QDirStat-style kind buckets: a coarse answer to "what sort of data is
@@ -234,7 +232,7 @@ struct FileTypeStats: Sendable {
     @Published var showAbout = false
     @Published var showWelcome = false
     @Published var lastTrashedURLs: [URL] = []
-    @Published var scan: ScanResult?
+    @Published var scan: ScanResult? { didSet { invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview() } }
     @Published private(set) var promptAvoidanceFolders: [String] = []
     private var lastScanAllowedProtectedFolder = false
     let installedApplications = InstalledApplicationsModel()
@@ -251,6 +249,10 @@ struct FileTypeStats: Sendable {
     @Published var selected: Int?
     @Published var search = "" { didSet { refreshFocus() } }
     @Published var allocated = true { didSet { refreshFocus() } }
+    @Published var mapMeasure: MapMeasure = .bytes
+    @Published var mapIndex: StorageMapIndex?
+    @Published var volumeFree: Int64?
+    @Published var volumeCapacity: Int64?
     @Published var liveProgress: ScanProgress?
     @Published var busy = false
     @Published var progress = "Choose what to scan to begin"
@@ -271,9 +273,34 @@ struct FileTypeStats: Sendable {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("StorageDaddy/Scan History", isDirectory: true)
     }
+    @Published var duplicateGroups: [DuplicateGroup] = []
+    @Published var duplicatesLoading = false
+    @Published var duplicatesError: String?
+    @Published var duplicatesSearched = false
+    private var duplicateTask: Task<Void, Never>?
+    private var duplicateVersion = UUID()
+    private var reviewBatchTask: Task<Void, Never>?
+    private var duplicateSurvivorSelections: [Int: DuplicateSurvivorSelection] = [:]
+    @Published var projectReviewRecords: [ProjectPurgeRecord] = []
+    @Published var projectReviewStatus: ProjectPurgeViewStatus = .idle("Review project evidence after scanning a workspace.")
+    private var projectReviewTask: Task<Void, Never>?
+    private var projectReviewVersion = UUID()
+    private var projectRecoveryPlans: [Int: String] = [:]
+    private var stagedProjectOwners: [Int: Int] = [:]
+    @Published var appDataReview: AppLeftoverReviewResult?
+    @Published var appDataReviewLoading = false
+    @Published var appDataReviewError: String?
+    private var appDataReviewTask: Task<Void, Never>?
+    private var appDataReviewVersion = UUID()
+    private var appDataLibraryRoot: URL?
+    private var stagedAppData: [Int: String] = [:]
     @Published var visible: [DiskNode] = []
     @Published var ranked: [DiskNode] = []
-    @Published var aged: [AgeSummary] = (0..<4).map { _ in AgeSummary() }
+    @Published var ageHistogram: FileAgeHistogram?
+    @Published var ageGranularity: FileAgeGranularity = .monthly { didSet { refreshFocus() } }
+    @Published var ageRefreshing = false
+    @Published var ageHistogramError: String?
+    private var ageTask: Task<Void, Never>?
     @Published var fileTypeRows: [FileTypeStat] = []
     @Published var fileTypeSummary: FileTypeStats?
     @Published var quickWinNodes: [DiskNode] = []
@@ -303,40 +330,256 @@ struct FileTypeStats: Sendable {
     private var scopedURL: URL?
     var node: DiskNode? { guard let scan, let id = selected, scan.nodes.indices.contains(id) else { return nil }; return scan.nodes[id] }
     func bytes(_ node: DiskNode) -> Int64 { allocated ? node.allocatedBytes : node.logicalBytes }
+    func fileEntries(_ node: DiskNode) -> Int64 {
+        guard let mapIndex, mapIndex.fileCounts.indices.contains(node.id) else { return node.isDirectory ? 0 : 1 }
+        return mapIndex.fileCounts[node.id]
+    }
+    func mapWeight(_ node: DiskNode) -> Int64 { mapMeasure == .bytes ? bytes(node) : fileEntries(node) }
+    func mapLabel(_ value: Int64) -> String { mapMeasure == .bytes ? DiskFormat.bytes(value) : "\(value.formatted()) \(value == 1 ? "file entry" : "file entries")" }
+    func storageKind(_ node: DiskNode) -> StorageKind {
+        guard let mapIndex, mapIndex.kinds.indices.contains(node.id) else { return .generic }
+        return mapIndex.kinds[node.id]
+    }
+    var mapItems: [DiskNode] {
+        guard let scan, scan.nodes.indices.contains(focus) else { return [] }
+        return scan.nodes[focus].children.map { scan.nodes[$0] }.sorted { mapWeight($0) > mapWeight($1) }
+    }
+    func matchesFilter(_ node: DiskNode) -> Bool { search.isEmpty || node.name.localizedCaseInsensitiveContains(search) }
+    func hasAncestor(_ id: Int, in ids: Set<Int>) -> Bool {
+        guard let scan else { return false }
+        var cursor: Int? = id
+        while let current = cursor, scan.nodes.indices.contains(current) {
+            if ids.contains(current) { return true }
+            guard let parent = scan.nodes[current].parent, parent < current else { break }
+            cursor = parent
+        }
+        return false
+    }
+    func toggleStage(_ id: Int) {
+        if staged.contains(id) { unstage(id) } else { stage(id) }
+    }
+    var projectedFreeUpperBound: Int64? {
+        guard let scan, let volumeFree else { return nil }
+        let stagedBytes = staged.filter { scan.nodes.indices.contains($0) }.reduce(Int64.zero) { sum, id in
+            let (value, overflow) = sum.addingReportingOverflow(max(0, scan.nodes[id].allocatedBytes))
+            return overflow ? Int64.max : value
+        }
+        let (sum, overflow) = volumeFree.addingReportingOverflow(stagedBytes)
+        return min(volumeCapacity ?? Int64.max, overflow ? Int64.max : sum)
+    }
     func refreshFocus() {
-        focusTask?.cancel()
+        focusTask?.cancel(); ageTask?.cancel()
+        ageHistogram = nil; ageHistogramError = nil; ageRefreshing = false
         guard let scan, scan.nodes.indices.contains(focus) else { visible = []; fileTypeRows = []; fileTypeSummary = nil; return }
         let version = UUID(); focusVersion = version
         let focus = focus, search = search, allocated = allocated, mode = mode
+        if mode == .age {
+            let granularity = ageGranularity, now = Date(), calendar = Calendar.current
+            ageRefreshing = true
+            ageTask = Task {
+                let worker = Task.detached(priority: .userInitiated) {
+                    try FileAgeHistogram.calculate(in: scan, focus: focus, granularity: granularity,
+                        allocated: allocated, search: search, now: now, calendar: calendar)
+                }
+                do {
+                    let histogram = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+                    guard !Task.isCancelled, focusVersion == version else { return }
+                    ageHistogram = histogram; ageRefreshing = false
+                } catch {
+                    guard !Task.isCancelled, focusVersion == version else { return }
+                    ageHistogramError = "Modification dates unavailable. Try refreshing this view."
+                    ageRefreshing = false
+                }
+            }
+        }
         focusTask = Task {
             let worker = Task.detached(priority: .userInitiated) {
                 func size(_ n: DiskNode) -> Int64 { allocated ? n.allocatedBytes : n.logicalBytes }
                 let visible = scan.nodes[focus].children.map { scan.nodes[$0] }.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }.sorted { size($0) > size($1) }
                 var files = NodeRanking(limit: 250, allocated: allocated)
-                var aged = (0..<4).map { _ in AgeSummary(allocated: allocated) }
                 var types = FileTypeStats()
-                guard mode == .top || mode == .age || mode == .types else { return (visible, files.sorted, aged, types, [FileTypeStat]()) }
+                guard mode == .top || mode == .types else { return (visible, files.sorted, types, [FileTypeStat]()) }
                 var stack = [focus]
-                let now = Date()
                 while let id = stack.popLast() {
                     if Task.isCancelled { break }
                     let n = scan.nodes[id]
                     if n.isDirectory { stack.append(contentsOf: n.children) }
                     else if search.isEmpty || n.name.localizedCaseInsensitiveContains(search) {
                         if mode == .top { files.insert(n); continue }
-                        if mode == .types { types.insert(n, bytes: size(n)); continue }
-                        let days = now.timeIntervalSince(n.modified) / 86400
-                        let bucket = days < 30 ? 0 : days < 180 ? 1 : days < 365 ? 2 : 3
-                        aged[bucket].count += 1; aged[bucket].bytes += size(n); aged[bucket].largest.insert(n)
+                        types.insert(n, bytes: size(n))
                     }
                 }
                 let rows = types.sort(limit: 48)
-                return (visible, files.sorted, aged, types, rows)
+                return (visible, files.sorted, types, rows)
             }
             let result = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
             guard !Task.isCancelled, focusVersion == version else { return }
-            visible = result.0; ranked = result.1; aged = result.2
-            fileTypeSummary = result.3; fileTypeRows = result.4
+            visible = result.0; ranked = result.1
+            fileTypeSummary = result.2; fileTypeRows = result.3
+        }
+    }
+    func invalidateDuplicateReview() {
+        duplicateTask?.cancel(); duplicateVersion = UUID()
+        duplicateGroups = []; duplicatesLoading = false; duplicatesError = nil; duplicatesSearched = false
+    }
+    func invalidateProjectReview() {
+        projectReviewTask?.cancel(); projectReviewVersion = UUID()
+        projectReviewRecords = []; projectRecoveryPlans = [:]; stagedProjectOwners = [:]
+        projectReviewStatus = .idle("Review project evidence after scanning a workspace.")
+    }
+    func reviewProjects() {
+        guard let scan, let report = developerReport, !busy else { return }
+        projectReviewTask?.cancel()
+        let version = UUID(); projectReviewVersion = version
+        let plans = projectRecoveryPlans
+        projectReviewStatus = .loading
+        projectReviewTask = Task {
+            let worker = Task.detached(priority: .utility) {
+                let preliminary = try ProjectPurgeReview.build(scan: scan, report: report, cancellationCheck: { try Task.checkCancellation() })
+                var probes: [Int: ProjectPurgeProbe] = [:]
+                for record in preliminary {
+                    try Task.checkCancellation()
+                    let git = try ProjectGitTrackingProbe.collect(scan: scan, projectID: record.id, artifactIDs: record.artifacts.map(\.id))
+                    probes[record.id] = ProjectPurgeProbe(git: git, recoveryPlans: plans)
+                }
+                try Task.checkCancellation()
+                return try ProjectPurgeReview.build(scan: scan, report: report, probes: probes, cancellationCheck: { try Task.checkCancellation() })
+            }
+            do {
+                let records = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+                guard !Task.isCancelled, projectReviewVersion == version else { return }
+                projectReviewRecords = records; projectReviewStatus = .ready
+                let allowed = Set(records.flatMap { $0.stageableArtifactIDs })
+                for id in Array(stagedProjectOwners.keys) where !allowed.contains(id) { unstage(id) }
+            } catch {
+                guard !Task.isCancelled, projectReviewVersion == version else { return }
+                projectReviewStatus = .error("Project evidence unavailable. Refresh the review to try again.")
+            }
+        }
+    }
+    func recordProjectRecoveryPlan(_ id: Int, plan: String?) {
+        guard !busy, projectReviewStatus == .ready,
+              projectReviewRecords.contains(where: { $0.artifacts.contains(where: { $0.id == id }) }) else { return }
+        let trimmed = plan?.trimmingCharacters(in: .whitespacesAndNewlines)
+        projectRecoveryPlans[id] = trimmed?.isEmpty == false ? trimmed : nil
+        unstage(id)
+        reviewProjects()
+    }
+    func cancelProjectReview() {
+        projectReviewTask?.cancel(); projectReviewVersion = UUID()
+        projectReviewStatus = .idle("Review canceled. Refresh project evidence to continue.")
+    }
+    func stageProjectArtifacts(_ ids: [Int]) {
+        guard !busy, projectReviewStatus == .ready,
+              !ids.isEmpty, Set(ProjectPurgeReview.stageableSelection(Set(ids), in: projectReviewRecords)) == Set(ids) else { return }
+        for record in projectReviewRecords {
+            for id in ids where record.stageableArtifactIDs.contains(id) { stagedProjectOwners[id] = record.id }
+        }
+        stageReviewBatch(ids)
+    }
+    func invalidateAppDataReview() {
+        appDataReviewTask?.cancel(); appDataReviewVersion = UUID()
+        appDataReview = nil; appDataReviewLoading = false; appDataReviewError = nil
+        appDataLibraryRoot = nil; stagedAppData = [:]
+    }
+    func refreshAppDataReview() {
+        guard let scan, !busy else { return }
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let library = home.appendingPathComponent("Library")
+        let roots = AppReferenceDiscovery.standardRoots(home: home)
+        appDataReviewTask?.cancel()
+        let version = UUID(); appDataReviewVersion = version
+        appDataReviewLoading = true; appDataReviewError = nil; appDataReview = nil
+        appDataReviewTask = Task {
+            let worker = Task.detached(priority: .utility) {
+                let reference = try AppReferenceDiscovery.collect(roots: roots)
+                return try AppLeftoverReview.analyze(scan: scan, inventory: reference, libraryRoot: library,
+                    cancellationCheck: { try Task.checkCancellation() })
+            }
+            do {
+                let result = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+                guard !Task.isCancelled, appDataReviewVersion == version else { return }
+                appDataReview = result; appDataLibraryRoot = library; appDataReviewLoading = false
+                let candidates = Set(result.candidates.map(\.id))
+                for id in Array(stagedAppData.keys) where !candidates.contains(id) { unstage(id) }
+            } catch {
+                guard !Task.isCancelled, appDataReviewVersion == version else { return }
+                appDataReviewLoading = false; appDataReviewError = "App reference unavailable. Refresh to try again."
+                for id in Array(stagedAppData.keys) { unstage(id) }
+            }
+        }
+    }
+    func inspectAppData(_ record: AppLeftoverRecord) {
+        guard let scan, scan.nodes.indices.contains(record.id), scan.url(for: record.id).path == record.path,
+              appDataReview?.records.contains(where: { $0.id == record.id && $0.path == record.path }) == true else { return }
+        openStorage(.explore); open(scan.nodes[record.id])
+    }
+    func cancelAppDataReview() {
+        appDataReviewTask?.cancel(); appDataReviewVersion = UUID()
+        appDataReviewLoading = false
+        appDataReviewError = "Review canceled. Refresh the app reference to continue."
+    }
+    func stageAppData(_ record: AppLeftoverRecord) {
+        guard let scan, !busy, !appDataReviewLoading,
+              appDataReview?.absenceEvidenceAvailable == true,
+              appDataReview?.candidates.contains(where: { $0.id == record.id && $0.path == record.path }) == true,
+              scan.nodes.indices.contains(record.id), scan.url(for: record.id).path == record.path else { return }
+        stagedAppData[record.id] = record.path
+        stage(record.id)
+    }
+    func findDuplicates() {
+        guard let scan, !busy, !duplicatesLoading else { return }
+        invalidateDuplicateReview()
+        let version = duplicateVersion
+        duplicatesLoading = true
+        duplicateTask = Task {
+            let worker = Task.detached(priority: .utility) { try await DuplicateFinder.find(in: scan) }
+            do {
+                let groups = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+                guard !Task.isCancelled, duplicateVersion == version else { return }
+                duplicateGroups = groups; duplicatesSearched = true; duplicatesLoading = false
+            } catch {
+                guard !Task.isCancelled, duplicateVersion == version else { return }
+                duplicatesLoading = false
+                duplicatesError = error.localizedDescription
+            }
+        }
+    }
+    /// The preflight is asynchronous; serial staging avoids dropping every item
+    /// after the first one at the existing busy guard. Nothing moves to Trash here.
+    func stageDuplicateCopies(_ ids: [Int]) {
+        guard let scan, !busy, !duplicatesLoading, !ids.isEmpty else { return }
+        let removals = Set(ids)
+        let groups = duplicateGroups.filter { !removals.isDisjoint(with: $0.nodeIDs) }
+        guard removals.isSubset(of: Set(groups.flatMap(\.nodeIDs))) else { return }
+        var proposals: [Int: DuplicateSurvivorSelection] = [:]
+        for group in groups {
+            let members = Set(group.nodeIDs), kept = members.subtracting(removals)
+            guard let key = members.min(), !kept.isEmpty else { return }
+            // Direct previously staged copies are reconciled by this new Keep
+            // choice. Ancestor folders require explicit removal in Cleanup.
+            let externalStaged = staged.subtracting(members)
+            let selection = DuplicateSurvivorSelection(members: members, kept: kept)
+            do { try DuplicateSurvivorProtection.validateCoverage(scan: scan, selections: [selection], staged: externalStaged) }
+            catch { message = error.localizedDescription; return }
+            proposals[key] = selection
+        }
+        for group in groups { for id in group.nodeIDs { unstage(id) } }
+        duplicateSurvivorSelections.merge(proposals) { _, latest in latest }
+        stageReviewBatch(ids)
+    }
+    func stageReviewBatch(_ ids: [Int]) {
+        guard !busy, let scan, ids.allSatisfy({ scan.nodes.indices.contains($0) && scan.nodes[$0].parent != nil }) else { return }
+        reviewBatchTask?.cancel()
+        let version = scanVersion
+        reviewBatchTask = Task {
+            for id in ids {
+                guard !Task.isCancelled, scanVersion == version, !busy else { return }
+                if hasAncestor(id, in: staged) { continue }
+                stage(id)
+                await task?.value
+                guard hasAncestor(id, in: staged) else { return }
+            }
         }
     }
     func scanUserCaches() {
@@ -430,7 +673,9 @@ struct FileTypeStats: Sendable {
                     }
                     let findingIndex = Dictionary(uniqueKeysWithValues: report.findings.map { ($0.id, $0) })
                     let projectNames = Dictionary(uniqueKeysWithValues: report.projects.map { ($0.id, $0.name) })
-                    return (quick.sorted, apps, fileCount, groups, report, growth, findingIndex, projectNames)
+                    let mapIndex = try StorageMapIndex(scan: result, groups: groups, cancellationCheck: { try Task.checkCancellation() })
+                    let volume = try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey, .volumeTotalCapacityKey])
+                    return (quick.sorted, apps, fileCount, groups, report, growth, findingIndex, projectNames, mapIndex, volume?.volumeAvailableCapacity.map(Int64.init), volume?.volumeTotalCapacity.map(Int64.init))
                 }
                 let summary = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
 
@@ -442,6 +687,8 @@ struct FileTypeStats: Sendable {
                 developerReport = summary.4
                 projectGrowth = summary.5
                 reportFindingsByID = summary.6; reportProjectNames = summary.7
+                mapIndex = summary.8
+                volumeFree = summary.9; volumeCapacity = summary.10
                 let summaryTime = summaryStart.duration(to: clock.now).components
                 insightsElapsed = Double(summaryTime.seconds) + Double(summaryTime.attoseconds) / 1e18
                 let readyTime = analysisStart.duration(to: clock.now).components
@@ -707,6 +954,8 @@ struct FileTypeStats: Sendable {
     func unstage(_ id: Int) {
         staged.remove(id)
         incompleteCleanup.removeValue(forKey: id)
+        stagedProjectOwners.removeValue(forKey: id)
+        stagedAppData.removeValue(forKey: id)
     }
 
     func reviewIncompleteCleanup(_ id: Int) {
@@ -743,6 +992,15 @@ struct FileTypeStats: Sendable {
         let ids = staged.sorted()
         let version = scanVersion
         let acknowledgements = incompleteCleanup.filter { staged.contains($0.key) }
+        let duplicateSelections = duplicateSurvivorSelections.values.filter { selection in
+            selection.members.contains { hasAncestor($0, in: staged) }
+        }
+        do { try DuplicateSurvivorProtection.validateCoverage(scan: scan, selections: duplicateSelections, staged: staged) }
+        catch { message = error.localizedDescription; return }
+        let projectOwners = stagedProjectOwners.filter { staged.contains($0.key) }
+        let recoveryPlans = projectRecoveryPlans
+        let appDataPaths = stagedAppData.filter { staged.contains($0.key) }
+        let libraryRoot = appDataLibraryRoot
         let alert = NSAlert()
         alert.messageText = "Move \(ids.count) \(ids.count == 1 ? "item" : "items") to Trash?"
         alert.informativeText = "Entire folders and their contents are included. Developer categories are descriptions, not recommendations to delete. Active environments, models and container volumes may be needed by your tools. We will check for changes again after you confirm."
@@ -759,6 +1017,22 @@ struct FileTypeStats: Sendable {
             do {
                 // Confirmation can remain open indefinitely. Rescan afterward,
                 // using exactly the candidates that the user approved.
+                try DuplicateSurvivorProtection.validateSurvivors(scan: scan, selections: duplicateSelections, staged: Set(ids))
+                try await ProjectProposalValidation.validate(scan: scan, artifactOwners: projectOwners,
+                    recoveryPlans: recoveryPlans, excludedFolders: excludedFolders)
+                if !appDataPaths.isEmpty {
+                    guard let libraryRoot else { throw NSError(domain: "AppDataReview", code: 1, userInfo: [NSLocalizedDescriptionKey: "App reference changed. Refresh App Data."]) }
+                    let home = FileManager.default.homeDirectoryForCurrentUser
+                    let referenceCheck = Task.detached(priority: .utility) {
+                        let reference = try AppReferenceDiscovery.collect(roots: AppReferenceDiscovery.standardRoots(home: home))
+                        return try AppLeftoverReview.analyze(scan: scan, inventory: reference, libraryRoot: libraryRoot,
+                            cancellationCheck: { try Task.checkCancellation() })
+                    }
+                    let fresh = try await withTaskCancellationHandler { try await referenceCheck.value } onCancel: { referenceCheck.cancel() }
+                    guard fresh.absenceEvidenceAvailable, appDataPaths.allSatisfy({ id, path in
+                        fresh.candidates.contains { $0.id == id && $0.path == path }
+                    }) else { throw NSError(domain: "AppDataReview", code: 1, userInfo: [NSLocalizedDescriptionKey: "App reference changed or is incomplete. Refresh App Data and review again."]) }
+                }
                 try await CleanupPreflight.validate(ids: ids, in: scan, acknowledgedIncomplete: acknowledgements, excludedFolders: excludedFolders)
                 try Task.checkCancellation()
                 guard scanVersion == version, staged == Set(ids) else {

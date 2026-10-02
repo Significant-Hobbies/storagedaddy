@@ -49,6 +49,44 @@ final class AnalysisTests: XCTestCase {
         XCTAssertTrue(groups.isEmpty)
     }
 
+    func testDuplicateFinderIncludesIndependentZeroLengthFiles() async throws {
+        let fixture = try Fixture()
+        try fixture.write("empty-a.bin", data: Data())
+        try fixture.write("empty-b.bin", data: Data())
+        let nodes = try [
+            fixture.node(id: 0, parent: nil, name: "", path: "", directory: true),
+            fixture.node(id: 1, parent: 0, name: "empty-a.bin", path: "empty-a.bin", useModified: false),
+            fixture.node(id: 2, parent: 0, name: "empty-b.bin", path: "empty-b.bin", useModified: false)
+        ]
+        let groups = try await DuplicateFinder.find(in: ScanResult(rootPath: fixture.root.path, nodes: nodes))
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?.nodeIDs, [1, 2])
+        XCTAssertEqual(groups.first?.wastedBytes, 0)
+    }
+
+    func testDuplicateFinderIncludesAPFSClonesWhenSupported() async throws {
+        let fixture = try Fixture()
+        try fixture.write("original.bin", data: Data(repeating: 17, count: 16384))
+        let status = clonefile(fixture.url("original.bin").path, fixture.url("clone.bin").path, 0)
+        if status != 0 {
+            let code = errno
+            guard [ENOTSUP, EXDEV, ENOSYS, EINVAL].contains(code) else {
+                throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+            }
+            throw XCTSkip("clonefile unavailable on this fixture filesystem (errno \(code))")
+        }
+        let nodes = try [
+            fixture.node(id: 0, parent: nil, name: "", path: "", directory: true),
+            fixture.node(id: 1, parent: 0, name: "original.bin", path: "original.bin", useModified: false),
+            fixture.node(id: 2, parent: 0, name: "clone.bin", path: "clone.bin", useModified: false)
+        ]
+        XCTAssertNotEqual(nodes[1].inode, nodes[2].inode)
+        let groups = try await DuplicateFinder.find(in: ScanResult(rootPath: fixture.root.path, nodes: nodes))
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?.nodeIDs, [1, 2])
+        // Content equality does not establish that shared blocks can be reclaimed.
+    }
+
     func testCleanupSafetyRejectsRootEscapesAndProtectedContainers() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }

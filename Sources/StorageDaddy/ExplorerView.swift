@@ -8,7 +8,6 @@ struct ExplorerView: View {
     @AppStorage("storageAccessIntroductionSeen") private var accessIntroductionSeen = false
     @State private var inspector = false
     @State private var choosingDisk = false
-    @State private var explainingSizes = false
     var body: some View {
         NavigationSplitView {
             sidebar.background(Color.black).navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
@@ -164,6 +163,9 @@ struct ExplorerView: View {
                 navigationHeading("STORAGE")
                 navigationItem(.explore)
                 navigationItem(.snapshots)
+                navigationItem(.duplicates)
+                navigationItem(.projects)
+                navigationItem(.appData)
                 navigationHeading("TOOLS").padding(.top, 9)
                 navigationItem(.dashboard)
                 navigationItem(.applications)
@@ -243,7 +245,48 @@ struct ExplorerView: View {
         case .snapshots: SavedHistoryView()
         case .dashboard: DashboardView(dashboard: m.dashboard)
         case .cleanup: CleanupView()
+        case .duplicates:
+            if let scan = m.scan {
+                DuplicateReviewView(scan: scan, groups: m.duplicateGroups, isLoading: m.duplicatesLoading,
+                    error: m.duplicatesError, onFind: m.findDuplicates, onCancel: m.invalidateDuplicateReview,
+                    onStage: m.stageDuplicateCopies, hasSearched: m.duplicatesSearched)
+                    .id("\(scan.started):\(scan.rootPath)")
+            }
         case .developer: DeveloperView()
+        case .projects:
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Button("Refresh project evidence", action: m.reviewProjects)
+                        .buttonStyle(StorageButtonStyle()).disabled(m.busy || m.projectReviewStatus == .loading)
+                    if m.projectReviewStatus == .loading {
+                        Button("Cancel review", action: m.cancelProjectReview).buttonStyle(StorageButtonStyle())
+                    }
+                    ProjectPurgeView(records: m.projectReviewRecords, scan: m.scan, status: m.projectReviewStatus,
+                        onRecoveryPlan: m.recordProjectRecoveryPlan, onRetry: m.reviewProjects, onStageArtifactIDs: m.stageProjectArtifacts)
+                }.padding(20)
+            }
+        case .appData:
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        Button("Refresh app reference", action: m.refreshAppDataReview)
+                            .buttonStyle(StorageButtonStyle()).disabled(m.busy || m.appDataReviewLoading)
+                        if m.appDataReviewLoading {
+                            ProgressView().controlSize(.small); Text("Reviewing app metadata…")
+                            Button("Cancel", action: m.cancelAppDataReview).buttonStyle(StorageButtonStyle())
+                        }
+                    }
+                    Text("Reference covers visible apps in standard application folders. Apps installed elsewhere, ownership and removal safety remain unknown.")
+                        .font(.callout).foregroundStyle(Tints.secondaryText)
+                    if let error = m.appDataReviewError { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Tints.coral) }
+                    if let result = m.appDataReview {
+                        AppLeftoverReviewView(result: result, reviewEnabled: !m.busy && !m.appDataReviewLoading,
+                            onInspect: m.inspectAppData, onReview: m.stageAppData)
+                    } else if !m.appDataReviewLoading {
+                        Text("Refresh the app reference to review direct Library data roots in this scan.").foregroundStyle(Tints.secondaryText)
+                    }
+                }.padding(20)
+            }
         case .acknowledgments: AcknowledgmentsView()
         }
     }
@@ -306,7 +349,14 @@ struct ExplorerView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
-    private var explorer: some View {
+    private var explorer: some View { StorageExplorePanel(inspector: $inspector) }
+}
+
+struct StorageExplorePanel: View {
+    @EnvironmentObject var m: ExplorerModel
+    @Binding var inspector: Bool
+    @State private var explainingSizes = false
+    var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 DoodleArt(topic: .explore).frame(width: 48, height: 48)
@@ -346,6 +396,11 @@ struct ExplorerView: View {
                     .background(Color.black)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Tints.mint.opacity(0.4), lineWidth: 1))
                     .accessibilityLabel("View: \(m.mode.rawValue)")
+                if ![.folders, .top, .age, .types].contains(m.mode) {
+                    Picker("Tile area", selection: $m.mapMeasure) {
+                        ForEach(MapMeasure.allCases) { measure in Text(measure.rawValue).tag(measure) }
+                    }.pickerStyle(.segmented).frame(maxWidth: 190)
+                }
                 Spacer()
                 HStack(spacing: 6) {
                     Button { explainingSizes = true } label: { Image(systemName: "info.circle") }
@@ -364,12 +419,13 @@ struct ExplorerView: View {
                 HStack {
                     Text("\(DiskFormat.bytes(m.bytes(scan.nodes[m.focus]))) in this folder").fontWeight(.medium)
                     Spacer()
-                    Text("Select to inspect · Double-click to open · Right-click to clean up")
+                    Text("Select to inspect · Option-click or M to mark · Double-click to open")
                         .foregroundStyle(Tints.secondaryText)
                 }.font(.caption)
             }
             Divider().overlay(Tints.secondaryText.opacity(0.18))
-            if m.visible.isEmpty { StorageEmptyView("No matching items", systemImage: "folder", description: Text("Try another filter or open a different folder.")) }
+            StorageFreeSpaceView()
+            if m.mapItems.isEmpty || ([.folders, .top, .age, .types].contains(m.mode) && m.visible.isEmpty) { StorageEmptyView("No matching items", systemImage: "folder", description: Text("Try another filter or open a different folder.")) }
             else if m.mode == .folders { folderList }
             else { DiskMapView() }
         }.padding(26)
@@ -391,6 +447,19 @@ struct ExplorerView: View {
     }
 }
 
+struct StorageFreeSpaceView: View {
+    @EnvironmentObject var m: ExplorerModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Free now: \(m.volumeFree.map(DiskFormat.bytes) ?? "Unavailable") → Up to \(m.projectedFreeUpperBound.map(DiskFormat.bytes) ?? "Unavailable") after emptying Trash")
+                .font(.caption).monospacedDigit().foregroundStyle(Tints.mint)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Staging changes nothing on disk. Shared APFS blocks and snapshots can reduce the space recovered.")
+                .font(.caption2).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 enum Tints {
     static let electricBlue = Color(red: 0.33, green: 0.58, blue: 0.83)
     static let mint = Color(red: 0.42, green: 0.79, blue: 0.62)
@@ -399,6 +468,20 @@ enum Tints {
     static let yellow = Color(red: 0.87, green: 0.67, blue: 0.28)
     static let cyan = Color(red: 0.27, green: 0.70, blue: 0.75)
     static let colors: [Color] = [mint, electricBlue, coral, yellow, cyan]
+
+    static func forKind(_ kind: StorageKind) -> Color {
+        switch kind {
+        case .code: mint
+        case .caches: yellow
+        case .toolchains: electricBlue
+        case .packages: cyan
+        case .git: Color(red: 0.67, green: 0.77, blue: 0.49)
+        case .media: Color(red: 0.91, green: 0.63, blue: 0.45)
+        case .documents: Color(red: 0.74, green: 0.79, blue: 0.81)
+        case .agents: Color(red: 0.45, green: 0.72, blue: 0.87)
+        case .generic: Color(white: 0.56)
+        }
+    }
 
     static func forLocation(_ name: String) -> Color {
         switch name.lowercased() {
@@ -436,7 +519,12 @@ struct InspectorView: View {
                     Text(StorageLabels.location(scan.url(for: n.id).path)).font(.caption).foregroundStyle(Tints.secondaryText).help(scan.url(for: n.id).path).textSelection(.enabled)
                     Text(DiskFormat.bytes(m.bytes(n))).font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit()
                     Divider().overlay(Tints.secondaryText.opacity(0.18))
-                    metric("On disk", DiskFormat.bytes(n.allocatedBytes)); metric("Logical", DiskFormat.bytes(n.logicalBytes)); metric("Modified", n.modified.formatted(date: .abbreviated, time: .omitted)); metric("Contents", "\(n.children.count) immediate items")
+                    metric("On disk", DiskFormat.bytes(n.allocatedBytes)); metric("Logical", DiskFormat.bytes(n.logicalBytes)); metric("Modified", n.modified == .distantPast || !n.modified.timeIntervalSince1970.isFinite ? "Unknown" : n.modified.formatted(date: .abbreviated, time: .omitted)); metric("Contents", "\(n.children.count) immediate items")
+                    metric("Kind", m.storageKind(n).rawValue)
+                    metric("File entries", m.fileEntries(n).formatted())
+                    if n.isDirectory, n.children.contains(where: { scan.nodes[$0].name == ".git" }) {
+                        GitEvidenceView(url: scan.url(for: n.id))
+                    }
                     Text("Allocated totals can include shared APFS blocks. They are not a promise of reclaimable space.").font(.caption).foregroundStyle(Tints.secondaryText)
                     if n.isDirectory {
                         FolderSymlinksView(scan: scan, folderID: n.id)
