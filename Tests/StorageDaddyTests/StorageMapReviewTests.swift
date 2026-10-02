@@ -107,36 +107,120 @@ struct StorageMapReviewTests {
         #expect(m.duplicateGroups.isEmpty); #expect(!m.duplicatesSearched)
         #expect(!m.duplicatesLoading); #expect(m.duplicatesError == nil)
     }
-    @Test func nativeMapInspectorCapturesAreOffscreen() throws {
+    @Test func nativeMapInspectorCapturesAreOffscreen() async throws {
         let m = ExplorerModel(); let scan = fixture(); m.scan = scan; m.mapIndex = StorageMapIndex(scan: scan)
         m.volumeFree = 45_000_000_000; m.volumeCapacity = 500_000_000_000; m.selected = 8
         m.refreshFocus()
         let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("artifacts/design/map-review")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        for width in [880, 1200, 1440] {
+        // The historical 880-point component is wider and taller than the
+        // detail area of an 880x600 app window. Reserve the ideal 200-point
+        // sidebar and 100 points for stage controls/status in a second probe.
+        // This is a content-budget fixture, not a full NavigationSplitView or
+        // native window acceptance test. It never activates the application.
+        let sizes = [(880, 1000, "880"), (1200, 1000, "1200"), (1440, 1000, "1440"),
+                     (680, 500, "shell-budget-880x600")]
+        for (width, height, label) in sizes {
             for state in ["bytes", "files", "filter", "staged"] {
                 m.mapMeasure = state == "files" ? .files : .bytes
                 m.search = state == "filter" ? "report" : ""
                 m.staged = state == "staged" ? [3] : []
+                try await Task.sleep(for: .milliseconds(30))
+                #expect(!m.visible.isEmpty)
                 let view = HStack(spacing: 0) { StorageExplorePanel(inspector: .constant(true)); Divider(); InspectorView().frame(width: 250) }
-                    .environmentObject(m).preferredColorScheme(.dark).tint(Tints.mint).buttonStyle(StorageButtonStyle()).background(Color.black).frame(width: CGFloat(width), height: 1000)
+                    .environmentObject(m).preferredColorScheme(.dark).tint(Tints.mint).buttonStyle(StorageButtonStyle()).background(Color.black).frame(width: CGFloat(width), height: CGFloat(height))
                 let host = NSHostingView(rootView: view)
-                host.frame = NSRect(x: 0, y: 0, width: width, height: 1000)
+                host.frame = NSRect(x: 0, y: 0, width: width, height: height)
                 let window = NSWindow(contentRect: host.frame, styleMask: [], backing: .buffered, defer: false)
                 window.contentView = host
-                RunLoop.current.run(until: Date().addingTimeInterval(0.12))
+                try await Task.sleep(for: .milliseconds(120))
                 host.layoutSubtreeIfNeeded(); window.displayIfNeeded()
                 #expect(host.bounds.width == CGFloat(width))
+                #expect(host.bounds.height == CGFloat(height))
                 func scrollViews(_ view: NSView) -> [NSScrollView] {
                     (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
                 }
+                for scroll in scrollViews(host) { scroll.scrollerStyle = .overlay; scroll.tile() }
+                host.layoutSubtreeIfNeeded()
+                let overflowingDocuments = scrollViews(host).filter { scroll in
+                    guard let document = scroll.documentView else { return false }
+                    return document.bounds.width > scroll.contentView.bounds.width + 1
+                }
+                #expect(overflowingDocuments.isEmpty, "\(state), \(label)")
+                let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+                host.cacheDisplay(in: host.bounds, to: bitmap)
+                try #require(bitmap.representation(using: .png, properties: [:])).write(to: directory.appendingPathComponent("\(state)-\(label).png"))
+            }
+        }
+    }
+
+    @Test func compactFullShellJourneyUsesOnlySyntheticState() async throws {
+        let m = ExplorerModel(); let scan = fixture()
+        m.scan = scan; m.mapIndex = StorageMapIndex(scan: scan); m.selected = 8
+        m.volumeFree = 45_000_000_000; m.volumeCapacity = 500_000_000_000
+        m.progress = "Synthetic scan · Nothing moved"; m.refreshFocus()
+        let wasActive = NSApplication.shared.isActive
+        let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("artifacts/compact-map")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for (width, height) in [(880, 600), (1200, 850), (1440, 900)] {
+            let states = ["bytes", "files", "filter", "staged", "inspector-hidden"]
+                + (width == 880 ? MapMode.allCases.filter { $0 != .treemap }.map(\.rawValue) : [])
+            for state in states {
+                m.mode = MapMode(rawValue: state) ?? .treemap
+                m.mapMeasure = state == "files" ? .files : .bytes
+                m.search = state == "filter" ? "report" : ""
+                // A visual staging fixture only: no stage/preflight/Trash action.
+                m.staged = state == "staged" ? [7] : []
+                try await Task.sleep(for: .milliseconds(30))
+                #expect(!m.visible.isEmpty)
+                let view = ExplorerView(runsLaunchActions: false, inspector: state != "inspector-hidden")
+                    .environmentObject(m).frame(width: CGFloat(width), height: CGFloat(height))
+                let host = NSHostingView(rootView: view)
+                host.frame = NSRect(x: 0, y: 0, width: width, height: height)
+                let window = NSWindow(contentRect: host.frame, styleMask: [], backing: .buffered, defer: false)
+                window.contentView = host
+                try await Task.sleep(for: .milliseconds(300))
+                host.layoutSubtreeIfNeeded(); window.displayIfNeeded()
+                #expect(host.bounds.width == CGFloat(width)); #expect(host.bounds.height == CGFloat(height))
+                func scrollViews(_ view: NSView) -> [NSScrollView] {
+                    (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
+                }
+                // Pin only these offscreen views, not the user's preferences.
+                // The first detached NavigationSplitView otherwise caches a
+                // legacy-scroller gutter before SwiftUI adopts overlay scrollbars.
+                for scroll in scrollViews(host) { scroll.scrollerStyle = .overlay; scroll.tile() }
+                host.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(100))
                 for scroll in scrollViews(host) {
-                    if let document = scroll.documentView { #expect(document.bounds.width <= scroll.contentView.bounds.width + 1) }
+                    if let document = scroll.documentView {
+                        #expect(document.bounds.width <= scroll.contentView.bounds.width + 1, "\(state), \(width): \(document.bounds.width) / \(scroll.contentView.bounds.width)")
+                    }
                 }
                 let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
                 host.cacheDisplay(in: host.bounds, to: bitmap)
-                try #require(bitmap.representation(using: .png, properties: [:])).write(to: directory.appendingPathComponent("\(state)-\(width).png"))
+                try #require(bitmap.representation(using: .png, properties: [:]))
+                    .write(to: directory.appendingPathComponent("shell-\(state.replacingOccurrences(of: " ", with: "-"))-\(width).png"))
+                if state == "staged" {
+                    for scroll in scrollViews(host) {
+                        guard let document = scroll.documentView,
+                              document.bounds.height > scroll.contentView.bounds.height else { continue }
+                        scroll.contentView.scroll(to: CGPoint(x: 0, y: max(0, document.bounds.height - scroll.contentView.bounds.height)))
+                        scroll.reflectScrolledClipView(scroll.contentView)
+                    }
+                    host.layoutSubtreeIfNeeded()
+                    host.cacheDisplay(in: host.bounds, to: bitmap)
+                    try #require(bitmap.representation(using: .png, properties: [:]))
+                        .write(to: directory.appendingPathComponent("shell-staged-scrolled-\(width).png"))
+                }
+                #expect(NSApplication.shared.isActive == wasActive)
+                #expect(m.scan?.nodes.map(\.allocatedBytes) == scan.nodes.map(\.allocatedBytes))
+                #expect(m.scan?.rootPath == scan.rootPath)
+                #expect(m.lastTrashedURLs.isEmpty)
             }
         }
+        m.openStorage(.developer); #expect(m.storageSection == .developer)
+        m.openStorage(.explore); #expect(m.storageSection == .explore)
+        #expect(m.workspace == .explore); #expect(m.lastTrashedURLs.isEmpty)
     }
 }

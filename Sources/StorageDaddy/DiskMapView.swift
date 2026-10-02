@@ -3,6 +3,7 @@ import AppKit
 import DiskCore
 
 struct DiskMapView: View {
+    var compact = false
     @EnvironmentObject var m: ExplorerModel
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -101,20 +102,18 @@ struct DiskMapView: View {
                     )
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("\(m.mode.rawValue) of \(m.mapItems.count) items. Select items using the list below.")
-                }.frame(minHeight: 210, maxHeight: .infinity)
+                }.frame(minHeight: 210, maxHeight: compact ? 260 : .infinity)
+                    .frame(height: compact ? 260 : nil)
                 mapLegend
                 Text(caption + " " + (m.mapMeasure == .bytes ? "Areas use the selected byte measure." : "Areas count file entries, including links; empty folders have no area.") + " Filters dim nonmatching tiles without changing area.").font(.caption).foregroundStyle(Tints.secondaryText)
                 Divider()
-                itemList(m.visible).frame(maxHeight: 200)
+                itemList(m.visible).frame(height: compact ? 200 : nil).frame(maxHeight: 200)
             }
         }
     }
     private var mapLegend: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ViewThatFits(in: .horizontal) {
-                legendKinds
-                ScrollView(.horizontal) { legendKinds }.scrollIndicators(.visible)
-            }
+            legendKinds
             Text("Diagonal lines: review candidate · Coral and dashed outline: staged for cleanup · M toggles Cleanup")
                 .font(.caption).foregroundStyle(Tints.secondaryText)
             Button(stagingActionLabel) { if let id = m.selected { m.toggleStage(id) } }
@@ -133,7 +132,7 @@ struct DiskMapView: View {
         return m.selected.map { m.staged.contains($0) } == true ? "Remove from Cleanup" : "Add to Cleanup"
     }
     private var legendKinds: some View {
-        HStack(spacing: 12) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 85), alignment: .leading)], alignment: .leading, spacing: 6) {
             ForEach(StorageKind.allCases, id: \.self) { kind in
                 HStack(spacing: 4) { Circle().fill(Tints.forKind(kind)).frame(width: 7, height: 7); Text(kind.rawValue) }.fixedSize()
             }
