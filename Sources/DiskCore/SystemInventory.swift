@@ -45,7 +45,8 @@ public enum SystemInventory {
             var fsType = ""
             var bsdName = ""
             var stat = Darwin.statfs()
-            if statfs(path, &stat) == 0 {
+            let hasStat = statfs(path, &stat) == 0
+            if hasStat {
                 fsType = cStringField(stat.f_fstypename)
                 bsdName = cStringField(stat.f_mntfromname).replacingOccurrences(of: "/dev/", with: "")
             }
@@ -84,7 +85,9 @@ public enum SystemInventory {
                 isNetwork: Self.networkFilesystems.contains(volumeKind.isEmpty ? fsType : volumeKind),
                 isEncrypted: encrypted,
                 isDiskImage: diskImage,
-                apfsContainer: Self.apfsContainerName(fsType: volumeKind.isEmpty ? fsType : volumeKind, bsdName: bsdName)
+                apfsContainer: Self.apfsContainerName(fsType: volumeKind.isEmpty ? fsType : volumeKind, bsdName: bsdName),
+                inodeTotal: hasStat && stat.f_files > 0 ? stat.f_files : nil,
+                inodeFree: hasStat && stat.f_files > 0 && stat.f_ffree <= stat.f_files ? stat.f_ffree : nil
             )
         }.sorted { lhs, rhs in
             func rank(_ v: MountedVolumeInfo) -> Int {
@@ -208,6 +211,10 @@ public struct MountedVolumeInfo: Sendable, Equatable {
     public var isEncrypted: Bool?
     public var isDiskImage: Bool
     public var apfsContainer: String?
+    /// Raw statfs counts, not an invented fixed APFS inode capacity.
+    /// Zero total or inconsistent counts are unavailable to metric consumers.
+    public var inodeTotal: UInt64? = nil
+    public var inodeFree: UInt64? = nil
 
     /// Space macOS can reclaim on demand (local snapshots, caches, cloud-only
     /// copies) but that still shows as used to basic capacity queries.
