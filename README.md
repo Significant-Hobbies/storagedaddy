@@ -97,7 +97,9 @@ Developer ID, notarization profile and Sparkle signing key.
 
 ## Privacy and limits
 
-File processing stays on your Mac. There are no file uploads or AI calls.
+File processing stays on your Mac. There are no file uploads. Folder explanations
+use your chosen local agent only when you request one; its provider policy applies.
+Optional App Health foreground-session heartbeats are disabled by default.
 Sparkle uses HTTPS to check for and download updates. Website request counts
 are separate from app activity.
 
@@ -131,3 +133,25 @@ Click **Settings** at the bottom of the sidebar, or open **storagedaddy → Sett
 Exclusions also block storage cleanup of those folders, their descendants, and any parent that would contain them. Changing exclusions clears the cleanup queue and marks existing results for a rescan. Settings cannot change during an active scan or cleanup check. Independent Applications and AI tools retain their own inventory scope.
 
 Cleanup uses one review list with a regeneration label on each item. Recognized caches and dependencies are usually regenerable; ambiguous build folders and other data are marked “Regeneration unconfirmed.” These labels are recovery guidance, not proof that an item is unused or disposable.
+
+### Optional native App Health sessions
+
+The published Foundation-only Swift SDK is pinned to `sass-maker/app-health`
+`0.1.0`. With no valid `StorageDaddyAppHealthPublicKey` in the app's per-user
+UserDefaults domain (`local.fleet.storagedaddy`), no App Health client or requests
+are created. There is no bundled key. The collector is `https://health.sassmaker.com`.
+
+The owner must first create a **StorageDaddy native public key** in App Health.
+Configure that public key locally with `defaults write local.fleet.storagedaddy StorageDaddyAppHealthPublicKey -string '<owner-created-native-public-key>'`, then
+restart the app. The key must match `ahk_native_` followed by 64 lowercase hex
+characters. To disable reporting, remove this setting and restart the app.
+Do not use an owner/admin credential or a website key.
+
+Only SDK active-session heartbeats are sent: a temporary session identifier and
+active state. There are no events, logs, user/device identifiers, filenames or scan
+details. Backgrounding stops heartbeats. Termination calls `close`, with a three
+second quit bound; final delivery is best effort. The SDK stores no persistent
+queue. Website traffic and native sessions remain separate measurements, and
+neither proves distinct people or installations. Tests use fake transports only.
+Live acceptance requires a separate owner-created key and collector receipt;
+this release does not configure or activate one.

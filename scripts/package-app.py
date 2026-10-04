@@ -72,6 +72,7 @@ pending_helper.replace(contents / "Helpers/memory-pack")
 for name in ["StorageDaddy.png", "StorageDaddy.icns", "Welcome.png", "PageDoodles.png",
              "ClaudeOfficial.png", "ChatGPTOfficial.png", "ProviderIcons-provenance.json"]:
     shutil.copy2(root / "Assets" / name, contents / "Resources" / name)
+shutil.copy2(root / "Assets" / "AppHealth-LICENSE.txt", contents / "Resources" / "AppHealth-LICENSE.txt")
 shutil.copy2(support / "THIRD_PARTY_NOTICES.txt", contents / "Resources" / "MemoryPack-THIRD_PARTY_NOTICES.txt")
 shutil.copy2(support / "provenance.json", contents / "Resources" / "MemoryPack-provenance.json")
 sparkle_support.embed(bundle)

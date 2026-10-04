@@ -6,6 +6,41 @@ import DiskCore
     @Published var report: SystemStorageReport?
     @Published var health: [NVMeHealthInfo] = []
     @Published var loading = false
+    @Published var ioRates: StorageDashboardMetrics.IORates = .waiting
+    private var samplingVersion = UUID()
+
+    func sampleWhileVisible(probe: @escaping @Sendable () -> StorageDashboardMetrics.IOSample = StorageDashboardMetrics.collectIOSample,
+                            interval: Duration = .seconds(2)) async {
+        let version = UUID(); samplingVersion = version
+        ioRates = .waiting
+        var previous: StorageDashboardMetrics.IOSample?
+        defer { if samplingVersion == version { ioRates = .waiting } }
+        while !Task.isCancelled, samplingVersion == version {
+            let worker = Task.detached(priority: .utility, operation: probe)
+            let sample = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+            guard !Task.isCancelled, samplingVersion == version else { return }
+            ioRates = StorageDashboardMetrics.ioRates(previous: previous, current: sample)
+            previous = sample
+            do { try await Task.sleep(for: interval) } catch { return }
+        }
+    }
+
+    static func scopedScore(_ report: SystemStorageReport) -> (String, StorageDashboardMetrics.Score) {
+        let volume = report.volumes.first(where: \.isStartupData) ?? report.volumes.first(where: { $0.mountPoint == "/" })
+        let validCapacity = volume.flatMap { v -> MountedVolumeInfo? in
+            guard let total = v.totalCapacity, total > 0, let free = v.availableCapacity, free >= 0, free <= total else { return nil }
+            return v
+        }
+        let purgeable = validCapacity.flatMap { v -> Int64? in
+            guard let important = v.importantAvailableCapacity, let free = v.availableCapacity,
+                  let total = v.totalCapacity, important >= free, important <= total else { return nil }
+            return important - free
+        }
+        return (volume.map { $0.name + " (" + $0.mountPoint + ")" } ?? "Startup scope unavailable",
+            StorageDashboardMetrics.score(totalBytes: validCapacity?.totalCapacity, freeBytes: validCapacity?.availableCapacity,
+                purgeableBytes: purgeable, nvmePercentUsed: nil,
+                snapshotCount: volume?.mountPoint == "/" ? report.pressure.localSnapshotNames?.count : nil))
+    }
 
     func loadIfNeeded() {
         if report == nil { refresh() }
@@ -56,6 +91,10 @@ struct DashboardView: View {
                                 .frame(maxWidth: wide ? nil : .infinity)
                         }
                         latestScanPanel
+                        let scoped = DashboardModel.scopedScore(report)
+                        StorageDashboardMetricsView(volumes: report.volumes, rates: dashboard.ioRates, score: scoped.1,
+                            scoreScope: scoped.0, isRefreshing: dashboard.loading, onRefresh: dashboard.refresh,
+                            onReviewSnapshots: { showingSystemDetails = true })
                         layout {
                             DashboardTrashPanel(excludedFolders: m.excludedFolders)
                                 .frame(maxWidth: .infinity)
@@ -75,7 +114,7 @@ struct DashboardView: View {
         }
         .background(Color.black)
         .buttonStyle(StorageButtonStyle())
-        .task { dashboard.loadIfNeeded() }
+        .task { dashboard.loadIfNeeded(); await dashboard.sampleWhileVisible() }
     }
 
     private var header: some View {
@@ -99,7 +138,8 @@ struct DashboardView: View {
     }
 
     private func capacityPanel(_ report: SystemStorageReport) -> some View {
-        let capacity = StartupCapacity(volumes: report.volumes)
+        let capacity = report.startupAccounting.flatMap { StartupCapacity(total: $0.total, available: $0.available) }
+            ?? StartupCapacity(volumes: report.volumes)
         let startup = report.volumes.first(where: \.isStartupData)
             ?? report.volumes.first(where: { $0.mountPoint == "/" })
         return VStack(alignment: .leading, spacing: 18) {
@@ -134,8 +174,11 @@ struct DashboardView: View {
                     Text("\(DiskFormat.bytes(purgeable)) purgeable · macOS may reclaim this when needed")
                         .font(.caption).foregroundStyle(Tints.cyan)
                 }
-                Text("Startup capacity is a macOS estimate. Scan totals below cover only the location scanned.")
+                Text(m.scan.flatMap { ScanStorageAccounting(scan: $0, capacity: capacity, apfs: report.startupAccounting) }.map {
+                    $0.summary + ". Used space outside the breakdown is unclassified, not unused. Protected folders, exclusions and separate system volumes are outside scan coverage. APFS metadata and snapshots can also contribute; individual amounts are unmeasured. Capacity and scan were measured at different times."
+                }.map { $0 + apfsVolumeSummary(report) } ?? "Startup capacity covers the startup storage pool. The scan below covers only its selected location, so it does not account for the whole disk." + apfsVolumeSummary(report))
                     .font(.caption2).foregroundStyle(Tints.secondaryText)
+                    .help(m.scan.flatMap { ScanStorageAccounting(scan: $0, capacity: capacity, apfs: report.startupAccounting)?.measuredBreakdown } ?? "Scan startup Data to compare file allocations with each APFS volume.")
             } else {
                 Text("Startup capacity unavailable")
                     .font(.title3).foregroundStyle(Tints.secondaryText)
@@ -147,6 +190,13 @@ struct DashboardView: View {
         .padding(22)
         .frame(maxWidth: .infinity, minHeight: 294, alignment: .topLeading)
         .background(Tints.mint.opacity(0.10), in: RoundedRectangle(cornerRadius: 17))
+    }
+
+    private func apfsVolumeSummary(_ report: SystemStorageReport) -> String {
+        guard let accounting = report.startupAccounting else { return " APFS volume allocation measurements are unavailable." }
+        return " Measured APFS volumes: " + accounting.volumes.map {
+            "\($0.name) \(DiskFormat.bytes($0.bytes))"
+        }.joined(separator: "; ") + "."
     }
 
     private func cleanupPanel(minHeight: CGFloat) -> some View {
@@ -265,7 +315,7 @@ struct DashboardView: View {
             if let scan = m.scan, scan.skipped > 0 {
                 Label("\(scan.skipped.formatted()) items skipped by the latest scan", systemImage: "exclamationmark.triangle")
                     .font(.callout).foregroundStyle(Tints.yellow)
-                Text("The scan total is partial. Open Explore for the scanned items and coverage details.")
+                Text("The scan total is partial. Skipped directories can contain many files; their sizes are unmeasured. Open Storage’s skipped Details for recorded reasons and ways to broaden coverage.")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
             }
             if let snapshots = report.pressure.localSnapshotNames, !snapshots.isEmpty {

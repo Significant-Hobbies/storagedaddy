@@ -3,6 +3,7 @@ import AppKit
 import DiskCore
 
 struct DiskMapView: View {
+    var compact = false
     @EnvironmentObject var m: ExplorerModel
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -17,35 +18,50 @@ struct DiskMapView: View {
                         for shape in shapes {
                             let selected = m.selected == shape.node.id
                             let isChild = m.mode == .treemap && shape.depth == 1
-                            if isChild {
-                                // The parent tile is already behind this path. Shade it so
-                                // the child keeps the same hue with a little less brightness.
-                                ctx.fill(shape.path, with: .color(Color.black.opacity(0.18)))
-                            } else {
-                                let opacity = m.mode == .treemap ? (selected ? 0.9 : 0.8) : (selected ? 1.0 : 0.9)
-                                ctx.fill(shape.path, with: .color(Tints.forNode(shape.node).opacity(opacity)))
+                            let isStaged = m.hasAncestor(shape.node.id, in: m.staged)
+                            let matches = m.matchesFilter(shape.node)
+                            let tint = isStaged ? Tints.coral : Tints.forKind(m.storageKind(shape.node))
+                            let opacity = matches ? (isChild ? 0.65 : 0.9) : 0.18
+                            ctx.fill(shape.path, with: .color(tint.opacity(opacity)))
+                            if isStaged {
+                                ctx.stroke(shape.path, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2, dash: [5, 3]))
+                            }
+                            if m.hasAncestor(shape.node.id, in: m.mapIndex?.reviewCandidates ?? []), !isStaged {
+                                var hatch = ctx
+                                hatch.clip(to: shape.path)
+                                let bounds = shape.path.boundingRect
+                                var lines = Path()
+                                for offset in stride(from: -bounds.height, through: bounds.width, by: 12) {
+                                    lines.move(to: CGPoint(x: bounds.minX + offset, y: bounds.maxY))
+                                    lines.addLine(to: CGPoint(x: bounds.minX + offset + bounds.height, y: bounds.minY))
+                                }
+                                hatch.stroke(lines, with: .color(Color.black.opacity(matches ? 0.22 : 0.08)), lineWidth: 1)
                             }
                             if selected || m.mode != .treemap {
                                 ctx.stroke(shape.path, with: .color(selected ? Color.white : Color.black), lineWidth: 3)
                             }
                             if shape.labelRect.width > 55 && shape.labelRect.height > 28 {
-                                let ink = isChild ? Color.white : Color(red: 0.015, green: 0.02, blue: 0.03)
+                                // An opaque dark label backing keeps small text readable over
+                                // semantic, nested, filtered and staged fills alike.
+                                let ink = matches ? Color.white : Color(white: 0.78)
                                 if m.mode == .treemap, shape.labelRect.height > 65, shape.labelRect.width > 95 {
                                     let r = shape.labelRect.insetBy(dx: isChild ? 10 : 14, dy: isChild ? 9 : 12)
-                                    let name = shortenedTileName(StorageLabels.name(shape.node), width: r.width)
-                                    let size = DiskFormat.bytes(m.bytes(shape.node))
+                                    ctx.fill(Path(roundedRect: CGRect(x: r.minX - 4, y: r.minY - 3, width: r.width + 8, height: 52), cornerRadius: 5), with: .color(.black))
+                                    let name = shortenedTileName((isStaged ? "✓ Cleanup · " : "") + StorageLabels.name(shape.node), width: r.width)
+                                    let size = m.mapLabel(m.mapWeight(shape.node))
                                     let detail: String
                                     if isChild, let parentBytes = shape.parentBytes, r.width > 190 {
-                                        detail = "\(size) · \(shareLabel(m.bytes(shape.node), of: parentBytes)) inside"
+                                        detail = "\(size) · \(shareLabel(m.mapWeight(shape.node), of: parentBytes)) inside"
                                     } else if !isChild && r.width > 220 {
-                                        detail = "\(size) · \(shareLabel(m.bytes(shape.node), of: map.totalBytes))"
+                                        detail = "\(size) · \(shareLabel(m.mapWeight(shape.node), of: map.totalBytes))"
                                     } else {
                                         detail = size
                                     }
                                     ctx.draw(Text(name).font(.system(size: isChild ? 14 : 17, weight: .semibold, design: .rounded)).foregroundColor(ink), in: CGRect(x: r.minX, y: r.minY, width: r.width, height: 24))
                                     ctx.draw(Text(detail).font(.system(size: isChild ? 12 : 14, weight: .medium)).foregroundColor(ink.opacity(0.85)), in: CGRect(x: r.minX, y: r.minY + 26, width: r.width, height: 20))
                                 } else {
-                                    let text = Text(StorageLabels.name(shape.node)).font(.system(size: 12, weight: .semibold)).foregroundColor(ink)
+                                    ctx.fill(Path(roundedRect: shape.labelRect.insetBy(dx: 3, dy: 3), cornerRadius: 5), with: .color(.black))
+                                    let text = Text((isStaged ? "✓ " : "") + StorageLabels.name(shape.node)).font(.system(size: 12, weight: .semibold)).foregroundColor(ink)
                                     ctx.draw(text, in: shape.labelRect.insetBy(dx: 7, dy: 5))
                                 }
                             }
@@ -60,7 +76,7 @@ struct DiskMapView: View {
                                 let r = remainder.rect.insetBy(dx: 14, dy: 12)
                                 ctx.draw(Text("\(remainder.title) · \(remainder.count.formatted()) items").font(.system(size: 15, weight: .semibold, design: .rounded)).foregroundColor(.white),
                                          in: CGRect(x: r.minX, y: r.minY, width: r.width, height: 24))
-                                ctx.draw(Text("\(DiskFormat.bytes(remainder.bytes)) · \(shareLabel(remainder.bytes, of: remainder.totalBytes))").font(.system(size: 13)).foregroundColor(Tints.secondaryText),
+                                ctx.draw(Text("\(m.mapLabel(remainder.bytes)) · \(shareLabel(remainder.bytes, of: remainder.totalBytes))").font(.system(size: 13)).foregroundColor(Tints.secondaryText),
                                          in: CGRect(x: r.minX, y: r.minY + 28, width: r.width, height: 20))
                             }
                         }
@@ -68,7 +84,7 @@ struct DiskMapView: View {
                     .overlay {
                         MapContextMenu(shapes: shapes, model: m)
                     }
-                    .modifier(MapHoverDetails(shapes: shapes, allocated: m.allocated, totalBytes: map.totalBytes, showShare: m.mode == .treemap))
+                    .modifier(MapHoverDetails(shapes: shapes, model: m, totalBytes: map.totalBytes, showShare: m.mode == .treemap))
                     .gesture(
                         SpatialTapGesture(count: 2)
                             .onEnded { value in
@@ -80,17 +96,47 @@ struct DiskMapView: View {
                                 .onEnded { value in
                                     if let hit = shapes.reversed().first(where: { $0.path.contains(value.location) }) {
                                         m.selected = hit.node.id
+                                        if NSEvent.modifierFlags.contains(.option) { m.toggleStage(hit.node.id) }
                                     }
                                 })
                     )
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("\(m.mode.rawValue) of \(m.visible.count) items. Select items using the list below.")
-                }.frame(minHeight: 210, maxHeight: .infinity)
-                Text(caption).font(.caption).foregroundStyle(Tints.secondaryText)
+                        .accessibilityLabel("\(m.mode.rawValue) of \(m.mapItems.count) items. Select items using the list below.")
+                }.frame(minHeight: 210, maxHeight: compact ? 260 : .infinity)
+                    .frame(height: compact ? 260 : nil)
+                mapLegend
+                Text(caption + " " + (m.mapMeasure == .bytes ? "Areas use the selected byte measure." : "Areas count file entries, including links; empty folders have no area.") + " Filters dim nonmatching tiles without changing area.").font(.caption).foregroundStyle(Tints.secondaryText)
                 Divider()
-                itemList(m.visible).frame(maxHeight: 200)
+                itemList(m.visible).frame(height: compact ? 200 : nil).frame(maxHeight: 200)
             }
         }
+    }
+    private var mapLegend: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            legendKinds
+            Text("Diagonal lines: review candidate · Coral and dashed outline: staged for cleanup · M toggles Cleanup")
+                .font(.caption).foregroundStyle(Tints.secondaryText)
+            Button(stagingActionLabel) { if let id = m.selected { m.toggleStage(id) } }
+                .keyboardShortcut("m", modifiers: [])
+                .disabled(m.selected == nil || m.busy || selectedCoveredByParent)
+                .help(selectedCoveredByParent ? "Remove the containing folder from Cleanup first." : "Nothing moves until the Cleanup confirmation and preflight.")
+                .font(.caption)
+        }
+    }
+    private var selectedCoveredByParent: Bool {
+        guard let id = m.selected else { return false }
+        return !m.staged.contains(id) && m.hasAncestor(id, in: m.staged)
+    }
+    private var stagingActionLabel: String {
+        if selectedCoveredByParent { return "In Cleanup with containing folder" }
+        return m.selected.map { m.staged.contains($0) } == true ? "Remove from Cleanup" : "Add to Cleanup"
+    }
+    private var legendKinds: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 85), alignment: .leading)], alignment: .leading, spacing: 6) {
+            ForEach(StorageKind.allCases, id: \.self) { kind in
+                HStack(spacing: 4) { Circle().fill(Tints.forKind(kind)).frame(width: 7, height: 7); Text(kind.rawValue) }.fixedSize()
+            }
+        }.font(.caption2).foregroundStyle(Tints.secondaryText)
     }
     private var caption: String {
         switch m.mode {
@@ -114,9 +160,19 @@ struct DiskMapView: View {
             LazyVStack(spacing: 0) {
                 ForEach(items) { n in
                     Button { m.selected = n.id } label: {
-                        HStack { Image(systemName: n.isDirectory ? "folder.fill" : "doc").foregroundStyle(Tints.forNode(n)); Text(StorageLabels.name(n)).lineLimit(1); Spacer(); Text(DiskFormat.bytes(m.bytes(n))).monospacedDigit(); if n.isDirectory { Image(systemName: "chevron.right") } }.padding(.vertical, 9).padding(.horizontal, 8).contentShape(Rectangle())
+                        HStack {
+                            Image(systemName: n.isDirectory ? "folder.fill" : "doc").foregroundStyle(Tints.forNode(n))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(StorageLabels.name(n)).lineLimit(1)
+                                Text(itemStatus(n)).font(.caption).foregroundStyle(Tints.secondaryText)
+                            }
+                            Spacer(); Text(StorageLabels.size(n, allocated: m.allocated)).monospacedDigit()
+                            if n.isDirectory { Image(systemName: "chevron.right") }
+                        }.padding(.vertical, 9).padding(.horizontal, 8).contentShape(Rectangle())
                     }.buttonStyle(.plain).background(m.selected == n.id ? Tints.electricBlue.opacity(0.2) : .clear)
-                        .help("\(StorageLabels.name(n)) · \(DiskFormat.bytes(m.bytes(n))) \(m.allocated ? "on disk" : "logical")")
+                        .accessibilityLabel(StorageLabels.name(n))
+                        .accessibilityValue("\(StorageLabels.size(n, allocated: m.allocated)) · \(itemStatus(n))")
+                        .help("\(StorageLabels.name(n)) · \(StorageLabels.size(n, allocated: m.allocated)) \(m.allocated ? "on disk" : "logical")")
                         .simultaneousGesture(TapGesture(count: 2).onEnded { m.open(n) })
                         .contextMenu { StorageItemMenu(node: n) }
                     Divider()
@@ -124,30 +180,24 @@ struct DiskMapView: View {
             }
         }
     }
+    private func itemStatus(_ node: DiskNode) -> String {
+        var parts = [m.storageKind(node).rawValue]
+        if m.hasAncestor(node.id, in: m.mapIndex?.reviewCandidates ?? []) { parts.append("Review candidate") }
+        if m.hasAncestor(node.id, in: m.staged) { parts.append(m.staged.contains(node.id) ? "In Cleanup" : "In Cleanup with containing folder") }
+        return parts.joined(separator: " · ")
+    }
     private var ageMap: some View {
-        let files = filesByAge
-        let totals = files.map { $0.bytes }
-        let maximum = max(1, totals.max() ?? 1)
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Storage by last modified date").font(.headline)
-                Text("Modification dates do not tell you when a file was last opened.").font(.caption).foregroundStyle(Tints.secondaryText)
-                ForEach(0..<4) { i in
-                    VStack(alignment: .leading, spacing: 7) {
-                        HStack { Text(["Last 30 days", "1–6 months", "6–12 months", "Over a year"][i]); Spacer(); Text(DiskFormat.bytes(totals[i])).monospacedDigit() }
-                        GeometryReader { g in RoundedRectangle(cornerRadius: 4).fill(Tints.colors[i]).frame(width: max(2, g.size.width * Double(totals[i]) / Double(maximum))) }.frame(height: 18)
-                            .help("\(files[i].count.formatted()) files · \(DiskFormat.bytes(totals[i])) \(m.allocated ? "on disk" : "logical")")
-                        Text("\(files[i].count.formatted()) files").font(.caption).foregroundStyle(Tints.secondaryText)
-                        ForEach(files[i].largest.sorted) { n in
-                            Button { m.selected = n.id } label: { HStack { Text(StorageLabels.name(n)).lineLimit(1); Spacer(); Text(DiskFormat.bytes(m.bytes(n))) }.font(.caption) }.buttonStyle(.plain)
-                                .contextMenu { StorageItemMenu(node: n) }
-                        }
-                    }
-                }
+        VStack(alignment: .leading, spacing: 10) {
+            if let error = m.ageHistogramError {
+                Text(error).font(.caption).foregroundStyle(Tints.yellow)
+                Button("Retry modification dates", action: m.refreshFocus)
             }
+            FileAgeHistogramView(histogram: m.ageHistogram, granularity: m.ageGranularity,
+                isRefreshing: m.ageRefreshing,
+                onGranularityChange: { m.ageGranularity = $0 },
+                onSelectNode: { m.selected = $0 })
         }
     }
-    private var filesByAge: [AgeSummary] { m.aged }
 
     private var typeStats: some View {
         let rows = m.fileTypeRows
@@ -195,11 +245,11 @@ struct DiskMapView: View {
 
     private func layout(size: CGSize) -> DiskMapLayout {
         guard let scan = m.scan else { return DiskMapLayout(tiles: [], totalBytes: 0) }
-        let items = m.visible; var tiles: [DiskMapTile] = []
+        let items = m.mapItems; var tiles: [DiskMapTile] = []
         var remainders: [TreemapRemainder] = []
-        var totalBytes = items.reduce(0.0) { $0 + Double(max(0, m.bytes($1))) }
+        var totalBytes = items.reduce(0.0) { $0 + Double(max(0, m.mapWeight($1))) }
         let full = CGRect(origin: .zero, size: size)
-        func weight(_ n: DiskNode) -> Double { Double(max(0, m.bytes(n))) }
+        func weight(_ n: DiskNode) -> Double { Double(max(0, m.mapWeight(n))) }
         func descendants(_ n: DiskNode) -> [DiskNode] { n.children.map { scan.nodes[$0] }.sorted { weight($0) > weight($1) } }
         func rectangles(_ children: [DiskNode], _ rect: CGRect, _ depth: Int, _ flame: Bool) {
             let total = children.reduce(0.0) { $0 + weight($1) }; guard total > 0, depth < (flame ? 4 : 3) else { return }
@@ -222,7 +272,7 @@ struct DiskMapView: View {
             let children = scan.nodes[m.focus].children.map { scan.nodes[$0] }
             func sumBytes(_ nodes: [DiskNode]) -> Int64 {
                 nodes.reduce(Int64.zero) { sum, node in
-                    let (value, overflow) = sum.addingReportingOverflow(max(0, m.bytes(node)))
+                    let (value, overflow) = sum.addingReportingOverflow(max(0, m.mapWeight(node)))
                     return overflow ? Int64.max : value
                 }
             }
@@ -360,7 +410,7 @@ private struct DiskMapTile {
 /// Hover state lives below layout so pointer movement never rebuilds the graph.
 private struct MapHoverDetails: ViewModifier {
     let shapes: [DiskMapTile]
-    let allocated: Bool
+    let model: ExplorerModel
     let totalBytes: Double
     let showShare: Bool
     @State private var hoveredID: Int?
@@ -387,11 +437,11 @@ private struct MapHoverDetails: ViewModifier {
                 if let hovered {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(StorageLabels.name(hovered.node)).font(.headline).lineLimit(2)
-                        Text(hovered.node.isDirectory ? "Folder" : "File").font(.caption).foregroundStyle(Tints.secondaryText)
-                        Text("\(DiskFormat.bytes(allocated ? hovered.node.allocatedBytes : hovered.node.logicalBytes)) \(allocated ? "on disk" : "logical")")
+                        Text(model.storageKind(hovered.node).rawValue).font(.caption).foregroundStyle(Tints.secondaryText)
+                        Text("\(model.mapLabel(model.mapWeight(hovered.node))) \(model.mapMeasure == .files ? "" : (model.allocated ? "on disk" : "logical"))")
                             .font(.callout.monospacedDigit()).foregroundStyle(Tints.mint)
                         if showShare {
-                            Text("\(shareLabel(allocated ? hovered.node.allocatedBytes : hovered.node.logicalBytes, of: totalBytes)) of this folder")
+                            Text("\(shareLabel(model.mapWeight(hovered.node), of: totalBytes)) of this folder")
                                 .font(.caption).foregroundStyle(Tints.secondaryText)
                         }
                         if hovered.node.isDirectory {

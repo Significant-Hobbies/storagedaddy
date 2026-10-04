@@ -231,6 +231,12 @@ struct StartupCapacity: Sendable {
     let total: Int64
     let available: Int64
 
+    init?(total: Int64, available: Int64) {
+        guard total > 0, (0...total).contains(available) else { return nil }
+        self.total = total
+        self.available = available
+    }
+
     init?(volumes: [MountedVolumeInfo]) {
         guard let volume = volumes.first(where: \.isStartupData)
                 ?? volumes.first(where: { $0.mountPoint == "/" }),

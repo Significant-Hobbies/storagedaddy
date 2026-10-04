@@ -10,12 +10,14 @@ import IOKit
 public enum SystemInventory {
 
     public static func collect() -> SystemStorageReport {
-        SystemStorageReport(
+        let volumes = mountedVolumes()
+        return SystemStorageReport(
             collectedAt: Date(),
-            volumes: mountedVolumes(),
+            volumes: volumes,
             containers: [],
             devices: storageDevices(),
-            pressure: PressureProbe.collect()
+            pressure: PressureProbe.collect(),
+            startupAccounting: volumes.first(where: \.isStartupData).flatMap { StartupAPFSAccounting.collect(startup: $0) }
         ).withContainers()
     }
 
@@ -34,9 +36,14 @@ public enum SystemInventory {
             .volumeIsReadOnlyKey,
             .volumeIsBrowsableKey
         ]
-        let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: []) ?? []
+        var urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: []) ?? []
         let session = DASessionCreate(kCFAllocatorDefault)
         let startupPath = "/System/Volumes/Data"
+        // Foundation can omit the hidden Data mount even with no skip option.
+        // It is required to identify the startup pool and physical Data usage.
+        if FileManager.default.fileExists(atPath: startupPath) {
+            urls.insert(URL(fileURLWithPath: startupPath, isDirectory: true), at: 0)
+        }
 
         var seen = Set<String>()
         return urls.compactMap { url in
@@ -45,7 +52,8 @@ public enum SystemInventory {
             var fsType = ""
             var bsdName = ""
             var stat = Darwin.statfs()
-            if statfs(path, &stat) == 0 {
+            let hasStat = statfs(path, &stat) == 0
+            if hasStat {
                 fsType = cStringField(stat.f_fstypename)
                 bsdName = cStringField(stat.f_mntfromname).replacingOccurrences(of: "/dev/", with: "")
             }
@@ -84,7 +92,9 @@ public enum SystemInventory {
                 isNetwork: Self.networkFilesystems.contains(volumeKind.isEmpty ? fsType : volumeKind),
                 isEncrypted: encrypted,
                 isDiskImage: diskImage,
-                apfsContainer: Self.apfsContainerName(fsType: volumeKind.isEmpty ? fsType : volumeKind, bsdName: bsdName)
+                apfsContainer: Self.apfsContainerName(fsType: volumeKind.isEmpty ? fsType : volumeKind, bsdName: bsdName),
+                inodeTotal: hasStat && stat.f_files > 0 ? stat.f_files : nil,
+                inodeFree: hasStat && stat.f_files > 0 && stat.f_ffree <= stat.f_files ? stat.f_ffree : nil
             )
         }.sorted { lhs, rhs in
             func rank(_ v: MountedVolumeInfo) -> Int {
@@ -168,6 +178,7 @@ public struct SystemStorageReport: Sendable {
     public var containers: [APFSContainerInfo]
     public var devices: [StorageDeviceInfo]
     public var pressure: PressureInfo
+    public var startupAccounting: StartupAPFSAccounting? = nil
 
     /// Group APFS volumes into their shared container. APFS volumes in one
     /// container share capacity, so container total/free come from members.
@@ -208,6 +219,10 @@ public struct MountedVolumeInfo: Sendable, Equatable {
     public var isEncrypted: Bool?
     public var isDiskImage: Bool
     public var apfsContainer: String?
+    /// Raw statfs counts, not an invented fixed APFS inode capacity.
+    /// Zero total or inconsistent counts are unavailable to metric consumers.
+    public var inodeTotal: UInt64? = nil
+    public var inodeFree: UInt64? = nil
 
     /// Space macOS can reclaim on demand (local snapshots, caches, cloud-only
     /// copies) but that still shows as used to basic capacity queries.

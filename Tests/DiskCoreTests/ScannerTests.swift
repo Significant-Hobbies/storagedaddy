@@ -4,6 +4,38 @@ import Foundation
 import XCTest
 
 final class ScannerTests: XCTestCase {
+    func testUnreadableDirectoryIsNotReportedAsAnEmptyDirectory() async throws {
+        try XCTSkipIf(geteuid() == 0, "Root can bypass directory permissions")
+        let fixture = try makeFixture()
+        let blocked = fixture.appendingPathComponent("blocked")
+        let empty = fixture.appendingPathComponent("empty")
+        try FileManager.default.createDirectory(at: blocked, withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: false)
+        try write([1, 2, 3], to: blocked.appendingPathComponent("not-empty.bin"))
+        XCTAssertEqual(chmod(blocked.path, 0), 0)
+        defer { _ = chmod(blocked.path, 0o700) }
+        for backend in [ScanBackend.foundation, .bulk, .parallel] {
+            let scan = try await DiskScanner.scan(root: fixture, backend: backend)
+            XCTAssertEqual(try node(named: "blocked", in: scan).isContentsUnreadable, true)
+            XCTAssertEqual(try node(named: "empty", in: scan).isContentsUnreadable, false)
+            XCTAssertEqual(scan.nodes[0].isScanIncomplete, true)
+            XCTAssertEqual(try node(named: "empty", in: scan).isScanIncomplete, false)
+            XCTAssertEqual(try node(named: "blocked", in: scan).allocatedBytes, 0)
+            XCTAssertFalse(scan.nodes.contains { $0.name == "not-empty.bin" })
+            XCTAssertTrue(scan.incompleteEvidence?.contains { $0.path == blocked.path && $0.reason == "unreadable directory" } == true)
+        }
+    }
+
+    func testLegacyNodesDecodeWithoutUnreadableFlag() throws {
+        let node = DiskNode(id: 0, parent: nil, name: "legacy", isDirectory: true)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(node)) as? [String: Any])
+        object.removeValue(forKey: "isContentsUnreadable")
+        object.removeValue(forKey: "isScanIncomplete")
+        let decoded = try JSONDecoder().decode(DiskNode.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(decoded.isContentsUnreadable)
+        XCTAssertNil(decoded.isScanIncomplete)
+    }
+
     func testPromptAvoidanceSkipsProtectedDirectoryAndReportsIncompleteScan() async throws {
         let fixture = try makeFixture()
         let downloads = fixture.appendingPathComponent("Downloads")
@@ -14,6 +46,7 @@ final class ScannerTests: XCTestCase {
         let result = try await DiskScanner.scan(root: fixture, backend: .foundation,
             promptAvoidanceFolders: [downloads.path])
         XCTAssertEqual(result.skipped, 1)
+        XCTAssertEqual(result.nodes[0].isScanIncomplete, true)
         XCTAssertEqual(result.incompleteEvidence?.first?.reason, "skipped to avoid a macOS permission prompt")
         XCTAssertFalse(result.nodes.contains { $0.name == "Downloads" || $0.name == "private.bin" })
         XCTAssertTrue(result.nodes.contains { $0.name == "visible.bin" })

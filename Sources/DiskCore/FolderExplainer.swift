@@ -75,16 +75,19 @@ public enum FolderExplainer {
         logicalBytes: Int64,
         children: Int,
         modified: Date,
+        assessment: FolderAssessment? = nil,
     ) -> String {
         """
         Help me understand this folder on my Mac before I change anything.
 
         Folder: \(path)
         storagedaddy measured:
-        - On disk: \(DiskFormat.bytes(allocatedBytes))
-        - Logical size: \(DiskFormat.bytes(logicalBytes))
-        - Immediate items: \(children.formatted())
+        - Scanned allocation: \(DiskFormat.bytes(allocatedBytes))
+        - Scanned logical size: \(DiskFormat.bytes(logicalBytes))
+        - Observed immediate items: \(children.formatted())
         - Modified: \(modified.formatted(date: .abbreviated, time: .shortened))
+
+        \(assessment.map { "Detected folder context (metadata inference, not proof):\n\($0.explanation)" } ?? "Folder role and scan completeness have not been confirmed.")
 
         Explain:
         1. What usually creates and uses this folder.
@@ -93,6 +96,7 @@ public enum FolderExplainer {
         4. The safest way to reduce its size.
         5. What I should inspect before acting.
 
+        Tailor the explanation to the detected context, but verify assumptions. If the scan is incomplete, do not treat observed bytes or item counts as the full contents, and do not describe zero scanned bytes as empty or unused. Allocated bytes do not establish reclaimable space.
         Do not delete or modify anything. If the path is app-specific or ambiguous, say what evidence would confirm it.
         """
     }
