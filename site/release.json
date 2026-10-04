@@ -1,11 +1,11 @@
 {
   "version": "0.1.4-beta",
-  "filename": "storagedaddy-0.1.4-build111-arm64.dmg",
-  "path": "/storagedaddy/releases/storagedaddy-0.1.4-build111-arm64.dmg",
-  "sha256": "2c08f30c3bb77e83af47281bab99cd969208868615f1e78e562f0d0aad54db0d",
+  "filename": "storagedaddy-0.1.4-build112-arm64.dmg",
+  "path": "/storagedaddy/releases/storagedaddy-0.1.4-build112-arm64.dmg",
+  "sha256": "45aef860c4c83905d77897694c601063c18596fddd9a2e6ee53050914b454d2d",
   "ready": true,
-  "bytes": 7803342,
+  "bytes": 7803316,
   "notarized": true,
-  "build": 111,
-  "sourceSha": "252a634d21bc91f03b0007b99578fb99d134d01d"
+  "build": 112,
+  "sourceSha": "4b5ac87e903f3ca0096213cf5f08319303b3083d"
 }
