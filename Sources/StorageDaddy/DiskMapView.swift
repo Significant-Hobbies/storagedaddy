@@ -22,7 +22,7 @@ struct DiskMapView: View {
                             let matches = m.matchesFilter(shape.node)
                             let tint = isStaged ? Tints.coral : Tints.forKind(m.storageKind(shape.node))
                             let opacity = matches ? (isChild ? 0.65 : 0.9) : 0.18
-                            ctx.fill(shape.path, with: .color(tint.opacity(opacity)))
+                            ctx.fill(shape.path, with: .color(MapTileFill.color(tint, intensity: opacity)))
                             if isStaged {
                                 ctx.stroke(shape.path, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2, dash: [5, 3]))
                             }
@@ -41,12 +41,10 @@ struct DiskMapView: View {
                                 ctx.stroke(shape.path, with: .color(selected ? Color.white : Color.black), lineWidth: 3)
                             }
                             if shape.labelRect.width > 55 && shape.labelRect.height > 28 {
-                                // An opaque dark label backing keeps small text readable over
-                                // semantic, nested, filtered and staged fills alike.
+                                // Direct white labels sit on contrast-adjusted category fills.
                                 let ink = matches ? Color.white : Color(white: 0.78)
                                 if m.mode == .treemap, shape.labelRect.height > 65, shape.labelRect.width > 95 {
                                     let r = shape.labelRect.insetBy(dx: isChild ? 10 : 14, dy: isChild ? 9 : 12)
-                                    ctx.fill(Path(roundedRect: CGRect(x: r.minX - 4, y: r.minY - 3, width: r.width + 8, height: 52), cornerRadius: 5), with: .color(.black))
                                     let name = shortenedTileName((isStaged ? "✓ Cleanup · " : "") + StorageLabels.name(shape.node), width: r.width)
                                     let size = m.mapLabel(m.mapWeight(shape.node))
                                     let detail: String
@@ -58,9 +56,8 @@ struct DiskMapView: View {
                                         detail = size
                                     }
                                     ctx.draw(Text(name).font(.system(size: isChild ? 14 : 17, weight: .semibold, design: .rounded)).foregroundColor(ink), in: CGRect(x: r.minX, y: r.minY, width: r.width, height: 24))
-                                    ctx.draw(Text(detail).font(.system(size: isChild ? 12 : 14, weight: .medium)).foregroundColor(ink.opacity(0.85)), in: CGRect(x: r.minX, y: r.minY + 26, width: r.width, height: 20))
+                                    ctx.draw(Text(detail).font(.system(size: isChild ? 12 : 14, weight: .medium)).foregroundColor(ink), in: CGRect(x: r.minX, y: r.minY + 26, width: r.width, height: 20))
                                 } else {
-                                    ctx.fill(Path(roundedRect: shape.labelRect.insetBy(dx: 3, dy: 3), cornerRadius: 5), with: .color(.black))
                                     let text = Text((isStaged ? "✓ " : "") + StorageLabels.name(shape.node)).font(.system(size: 12, weight: .semibold)).foregroundColor(ink)
                                     ctx.draw(text, in: shape.labelRect.insetBy(dx: 7, dy: 5))
                                 }
