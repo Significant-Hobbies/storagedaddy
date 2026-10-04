@@ -160,8 +160,9 @@ struct StorageMapReviewTests {
         m.volumeFree = 45_000_000_000; m.volumeCapacity = 500_000_000_000
         m.progress = "Synthetic scan · Nothing moved"; m.refreshFocus()
         let wasActive = NSApplication.shared.isActive
-        let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("artifacts/compact-map")
+        let directory = ProcessInfo.processInfo.environment["STORAGEDADDY_MAP_EVIDENCE_DIR"].map { URL(fileURLWithPath: $0) }
+            ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("artifacts/compact-map")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         for (width, height) in [(880, 600), (1200, 850), (1440, 900)] {
             let states = ["bytes", "files", "filter", "staged", "inspector-hidden"]
