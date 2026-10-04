@@ -17,7 +17,7 @@ final class StorageDashboardMetricsTests: XCTestCase {
         XCTAssertNil(Metrics.inodes(total: 100, free: 101))
         XCTAssertEqual(Metrics.inodes(total: 100, free: 0)?.used, 100)
         XCTAssertEqual(Metrics.inodes(total: 100, free: 100)?.usedRatio, 0)
-        XCTAssertEqual(Metrics.inodes(total: .max, free: .max)?.used, 0)
+        XCTAssertNil(Metrics.inodes(total: .max, free: .max))
         XCTAssertEqual(Metrics.inodes(total: 100, free: 25)?.usedRatio, 0.75)
     }
 
