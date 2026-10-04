@@ -235,6 +235,7 @@ struct FileTypeStats: Sendable {
     @Published var showWelcome = false
     @Published var lastTrashedURLs: [URL] = []
     @Published var scan: ScanResult?
+    @Published var scanStorageAccounting: ScanStorageAccounting?
     @Published private(set) var promptAvoidanceFolders: [String] = []
     private var lastScanAllowedProtectedFolder = false
     let installedApplications = InstalledApplicationsModel()
@@ -430,7 +431,13 @@ struct FileTypeStats: Sendable {
                     }
                     let findingIndex = Dictionary(uniqueKeysWithValues: report.findings.map { ($0.id, $0) })
                     let projectNames = Dictionary(uniqueKeysWithValues: report.projects.map { ($0.id, $0.name) })
-                    return (quick.sorted, apps, fileCount, groups, report, growth, findingIndex, projectNames)
+                    var accounting: ScanStorageAccounting?
+                    if ["/", "/System/Volumes/Data"].contains(result.rootPath) {
+                        let volumes = SystemInventory.mountedVolumes()
+                        let apfs = volumes.first(where: \.isStartupData).flatMap { StartupAPFSAccounting.collect(startup: $0) }
+                        accounting = ScanStorageAccounting(scan: result, capacity: StartupCapacity(volumes: volumes), apfs: apfs)
+                    }
+                    return (quick.sorted, apps, fileCount, groups, report, growth, findingIndex, projectNames, accounting)
                 }
                 let summary = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
 
@@ -449,6 +456,7 @@ struct FileTypeStats: Sendable {
                 didPublish = true
                 if result.nodes.count > 1 || result.skipped == 0 { cleanupRefreshPaths.removeAll { $0 == result.rootPath } }
                 self.scan = result; exclusionResultsStale = false; quickWinNodes = summary.0; appNodes = summary.1; fileCount = summary.2; focus = 0; selected = nil
+                scanStorageAccounting = summary.8
                 // A manual scan must land on results, even when launched from credits or another utility page.
                 if let destination {
                     if destination == .explore { openStorage(.explore) }
@@ -529,10 +537,11 @@ struct FileTypeStats: Sendable {
             logicalBytes: node.logicalBytes,
             children: node.children.count,
             modified: node.modified,
+            assessment: FolderArchetypes.assess(scan, folderID: id, category: cleanupCategory(id)),
         )
     }
     /// Asks a locally installed agent CLI (Claude, then Codex) to explain the
-    /// folder. Only the folder path and measured sizes are sent; the agent runs
+    /// folder. The path, scan measurements and inferred folder context are sent; the agent runs
     /// read-only and can be cancelled. Falls back to the copy-paste prompt when
     /// no supported CLI is installed.
     func explainFolder(_ id: Int) {

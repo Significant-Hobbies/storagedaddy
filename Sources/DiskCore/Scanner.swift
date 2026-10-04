@@ -166,24 +166,35 @@ private struct Scanner {
             let entries: [EntryMetadata]
             do { entries = try result.get() }
             catch is CancellationError { throw CancellationError() }
-            catch { recordSkip(path: directory.path, error: error); return [] }
+            catch {
+                nodes[directory.id].isContentsUnreadable = true
+                nodes[directory.id].isScanIncomplete = true
+                recordSkip(path: directory.path, error: error)
+                return []
+            }
+            nodes[directory.id].isContentsUnreadable = false
+            nodes[directory.id].isScanIncomplete = false
             nodes[directory.id].children.reserveCapacity(entries.count)
             var childDirectories: [ScanDirectory] = []
             for (entryIndex, entry) in entries.enumerated() {
                 if entryIndex & 255 == 0 { try cancellation.check() }
                 if !exclusions.paths.isEmpty, exclusions.contains(childPath(directory.path, entry.name)) {
+                    nodes[directory.id].isScanIncomplete = true
                     recordSkip(path: childPath(directory.path, entry.name), reason: "excluded by folder settings")
                     continue
                 }
                 if !promptAvoidance.paths.isEmpty, promptAvoidance.contains(childPath(directory.path, entry.name)) {
+                    nodes[directory.id].isScanIncomplete = true
                     recordSkip(path: childPath(directory.path, entry.name), reason: "skipped to avoid a macOS permission prompt")
                     continue
                 }
                 guard !isSensitiveComponent(entry.name) else {
+                    nodes[directory.id].isScanIncomplete = true
                     recordSkip(path: childPath(directory.path, entry.name), reason: "excluded by sensitive path policy")
                     continue
                 }
                 guard entry.device == rootDevice, !entry.isMountPoint else {
+                    nodes[directory.id].isScanIncomplete = true
                     recordSkip(path: childPath(directory.path, entry.name), reason: "mount boundary (protected volume)")
                     continue
                 }
@@ -336,6 +347,7 @@ private struct Scanner {
                 if index & 255 == 0 { try Task.checkCancellation() }
                 logicalBytes = saturatingAdd(logicalBytes, nodes[child].logicalBytes)
                 allocatedBytes = saturatingAdd(allocatedBytes, nodes[child].allocatedBytes)
+                if nodes[child].isScanIncomplete == true { nodes[id].isScanIncomplete = true }
             }
             nodes[id].logicalBytes = logicalBytes
             nodes[id].allocatedBytes = allocatedBytes

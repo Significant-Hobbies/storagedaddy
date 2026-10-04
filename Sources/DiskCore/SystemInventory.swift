@@ -10,12 +10,14 @@ import IOKit
 public enum SystemInventory {
 
     public static func collect() -> SystemStorageReport {
-        SystemStorageReport(
+        let volumes = mountedVolumes()
+        return SystemStorageReport(
             collectedAt: Date(),
-            volumes: mountedVolumes(),
+            volumes: volumes,
             containers: [],
             devices: storageDevices(),
-            pressure: PressureProbe.collect()
+            pressure: PressureProbe.collect(),
+            startupAccounting: volumes.first(where: \.isStartupData).flatMap { StartupAPFSAccounting.collect(startup: $0) }
         ).withContainers()
     }
 
@@ -34,9 +36,14 @@ public enum SystemInventory {
             .volumeIsReadOnlyKey,
             .volumeIsBrowsableKey
         ]
-        let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: []) ?? []
+        var urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: []) ?? []
         let session = DASessionCreate(kCFAllocatorDefault)
         let startupPath = "/System/Volumes/Data"
+        // Foundation can omit the hidden Data mount even with no skip option.
+        // It is required to identify the startup pool and physical Data usage.
+        if FileManager.default.fileExists(atPath: startupPath) {
+            urls.insert(URL(fileURLWithPath: startupPath, isDirectory: true), at: 0)
+        }
 
         var seen = Set<String>()
         return urls.compactMap { url in
@@ -168,6 +175,7 @@ public struct SystemStorageReport: Sendable {
     public var containers: [APFSContainerInfo]
     public var devices: [StorageDeviceInfo]
     public var pressure: PressureInfo
+    public var startupAccounting: StartupAPFSAccounting? = nil
 
     /// Group APFS volumes into their shared container. APFS volumes in one
     /// container share capacity, so container total/free come from members.

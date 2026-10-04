@@ -64,8 +64,20 @@ struct LiveScanView: View {
 }
 
 struct SizeExplanationView: View {
+    var accounting: ScanStorageAccounting? = nil
+    var scan: ScanResult? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let accounting {
+                Text("Why the scan differs from disk usage").font(.headline)
+                if let breakdown = accounting.measuredBreakdown { Text(breakdown) }
+                Text(accounting.explanation)
+                Text("Capacity measured after this scan; rescan to update.")
+            }
+            if let scan, scan.skipped > 0 {
+                Text("Scan coverage").font(.headline)
+                Text(scan.coverageExplanation)
+            }
             Text("Two ways to measure size").font(.headline)
             Text("On disk is the space allocated to a file. Logical is the size of its contents as reported to apps.")
             Text("For example, a sparse disk image can have a logical size of 100 GB while occupying only 8 GB on disk. Small files can occupy more space than their contents because storage is allocated in blocks.")

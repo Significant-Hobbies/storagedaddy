@@ -7,6 +7,11 @@ public struct DiskNode: Codable, Sendable, Identifiable {
     // same public/Codable fields while saving eight bytes per node on arm64.
     public var isDirectory: Bool
     public var isSymlink: Bool
+    /// nil for legacy scans or before traversal; true means contents could
+    /// not be enumerated. An unreadable directory is not an empty directory.
+    public var isContentsUnreadable: Bool? = nil
+    /// Includes omissions in descendants. Optional for legacy scan decoding.
+    public var isScanIncomplete: Bool? = nil
     public var name: String
     public var logicalBytes: Int64
     public var allocatedBytes: Int64

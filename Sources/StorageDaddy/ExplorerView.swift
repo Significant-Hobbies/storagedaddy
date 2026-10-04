@@ -177,7 +177,8 @@ struct ExplorerView: View {
                     Text("\(DiskFormat.bytes(root.allocatedBytes)) on disk").font(.callout).monospacedDigit()
                     if scan.skipped > 0 {
                         Button("\(scan.skipped.formatted()) skipped · Details") {
-                            m.message = "Some locations were protected, unreadable or excluded. Totals include only the files that could be scanned. You can still review individual items for cleanup; each is checked separately. Getting Started shows your current access and options for broader coverage."
+                            m.message = [m.scanStorageAccounting?.measuredBreakdown, m.scanStorageAccounting?.explanation, scan.coverageExplanation]
+                                .compactMap { $0 }.joined(separator: "\n\n")
                         }.font(.caption)
                     }
                 }.padding(.vertical, 12)
@@ -349,8 +350,8 @@ struct ExplorerView: View {
                 Spacer()
                 HStack(spacing: 6) {
                     Button { explainingSizes = true } label: { Image(systemName: "info.circle") }
-                        .accessibilityLabel("Explain on-disk and logical sizes")
-                        .popover(isPresented: $explainingSizes) { SizeExplanationView().frame(width: 340).padding(22).background(Color.black) }
+                        .accessibilityLabel("Explain disk usage, scan coverage and file sizes")
+                        .popover(isPresented: $explainingSizes) { ScrollView { SizeExplanationView(accounting: m.scanStorageAccounting, scan: m.scan).padding(22) }.frame(width: 420, height: 480).background(Color.black) }
                     Button("On disk") { m.allocated = true }
                         .buttonStyle(StorageButtonStyle(prominent: m.allocated))
                         .accessibilityAddTraits(m.allocated ? .isSelected : [])
@@ -362,7 +363,8 @@ struct ExplorerView: View {
             }
             if let scan = m.scan, scan.nodes.indices.contains(m.focus) {
                 HStack {
-                    Text("\(DiskFormat.bytes(m.bytes(scan.nodes[m.focus]))) in this folder").fontWeight(.medium)
+                    Text(m.focus == 0 && m.allocated ? m.scanStorageAccounting?.summary ?? "\(StorageLabels.size(scan.nodes[m.focus], allocated: m.allocated)) in this folder" : "\(StorageLabels.size(scan.nodes[m.focus], allocated: m.allocated)) in this folder").fontWeight(.medium)
+                        .help(m.scanStorageAccounting.map { $0.explanation + "\n\nCapacity measured after this scan; rescan to update." } ?? "Totals include only files reached by this scan.")
                     Spacer()
                     Text("Select to inspect · Double-click to open · Right-click to clean up")
                         .foregroundStyle(Tints.secondaryText)
@@ -381,7 +383,7 @@ struct ExplorerView: View {
                     Image(systemName: n.isDirectory ? "folder.fill" : "doc.fill").font(.title3).foregroundStyle(Tints.forNode(n)).frame(width: 26)
                     VStack(alignment: .leading, spacing: 4) { Text(StorageLabels.name(n)).font(.system(size: 15, weight: .medium)); Text(n.isDirectory ? "\(n.children.count) items" : n.modified.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(Tints.secondaryText) }
                     Spacer()
-                    Text(DiskFormat.bytes(m.bytes(n))).monospacedDigit().foregroundStyle(Tints.secondaryText)
+                    Text(StorageLabels.size(n, allocated: m.allocated)).monospacedDigit().foregroundStyle(Tints.secondaryText)
                     if n.isDirectory { Image(systemName: "chevron.right").font(.caption).foregroundStyle(Tints.secondaryText.opacity(0.7)) }
                 }.padding(.vertical, 8).contentShape(Rectangle())
             }.buttonStyle(.plain).simultaneousGesture(TapGesture(count: 2).onEnded { m.open(n) })
@@ -434,9 +436,9 @@ struct InspectorView: View {
                     Image(systemName: n.isDirectory ? "folder.fill" : "doc.fill").font(.system(size: 44)).foregroundStyle(Tints.forNode(n))
                     Text(StorageLabels.name(n)).font(.title2.weight(.semibold)).textSelection(.enabled)
                     Text(StorageLabels.location(scan.url(for: n.id).path)).font(.caption).foregroundStyle(Tints.secondaryText).help(scan.url(for: n.id).path).textSelection(.enabled)
-                    Text(DiskFormat.bytes(m.bytes(n))).font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit()
+                    Text(StorageLabels.size(n, allocated: m.allocated, compact: true)).font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit().help(StorageLabels.size(n, allocated: m.allocated))
                     Divider().overlay(Tints.secondaryText.opacity(0.18))
-                    metric("On disk", DiskFormat.bytes(n.allocatedBytes)); metric("Logical", DiskFormat.bytes(n.logicalBytes)); metric("Modified", n.modified.formatted(date: .abbreviated, time: .omitted)); metric("Contents", "\(n.children.count) immediate items")
+                    metric("On disk", StorageLabels.size(n, allocated: true)); metric("Logical", StorageLabels.size(n, allocated: false)); metric("Modified", n.modified.formatted(date: .abbreviated, time: .omitted)); metric("Contents", n.isContentsUnreadable == true ? "Not enumerated" : "\(n.children.count) immediate items\(n.isScanIncomplete == true ? " · incomplete" : "")")
                     Text("Allocated totals can include shared APFS blocks. They are not a promise of reclaimable space.").font(.caption).foregroundStyle(Tints.secondaryText)
                     if n.isDirectory {
                         FolderSymlinksView(scan: scan, folderID: n.id)
@@ -448,12 +450,15 @@ struct InspectorView: View {
                     Button("Copy Path", systemImage: "doc.on.doc") { m.copyPath(n.id) }
                     if n.isDirectory {
                         Button("Explain This Folder", systemImage: "sparkles") { m.explainFolder(n.id) }
-                            .help("Ask your local Claude or Codex install to explain this folder. Only its path and measurements are sent.")
+                            .help("Ask your local Claude or Codex install to explain this folder. Its path, scan measurements and detected folder context are sent.")
                         Button("Copy Ask AI Prompt", systemImage: "doc.on.doc") { m.copyFolderPrompt(n.id) }
                             .help("Copy a ready-to-paste prompt that asks an AI assistant to explain this folder. Nothing is uploaded.")
                     }
                     if n.isDirectory { Button("Open Folder", systemImage: "folder") { m.open(n) } }
                     CleanupFlag(category: m.cleanupCategory(n.id))
+                    if let assessment = FolderArchetypes.assess(scan, folderID: n.id, category: m.cleanupCategory(n.id)) {
+                        Text(assessment.explanation).font(.caption).foregroundStyle(Tints.secondaryText).textSelection(.enabled)
+                    }
                     if let note = CleanupGuidance.chromeCacheNote(path: scan.url(for: n.id).path) {
                         Text(note).font(.caption).foregroundStyle(Tints.yellow)
                     }
@@ -472,7 +477,7 @@ struct InspectorView: View {
                     if !n.children.isEmpty {
                         Divider().overlay(Tints.secondaryText.opacity(0.18)); Text("LARGEST INSIDE").font(.caption).foregroundStyle(Tints.secondaryText)
                         ForEach(Array(n.children.map { scan.nodes[$0] }.sorted { m.bytes($0) > m.bytes($1) }.prefix(8))) { child in
-                            Button { m.selected = child.id } label: { HStack { Text(StorageLabels.name(child)).lineLimit(1); Spacer(); Text(DiskFormat.bytes(m.bytes(child))) }.font(.caption) }.buttonStyle(.plain).contextMenu { StorageItemMenu(node: child) }
+                            Button { m.selected = child.id } label: { HStack { Text(StorageLabels.name(child)).lineLimit(1); Spacer(); Text(StorageLabels.size(child, allocated: m.allocated)) }.font(.caption) }.buttonStyle(.plain).contextMenu { StorageItemMenu(node: child) }
                         }
                     }
                 }.padding(20).frame(maxWidth: .infinity, alignment: .leading)

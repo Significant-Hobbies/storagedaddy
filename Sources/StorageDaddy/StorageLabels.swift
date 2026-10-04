@@ -22,6 +22,16 @@ enum StorageLabels {
 
     static func name(_ node: DiskNode) -> String { component(node.name) }
 
+    static func size(_ node: DiskNode, allocated: Bool, compact: Bool = false) -> String {
+        if node.isContentsUnreadable == true { return compact ? "Not scanned" : "Not scanned · unreadable" }
+        let bytes = allocated ? node.allocatedBytes : node.logicalBytes
+        if node.isScanIncomplete == true {
+            if bytes == 0 { return compact ? "Size unknown" : "Size unknown · incomplete scan" }
+            return "\(DiskFormat.bytes(bytes)) scanned" + (compact ? "" : " · incomplete")
+        }
+        return DiskFormat.bytes(bytes)
+    }
+
     static func session(_ name: String) -> String {
         let stem = (name as NSString).deletingPathExtension
         if stem.hasPrefix("session-") { return "Session " + stem.dropFirst(8) }

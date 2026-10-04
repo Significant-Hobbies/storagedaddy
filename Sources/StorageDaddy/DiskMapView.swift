@@ -114,9 +114,9 @@ struct DiskMapView: View {
             LazyVStack(spacing: 0) {
                 ForEach(items) { n in
                     Button { m.selected = n.id } label: {
-                        HStack { Image(systemName: n.isDirectory ? "folder.fill" : "doc").foregroundStyle(Tints.forNode(n)); Text(StorageLabels.name(n)).lineLimit(1); Spacer(); Text(DiskFormat.bytes(m.bytes(n))).monospacedDigit(); if n.isDirectory { Image(systemName: "chevron.right") } }.padding(.vertical, 9).padding(.horizontal, 8).contentShape(Rectangle())
+                        HStack { Image(systemName: n.isDirectory ? "folder.fill" : "doc").foregroundStyle(Tints.forNode(n)); Text(StorageLabels.name(n)).lineLimit(1); Spacer(); Text(StorageLabels.size(n, allocated: m.allocated)).monospacedDigit(); if n.isDirectory { Image(systemName: "chevron.right") } }.padding(.vertical, 9).padding(.horizontal, 8).contentShape(Rectangle())
                     }.buttonStyle(.plain).background(m.selected == n.id ? Tints.electricBlue.opacity(0.2) : .clear)
-                        .help("\(StorageLabels.name(n)) · \(DiskFormat.bytes(m.bytes(n))) \(m.allocated ? "on disk" : "logical")")
+                        .help("\(StorageLabels.name(n)) · \(StorageLabels.size(n, allocated: m.allocated))")
                         .simultaneousGesture(TapGesture(count: 2).onEnded { m.open(n) })
                         .contextMenu { StorageItemMenu(node: n) }
                     Divider()
