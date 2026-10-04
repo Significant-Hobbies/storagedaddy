@@ -137,7 +137,7 @@ public enum FolderArchetypes {
             return assessment(.buildOutputs, "Matched Xcode's DerivedData location.")
         }
         if !markers.isEmpty {
-            return assessment(.project, "Observed immediate project markers: \(markers.joined(separator: ", ")). Manifest contents and Git state have not been read.")
+            return assessment(.project, "Observed immediate project markers: \(markers.joined(separator: ", ")). Recognition uses filename metadata; manifest contents have not been read. Git review evidence is checked separately.")
         }
         if let first = homeLower.first, ["desktop", "documents", "downloads", "pictures", "movies", "music"].contains(first) {
             return assessment(.personalFiles, "Matched a personal-files location; no more specific role was confirmed.")

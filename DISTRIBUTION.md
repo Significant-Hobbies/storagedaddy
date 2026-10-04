@@ -1,4 +1,4 @@
-storagedaddy 0.1.2 — Beta
+storagedaddy 0.1.4 — Beta
 =======================
 
 Apple silicon Mac · macOS 14 Sonoma or later
@@ -39,8 +39,10 @@ exports before sharing them. No guaranteed compression ratio is promised.
 
 Privacy
 -------
-storagedaddy processes your files on your Mac without accounts, app telemetry,
-uploads or AI calls. Sparkle checks for updates over HTTPS and downloads updates
+storagedaddy processes your files on your Mac without accounts or file uploads.
+Optional App Health foreground-session heartbeats are off by default and require
+a valid per-user native public key. They contain a temporary session identifier
+and active state, with no events, logs, file/scan details or user/device identity. Sparkle checks for updates over HTTPS and downloads updates
 when you choose to install them.
 It scans file metadata. Session detail views read bounded local metadata;
 skills previews read only the selected text file. Archiving reads eligible

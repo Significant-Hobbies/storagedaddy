@@ -18,6 +18,10 @@ struct AcknowledgmentsView: View {
                 if let license = Bundle.main.url(forResource: "Sparkle-LICENSE", withExtension: "txt") {
                     Button("Open Sparkle license") { NSWorkspace.shared.open(license) }.buttonStyle(StorageButtonStyle())
                 }
+                credit("App Health Swift SDK", "The MIT-licensed Foundation SDK supports optional foreground-session heartbeats. Reporting is disabled unless a per-user native public key is configured; it receives no file or scan details.", "https://github.com/sass-maker/app-health")
+                if let license = Bundle.main.url(forResource: "AppHealth-LICENSE", withExtension: "txt") {
+                    Button("Open App Health license") { NSWorkspace.shared.open(license) }.buttonStyle(StorageButtonStyle())
+                }
                 credit("Mole", "An inspiration and comparison tool for Mac storage workflows. No Mole code is included in this app. Mole is licensed under GPL-3.0.", "https://github.com/tw93/Mole")
                 credit("dua & Dust", "Open-source disk analyzers evaluated for scan performance. The dua adapter is an isolated experiment; neither analyzer is bundled in this app.", "https://github.com/Byron/dua-cli")
                 outdoorsCredit

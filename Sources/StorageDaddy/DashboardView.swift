@@ -6,6 +6,41 @@ import DiskCore
     @Published var report: SystemStorageReport?
     @Published var health: [NVMeHealthInfo] = []
     @Published var loading = false
+    @Published var ioRates: StorageDashboardMetrics.IORates = .waiting
+    private var samplingVersion = UUID()
+
+    func sampleWhileVisible(probe: @escaping @Sendable () -> StorageDashboardMetrics.IOSample = StorageDashboardMetrics.collectIOSample,
+                            interval: Duration = .seconds(2)) async {
+        let version = UUID(); samplingVersion = version
+        ioRates = .waiting
+        var previous: StorageDashboardMetrics.IOSample?
+        defer { if samplingVersion == version { ioRates = .waiting } }
+        while !Task.isCancelled, samplingVersion == version {
+            let worker = Task.detached(priority: .utility, operation: probe)
+            let sample = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+            guard !Task.isCancelled, samplingVersion == version else { return }
+            ioRates = StorageDashboardMetrics.ioRates(previous: previous, current: sample)
+            previous = sample
+            do { try await Task.sleep(for: interval) } catch { return }
+        }
+    }
+
+    static func scopedScore(_ report: SystemStorageReport) -> (String, StorageDashboardMetrics.Score) {
+        let volume = report.volumes.first(where: \.isStartupData) ?? report.volumes.first(where: { $0.mountPoint == "/" })
+        let validCapacity = volume.flatMap { v -> MountedVolumeInfo? in
+            guard let total = v.totalCapacity, total > 0, let free = v.availableCapacity, free >= 0, free <= total else { return nil }
+            return v
+        }
+        let purgeable = validCapacity.flatMap { v -> Int64? in
+            guard let important = v.importantAvailableCapacity, let free = v.availableCapacity,
+                  let total = v.totalCapacity, important >= free, important <= total else { return nil }
+            return important - free
+        }
+        return (volume.map { $0.name + " (" + $0.mountPoint + ")" } ?? "Startup scope unavailable",
+            StorageDashboardMetrics.score(totalBytes: validCapacity?.totalCapacity, freeBytes: validCapacity?.availableCapacity,
+                purgeableBytes: purgeable, nvmePercentUsed: nil,
+                snapshotCount: volume?.mountPoint == "/" ? report.pressure.localSnapshotNames?.count : nil))
+    }
 
     func loadIfNeeded() {
         if report == nil { refresh() }
@@ -56,6 +91,10 @@ struct DashboardView: View {
                                 .frame(maxWidth: wide ? nil : .infinity)
                         }
                         latestScanPanel
+                        let scoped = DashboardModel.scopedScore(report)
+                        StorageDashboardMetricsView(volumes: report.volumes, rates: dashboard.ioRates, score: scoped.1,
+                            scoreScope: scoped.0, isRefreshing: dashboard.loading, onRefresh: dashboard.refresh,
+                            onReviewSnapshots: { showingSystemDetails = true })
                         layout {
                             DashboardTrashPanel(excludedFolders: m.excludedFolders)
                                 .frame(maxWidth: .infinity)
@@ -75,7 +114,7 @@ struct DashboardView: View {
         }
         .background(Color.black)
         .buttonStyle(StorageButtonStyle())
-        .task { dashboard.loadIfNeeded() }
+        .task { dashboard.loadIfNeeded(); await dashboard.sampleWhileVisible() }
     }
 
     private var header: some View {
