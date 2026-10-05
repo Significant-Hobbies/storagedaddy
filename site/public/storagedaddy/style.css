@@ -55,3 +55,13 @@
 .live-analytics-note{color:var(--muted);font-size:12px;line-height:1.7;max-width:80ch;margin:16px 0 0}
 @media(max-width:620px){.live-analytics-heading{align-items:flex-start;flex-direction:column;gap:6px}}
 @media(max-width:900px){.live-analytics-frame{height:1240px}}
+
+/* Keep the native footer content in the shared full-width Precise composition. */
+.sd-precise-footer{display:block;width:100%;margin:0;padding:0;border:0;min-width:0}
+.sd-precise-footer fleet-footer-extension{--fleet-footer-surface:#000;--fleet-footer-edge:clamp(16px,4vw,64px);--fleet-footer-signature-font:inherit}
+.sd-footer-content{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);align-items:start;gap:14px 32px;min-width:0;color:var(--muted);font-size:12px}
+.sd-footer-identity{min-width:0}.sd-footer-identity .footer-brand{display:flex;align-items:center;gap:10px;color:var(--mint-soft);font-weight:650}.sd-footer-identity>p{margin:10px 0 0;font-size:12px;line-height:1.7}
+.sd-footer-content .footer-links{grid-column:auto;grid-row:auto;display:flex;justify-content:flex-start;flex-wrap:wrap;gap:4px 18px;min-width:0}
+.sd-footer-content .footer-links a{display:inline-flex;align-items:center;min-height:44px;gap:8px}
+.sd-footer-content>small{grid-column:1/-1;color:rgba(168,189,176,.6);font-size:11px;line-height:1.6;border-top:1px solid var(--line);padding-top:14px}
+@media(max-width:620px){.sd-footer-content{grid-template-columns:minmax(0,1fr);gap:14px}.sd-footer-content .footer-links{gap:2px 14px}.sd-footer-content>small{grid-column:auto}}

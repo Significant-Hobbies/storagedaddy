@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import worker from './worker.mjs';
 import release from './release.json' with { type: 'json' };
 function env(status = 200) {
@@ -26,7 +28,30 @@ test('root landing and relative assets map to packaged assets without duplicate 
  assert.equal(e.events.length,1); assert.equal(e.events[0].blobs[0],'page_view');
  assert.match(response.headers.get('content-security-policy'), /https:\/\/\*\.clarity\.ms/);
  assert.match(response.headers.get('content-security-policy'), /https:\/\/c\.bing\.com/);
- assert.match(response.headers.get('content-security-policy'), /connect-src[^;]*https:\/\/api\.sassmaker\.com/);
+  assert.match(response.headers.get('content-security-policy'), /connect-src[^;]*https:\/\/api\.sassmaker\.com/);
+});
+test('same-origin footer artwork and fonts use the existing static route with self-only font policy', async () => {
+ for (const path of ['/footer-art/storagedaddy.webp', '/fonts/fleet-footer-precise-v1/geist.woff2']) {
+  for (const method of ['GET', 'HEAD']) {
+   const e = env();
+   const response = await worker.fetch(new Request(`https://storage.daddyrad.com${path}`, { method }), e);
+   assert.equal(response.status, 200);
+   assert.equal(new URL(e.requested[0]).pathname, `/storagedaddy${path}`);
+   assert.match(response.headers.get('content-security-policy'), /font-src 'self'/);
+   assert.equal(e.events.length, 0);
+  }
+ }
+});
+test('footer assets are packaged under the Worker asset prefix with recorded source hashes', async () => {
+ for (const [path, expectedHash] of [
+  ['./public/storagedaddy/footer-art/storagedaddy.webp', '9164eb6b49796a5263e6741ca85d51ceec01b42fac68aeb5647f90eb3d3fa8c5'],
+  ['./public/storagedaddy/fonts/fleet-footer-precise-v1/geist.woff2', '19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1'],
+  ['./public/storagedaddy/fonts/fleet-footer-precise-v1/geistmono.woff2', '3f98383b122fe015a48536cd4a1cda855a201718923ffe74931a01597107b9b5'],
+  ['./public/storagedaddy/fonts/fleet-footer-precise-v1/newsreader.woff2', '6e4f2958c3a7c4a80acde4e5a679abe7e01bc1e30b92be3c7a8b696ef401d101'],
+ ]) {
+  const bytes = await readFile(new URL(path, import.meta.url));
+  assert.equal(createHash('sha256').update(bytes).digest('hex'), expectedHash, path);
+ }
 });
 test('legacy landing and download links redirect to the corrected domain without counting', async () => {
  for (const [path,target] of [['/storagedaddy','/'],['/storagedaddy/','/'],['/storagedaddy/download','/download'],['/storagedaddy/assets/StorageDaddy.png','/assets/StorageDaddy.png']]) {
