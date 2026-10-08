@@ -8,7 +8,12 @@
     "deploy": "node check-release.mjs && npm run check && wrangler deploy --tag \"$(git rev-parse HEAD)\""
   },
   "devDependencies": {
-    "wrangler": "4.125.0",
+    "wrangler": "4.148.0",
     "typescript": "6.0.3"
+  },
+  "overrides": {
+    "miniflare": {
+      "sharp": "0.35.5"
+    }
   }
 }
