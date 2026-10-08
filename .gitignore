@@ -16,6 +16,10 @@ site/public/storagedaddy/releases/*.dmg
 
 # Private local receipts and unpublished experiments
 .fleet/
+.fleet-local/
+.wrangler/
+# Owner-local launch/community post records
+docs/marketing/
 Experiments/
 PROJECT_STATUS.md
 PRODUCT.md
