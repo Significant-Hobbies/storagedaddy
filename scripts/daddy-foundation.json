@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "sparkleVersion": "2.9.6",
+  "copies": {
+    "DaddyAppUpdates.swift": "c0e53af72a170d86380f131f31534c749850697fe893babd5adbedc59a577823",
+    "DaddyAppUpdatesTests.swift": "fd75f2894cf1a3b947d9dcbf7434c401487cf78e1ce08d31cd7c0885ddb12f43",
+    "DaddyVisualCore.swift": "353514b60f4431580d171ee97a04ddfbd615ff7830fe1b3c4c23812a4c3581ed",
+    "DaddyLifecycle.swift": "e96a7670df71b016654847dea71d316d5f3470663826a9e22b447679f013e39f",
+    "sparkle_core.py": "14ea1356f4af4e91c1d3e4449c216343e33984d7c4c35cb85f43a186a2e9837c",
+    "check-daddy-foundation.py": "b34ed50a4283bddbd4d20f1c813eb70506f4f17d7098175db740aca1bf4f3394",
+    "appcast_core.py": "2c450eedc1d335a92cdb9772d3d5ccc7b54f3dcac4485222d0e3043302bd175c"
+  }
+}

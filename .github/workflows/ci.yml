@@ -16,13 +16,14 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v5
+      - run: python3 scripts/check-daddy-foundation.py --app storagedaddy
       - run: swift test
       - run: swift build -c release
       - run: python3 -m unittest test_sparkle_support
         working-directory: scripts
 
   shared_candidate:
-    uses: sass-maker/saas-maker/.github/workflows/daddy-macos-candidate.yml@de31581b56fa8b6c20a03d0846ad2204aa2c9bab
+    uses: sass-maker/saas-maker/.github/workflows/daddy-macos-candidate.yml@67dcb59d289c396349244f42778dccbd2953ba41
     with:
       app: storagedaddy
-      tooling-ref: de31581b56fa8b6c20a03d0846ad2204aa2c9bab
+      tooling-ref: 67dcb59d289c396349244f42778dccbd2953ba41

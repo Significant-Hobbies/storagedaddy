@@ -20,13 +20,7 @@ struct DiskBuddyApp: App {
                     Button("About storagedaddy") { model.showAbout = true }
                 }
                 CommandGroup(after: .appInfo) {
-                    Button("Check for Updates…", action: updates.check).disabled(!updates.canCheck || !updates.isIdle)
-                    Toggle("Automatically Check for Updates", isOn: $updates.automaticallyChecks)
-                    if updates.waitingForIdle { Text("Update waiting for current work to finish") }
-                    Divider()
-
-                    Button("Getting Started…") { model.showWelcome = true }.disabled(model.busy)
-                    Button("Acknowledgments…") { model.workspace = .acknowledgments; model.showWelcome = false }
+                    DaddyUpdateMenu(updates: updates)
                 }
                 CommandGroup(after: .newItem) {
                     Button("Scan Folder…") { model.chooseFolder() }.keyboardShortcut("o")
