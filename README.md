@@ -29,6 +29,11 @@ sizes and timing are not a whole-disk benchmark.
 - AI Sessions for standard Claude and Codex transcript locations, independent
   of a disk scan. Older conversations can be exported locally before cleanup.
 - Saved snapshots in History and signed updates through Sparkle.
+- A menu bar status item: closing the window keeps StorageDaddy available,
+  scan status and cancel stay reachable, and opt-in **Launch at Login** and
+  **Notify When Scan Finishes** cover scans that finish with no window open.
+  Quitting during a scan, reviewed cleanup, snapshot save or conversation
+  export asks before interrupting it.
 
 ## Install
 
