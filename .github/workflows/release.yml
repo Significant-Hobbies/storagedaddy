@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: sass-maker/saas-maker
-          ref: 3ce0419bbb906396d6bfd03351b4c444b10f2c54
+          ref: 67dcb59d289c396349244f42778dccbd2953ba41
           path: .daddy-tooling
           persist-credentials: false
       - name: Verify release tag and source commit
@@ -66,6 +66,7 @@ jobs:
         env:
           CALLER_REPOSITORY: ${{ github.repository }}
         run: |
+          python3 app/scripts/check-daddy-foundation.py --app storagedaddy
           python3 .daddy-tooling/tooling/daddy-macos/candidate.py \
             --app storagedaddy \
             --repository "$CALLER_REPOSITORY" \
