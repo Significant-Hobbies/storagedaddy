@@ -7,8 +7,12 @@ struct DiskBuddyApp: App {
     @NSApplicationDelegateAdaptor(StorageDaddyAppDelegate.self) private var appDelegate
     @StateObject private var model = ExplorerModel()
     @StateObject private var updates = AppUpdates()
+    @StateObject private var login = DaddyLaunchAtLogin()
     var body: some Scene {
-        WindowGroup("storagedaddy") { ExplorerView().environmentObject(model).frame(minWidth: 880, minHeight: 600).onAppear { updates.start(model: model) } }
+        Window("storagedaddy", id: "main") { ExplorerView().environmentObject(model).frame(minWidth: 880, minHeight: 600).onAppear {
+            updates.start(model: model)
+            reviewActiveWorkBeforeQuit()
+        } }
             .defaultSize(width: 1320, height: 850)
             .windowStyle(.hiddenTitleBar)
             .commands {
@@ -30,14 +34,40 @@ struct DiskBuddyApp: App {
                     Button("Cancel Scan") { model.cancel() }.keyboardShortcut(".").disabled(!model.busy)
                 }
             }
+        MenuBarExtra {
+            StorageMenu(model: model, updates: updates, login: login)
+        } label: {
+            Label("StorageDaddy", systemImage: "internaldrive").onAppear(perform: reviewActiveWorkBeforeQuit)
+        }
         Settings {
             StorageSettingsView(updates: updates).environmentObject(model)
         }
         .windowResizability(.contentSize)
     }
+    private func reviewActiveWorkBeforeQuit() { appDelegate.activeWork = { [model] in model.activeWorkDescription } }
+}
+
+private struct StorageMenu: View {
+    @ObservedObject var model: ExplorerModel
+    @ObservedObject var updates: AppUpdates
+    @ObservedObject var login: DaddyLaunchAtLogin
+    var body: some View {
+        DaddyMenuStatus(message: model.menuStatus)
+        Divider()
+        DaddyMenuOpenButton(appName: "StorageDaddy")
+        if model.isScanning { Button("Cancel Scan") { model.cancel() } }
+        SettingsLink()
+        Button("Check for Updates…", action: updates.check).disabled(!updates.canCheck || !updates.isIdle)
+        Divider()
+        DaddyLaunchAtLoginToggle(login: login)
+        DaddyCompletionNoticeToggle(title: "Notify When Scan Finishes")
+        Divider()
+        DaddyMenuQuitButton(appName: "StorageDaddy")
+    }
 }
 
 @MainActor final class StorageDaddyAppDelegate: NSObject, NSApplicationDelegate {
+    var activeWork: (() -> String?)?
     private var health: NativeAppHealth?
     private var awaitingHealthClose = false
     static let brandIcon: NSImage? = Bundle.main.url(forResource: "StorageDaddy", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
@@ -60,9 +90,11 @@ struct DiskBuddyApp: App {
         health?.setActive(true)
     }
     func applicationDidResignActive(_ notification: Notification) { health?.setActive(false) }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let health, health.isEnabled else { return .terminateNow }
         guard !awaitingHealthClose else { return .terminateLater }
+        guard DaddyQuitReview.shouldQuit(appName: "StorageDaddy", activeWork: activeWork?()) else { return .terminateCancel }
+        guard let health, health.isEnabled else { return .terminateNow }
         awaitingHealthClose = true
         Task {
             await health.close()
@@ -256,7 +288,7 @@ struct FileTypeStats: Sendable {
             message = "The previous scan location is unavailable. Reconnect the disk or use Scan Folder to grant access again."
             return
         }
-        start(URL(fileURLWithPath: path), allowProtectedFolder: lastScanAllowedProtectedFolder && scan?.rootPath == path)
+        start(URL(fileURLWithPath: path), allowProtectedFolder: lastScanAllowedProtectedFolder && scan?.rootPath == path, notifyOnCompletion: false)
     }
     @Published var showAbout = false
     @Published var showWelcome = false
@@ -285,6 +317,7 @@ struct FileTypeStats: Sendable {
     @Published var volumeCapacity: Int64?
     @Published var liveProgress: ScanProgress?
     @Published var busy = false
+    @Published private(set) var lastScanSummary = "No scan yet"
     @Published var progress = "Choose what to scan to begin"
     @Published var folderExplanation: FolderExplanationState?
     @Published var message: String?
@@ -353,6 +386,19 @@ struct FileTypeStats: Sendable {
     private var memoryTask: Task<Void, Never>?
     private var scanVersion = UUID()
     private var activeScanVersion: UUID?
+    var isScanning: Bool { activeScanVersion != nil }
+    var menuStatus: String {
+        if isScanning { return "Scan in progress" }
+        if busy || snapshotBusy || conversationArchive.busy { return "Storage operation in progress" }
+        return lastScanSummary
+    }
+    /// Scans, reviewed cleanup, snapshot saves and conversation exports warn before quitting.
+    var activeWorkDescription: String? {
+        if isScanning { return "A storage scan is still running." }
+        if busy || snapshotBusy { return "A storage operation is still running." }
+        if conversationArchive.busy { return "A conversation export is still running." }
+        return nil
+    }
     private var focusTask: Task<Void, Never>?
     private var focusVersion = UUID()
     private var task: Task<Void, Never>?
@@ -635,7 +681,7 @@ struct FileTypeStats: Sendable {
         }
     }
     func rescan() { if let scan { start(URL(fileURLWithPath: scan.rootPath), allowProtectedFolder: lastScanAllowedProtectedFolder) } }
-    func start(_ url: URL, destination: Workspace? = nil, allowProtectedFolder: Bool = false) {
+    func start(_ url: URL, destination: Workspace? = nil, allowProtectedFolder: Bool = false, notifyOnCompletion: Bool = true) {
         guard !busy else { return }
         lastScanAllowedProtectedFolder = allowProtectedFolder
         let protectedFolders = allowProtectedFolder ? [] : AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
@@ -740,14 +786,18 @@ struct FileTypeStats: Sendable {
                 } else { openStorage(.explore) }
                 snapshotNotice = nil
                 progress = "\(fileCount.formatted()) files · \(SpeedFormat.duration(result.elapsed)) scan · \(result.skipped) skipped"
+                lastScanSummary = "Last scan: \(fileCount.formatted()) files · \(Date().formatted(date: .abbreviated, time: .shortened))"
+                if notifyOnCompletion {
+                    DaddyCompletionNotices.postIfWindowHidden(title: "Storage scan complete", body: "Open StorageDaddy to review the results.")
+                }
                 if url.standardizedFileURL.path == FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches").standardizedFileURL.path {
                     // A cache-only scan must not start a separate walk of Home while
                     // macOS-protected folders are inaccessible. Even a readable-looking
                     // directory may block in opendir and leave the quick scan spinning.
                     if protectedFolders.isEmpty { discoverProjectDependencies(promptAvoidanceFolders: []) }
                 }
-            } catch is CancellationError { if scanVersion == version { progress = scan == nil ? "Scan cancelled · Choose a disk or folder to try again" : "Scan cancelled · Showing previous results" } }
-            catch { if scanVersion == version { message = error.localizedDescription; progress = scan == nil ? "Scan failed · Choose another disk or folder" : "Scan failed · Showing previous results" } }
+            } catch is CancellationError { if scanVersion == version { progress = scan == nil ? "Scan cancelled · Choose a disk or folder to try again" : "Scan cancelled · Showing previous results"; lastScanSummary = "Last scan cancelled" } }
+            catch { if scanVersion == version { message = error.localizedDescription; progress = scan == nil ? "Scan failed · Choose another disk or folder" : "Scan failed · Showing previous results"; lastScanSummary = "Last scan needs attention" } }
             guard scanVersion == version else { return }
             liveProgress = nil; busy = false
         }
@@ -792,6 +842,7 @@ struct FileTypeStats: Sendable {
             scanPeakRSS = priorScanPeakRSS
             liveProgress = nil; busy = false
             progress = scan == nil ? "Scan cancelled · Choose a folder to grant access" : "Scan cancelled · Showing previous results"
+            lastScanSummary = "Last scan cancelled"
         }
     }
     func open(_ n: DiskNode) { selected = n.id; if n.isDirectory { focus = n.id; search = "" } }

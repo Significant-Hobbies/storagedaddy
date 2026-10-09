@@ -496,12 +496,12 @@ struct StorageFreeSpaceView: View {
 }
 
 enum Tints {
-    static let electricBlue = Color(red: 0.33, green: 0.58, blue: 0.83)
-    static let mint = Color(red: 0.42, green: 0.79, blue: 0.62)
-    static let secondaryText = Color(red: 0.78, green: 0.90, blue: 0.86)
-    static let coral = Color(red: 0.90, green: 0.46, blue: 0.40)
-    static let yellow = Color(red: 0.87, green: 0.67, blue: 0.28)
-    static let cyan = Color(red: 0.27, green: 0.70, blue: 0.75)
+    static let electricBlue = DaddyPalette.blue
+    static let mint = DaddyPalette.mint
+    static let secondaryText = DaddyPalette.secondaryInk
+    static let coral = DaddyPalette.coral
+    static let yellow = DaddyPalette.amber
+    static let cyan = DaddyPalette.cyan
     static let colors: [Color] = [mint, electricBlue, coral, yellow, cyan]
 
     static func forKind(_ kind: StorageKind) -> Color {
