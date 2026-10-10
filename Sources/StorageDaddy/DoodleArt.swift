@@ -1,5 +1,6 @@
 import DiskCore
 import SwiftUI
+import SaaSMakerUI
 import AppKit
 import Darwin
 
@@ -46,10 +47,10 @@ struct ScanWelcomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack {
-                    Label("Welcome to storagedaddy", systemImage: "sparkle")
+                    Label("welcome to storagedaddy", systemImage: "sparkle").accessibilityLabel("Welcome to storagedaddy")
                         .font(.system(size: 11, weight: .semibold)).tracking(1.2).foregroundStyle(Tints.mint)
                     Spacer()
-                    if let later { Button("Explore tools first", action: later).font(.caption) }
+                    if let later { Button("explore tools first", action: later).accessibilityLabel("Explore tools first").font(.caption) }
                 }
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 20) {
@@ -65,15 +66,15 @@ struct ScanWelcomeView: View {
                     .font(.system(size: 15)).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
                 capacitySummary
                 HStack(spacing: 12) {
-                    Button("Scan a Disk…", systemImage: "internaldrive.fill", action: scanDisk)
+                    Button("scan a disk…", systemImage: "internaldrive.fill", action: scanDisk).accessibilityLabel("Scan a Disk…")
                         .buttonStyle(StorageButtonStyle(prominent: true)).controlSize(.large)
-                    Button("Scan Home Folder", systemImage: "house", action: scanHome).controlSize(.large)
-                    Button("Scan a Folder…", systemImage: "folder.badge.plus", action: scanFolder)
+                    Button("scan home folder", systemImage: "house", action: scanHome).accessibilityLabel("Scan Home Folder").controlSize(.large)
+                    Button("scan a folder…", systemImage: "folder.badge.plus", action: scanFolder).accessibilityLabel("Scan a Folder…")
                         .controlSize(.large)
                 }
                 Text("Scan Home Folder finds caches and node_modules in readable locations. Without Full Disk Access, protected folders are skipped to avoid macOS prompts; choose one with Scan a Folder if you want it included. Scan a Disk covers the rest of that volume.")
                     .font(.callout).foregroundStyle(Tints.secondaryText)
-                Button("Scan only user caches (faster)", systemImage: "archivebox", action: scanCaches)
+                Button("scan only user caches (faster)", systemImage: "archivebox", action: scanCaches).accessibilityLabel("Scan only user caches (faster)")
                     .font(.callout)
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "lock.shield").foregroundStyle(Tints.mint).padding(.top, 2)
@@ -83,7 +84,7 @@ struct ScanWelcomeView: View {
                             .font(.callout).foregroundStyle(Tints.secondaryText)
                         if accessStatus != .accessible {
                             HStack(spacing: 12) {
-                                Button("Access options") { accessDetails.toggle() }
+                                Button("access options") { accessDetails.toggle() }.accessibilityLabel("Access options")
                                 Text("Or scan just one folder").font(.caption).foregroundStyle(Tints.secondaryText)
                             }
                         }
@@ -93,16 +94,16 @@ struct ScanWelcomeView: View {
                             Text("Open Privacy & Security → Full Disk Access, add storagedaddy with + and enable it. Reopen the app if macOS asks. This grants broad access to your files; protected and excluded items can still be skipped.")
                                 .font(.callout).foregroundStyle(Tints.secondaryText)
                             HStack {
-                                Button("Open System Settings") {
+                                Button("open system settings") {
                                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { NSWorkspace.shared.open(url) }
-                                }
-                                Button("Show app in Finder") { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
+                                }.accessibilityLabel("Open System Settings")
+                                Button("show app in finder") { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }.accessibilityLabel("Show app in Finder")
                             }
                         }
                     }
                 }
                 .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Tints.mint.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+                .storagePanel()
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Tints.mint.opacity(0.2)))
                 HStack(alignment: .top, spacing: 20) {
                     step(.overview, "1. Scan", "Choose your storage")
@@ -133,7 +134,7 @@ struct ScanWelcomeView: View {
     private var capacitySummary: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("STARTUP STORAGE").font(.system(size: 11, weight: .semibold)).tracking(1.1)
+                Text("startup storage").accessibilityLabel("STARTUP STORAGE").font(.system(size: 11, weight: .semibold)).tracking(1.1)
                     .foregroundStyle(Tints.secondaryText)
                 Spacer()
                 Text("macOS estimate").font(.caption).foregroundStyle(Tints.secondaryText)
@@ -169,7 +170,7 @@ struct ScanWelcomeView: View {
                 .font(.caption).foregroundStyle(Tints.secondaryText)
         }
         .padding(16)
-        .background(Tints.mint.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+        .storagePanel()
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Tints.mint.opacity(0.2)))
     }
 
@@ -213,15 +214,13 @@ struct ScanWelcomeView: View {
 
     private var introduction: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("See what’s taking space.\nStart with a scan.")
-                .font(.system(size: 34, weight: .semibold, design: .rounded)).tracking(-0.7)
-                .fixedSize(horizontal: false, vertical: true)
+            SMSectionHeader("See what’s taking space.\nStart with a scan.", size: 34).accessibilityLabel("See what’s taking space.\nStart with a scan.")
         }
     }
     private func step(_ topic: DoodleTopic, _ title: String, _ subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             DoodleArt(topic: topic).frame(width: 62, height: 62)
-            Text(title).font(.headline)
+            Text(title.lowercased()).accessibilityLabel(title).font(.headline)
             Text(subtitle).font(.system(size: 12)).foregroundStyle(Tints.secondaryText)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }

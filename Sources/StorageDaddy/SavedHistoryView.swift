@@ -1,4 +1,5 @@
 import SwiftUI
+import SaaSMakerUI
 import DiskCore
 
 struct SavedHistoryView: View {
@@ -11,13 +12,13 @@ struct SavedHistoryView: View {
             VStack(alignment: .leading, spacing: 20) {
                 HStack {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("History").font(.largeTitle.weight(.semibold))
+                        SMSectionHeader("History", size: 28).accessibilityLabel("History")
                         Text("Scans you chose to keep.").foregroundStyle(Tints.secondaryText)
                     }
                     DoodleArt(topic: .snapshots).frame(width: 80, height: 80)
                     Spacer()
                     if !m.savedSnapshots.isEmpty {
-                        Button("Refresh", systemImage: "arrow.clockwise") { Task { await m.refreshSnapshotHistory() } }
+                        Button("refresh", systemImage: "arrow.clockwise") { Task { await m.refreshSnapshotHistory() } }.accessibilityLabel("Refresh")
                             .disabled(m.snapshotHistoryLoading)
                     }
                 }
@@ -26,7 +27,7 @@ struct SavedHistoryView: View {
                         Label(warning, systemImage: "exclamationmark.triangle")
                             .font(.callout).foregroundStyle(Tints.yellow)
                         Spacer()
-                        Button("Try Again") { Task { await m.refreshSnapshotHistory() } }
+                        Button("try again") { Task { await m.refreshSnapshotHistory() } }.accessibilityLabel("Try Again")
                             .disabled(m.snapshotHistoryLoading)
                     }
                 }
@@ -41,7 +42,7 @@ struct SavedHistoryView: View {
                             m.openStorage(.explore)
                         }.buttonStyle(StorageButtonStyle(prominent: true))
                     }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Tints.mint.opacity(0.25)))
+                        .storagePanel()
                 } else if let selected, let snapshot = m.savedSnapshots.first(where: { $0.id == selected }) {
                     snapshotDetail(snapshot)
                 } else {
@@ -80,7 +81,7 @@ struct SavedHistoryView: View {
 
     private func snapshotDetail(_ snapshot: SavedScanSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Button("All snapshots", systemImage: "chevron.left") { selected = nil }
+            Button("all snapshots", systemImage: "chevron.left") { selected = nil }.accessibilityLabel("All snapshots")
             Text(StorageLabels.location(snapshot.scan.rootPath)).font(.title2.weight(.semibold))
                 .textSelection(.enabled)
             Text("Scanned " + snapshot.scan.started.formatted(date: .abbreviated, time: .shortened))

@@ -1,5 +1,6 @@
 import DiskCore
 import SwiftUI
+import SaaSMakerUI
 
 /// Display only. The dashboard owner injects fixture/live values and owns the
 /// sampling lifetime; this view does not poll, inventory, persist or read files.
@@ -16,12 +17,13 @@ struct StorageDashboardMetricsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("STORAGE METRICS")
+                Text("storage metrics").accessibilityLabel("STORAGE METRICS")
                     .font(.system(size: 11, weight: .bold)).tracking(1.2)
                     .foregroundStyle(Tints.mint)
                 Spacer()
                 Button(action: onRefresh) {
-                    Label(isRefreshing ? "Refreshing…" : "Refresh", systemImage: "arrow.clockwise")
+                    Label(isRefreshing ? "refreshing…" : "refresh", systemImage: "arrow.clockwise")
+                        .accessibilityLabel(isRefreshing ? "Refreshing…" : "Refresh")
                 }
                 .disabled(isRefreshing)
             }
@@ -140,8 +142,6 @@ struct StorageDashboardMetricsView: View {
 
 private extension View {
     func metricCard() -> some View {
-        self.padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Tints.secondaryText.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
+        SMCard { self }
     }
 }

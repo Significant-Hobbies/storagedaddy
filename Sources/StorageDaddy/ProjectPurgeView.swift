@@ -1,4 +1,5 @@
 import SwiftUI
+import SaaSMakerUI
 import DiskCore
 
 enum ProjectPurgeViewStatus: Equatable {
@@ -89,15 +90,15 @@ struct ProjectPurgeRecoveryPlanSheet: View {
                 .font(.caption).foregroundStyle(Tints.secondaryText)
             HStack {
                 if draft.existingPlan != nil {
-                    Button("Clear saved plan") {
+                    Button("clear saved plan") {
                         if draft.clear(callback: onRecoveryPlan) { dismiss() }
-                    }.buttonStyle(StorageButtonStyle())
+                    }.accessibilityLabel("Clear saved plan").buttonStyle(StorageButtonStyle())
                 }
                 Spacer()
-                Button("Cancel") { dismiss() }.buttonStyle(StorageButtonStyle())
-                Button("Save reviewed plan") {
+                Button("cancel") { dismiss() }.accessibilityLabel("Cancel").buttonStyle(StorageButtonStyle())
+                Button("save reviewed plan") {
                     if draft.submit(callback: onRecoveryPlan) { dismiss() }
-                }
+                }.accessibilityLabel("Save reviewed plan")
                 .buttonStyle(StorageButtonStyle(prominent: true))
                 .disabled(!draft.canSubmit)
             }
@@ -139,8 +140,7 @@ struct ProjectPurgeView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Project artifacts")
-                        .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    SMSectionHeader("Project artifacts", size: 28).accessibilityLabel("Project artifacts")
                     Text("Keep the workspace. Review dependencies and generated outputs in context.")
                         .foregroundStyle(Tints.secondaryText)
                 }
@@ -157,7 +157,7 @@ struct ProjectPurgeView: View {
                 HStack { ProgressView().controlSize(.small); Text("Reviewing project evidence…") }
             case let .error(message):
                 Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(Tints.coral)
-                if let onRetry { Button("Refresh project evidence", action: onRetry) }
+                if let onRetry { Button("refresh project evidence", action: onRetry).accessibilityLabel("Refresh project evidence") }
                 else { Text("Use Refresh project evidence above this panel.").font(.caption).foregroundStyle(Tints.secondaryText) }
             case let .idle(message): Text(message).foregroundStyle(Tints.secondaryText)
             case .ready:

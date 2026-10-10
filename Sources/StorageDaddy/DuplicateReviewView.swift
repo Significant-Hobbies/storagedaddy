@@ -1,5 +1,6 @@
 import DiskCore
 import SwiftUI
+import SaaSMakerUI
 
 /// A review-only selection: every copy is kept until the owner explicitly changes it.
 /// Invalid evidence fails closed; the caller still owns filesystem preflight.
@@ -82,13 +83,13 @@ struct DuplicateReviewView: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Duplicates").font(.system(size: 28, weight: .semibold, design: .rounded))
+                    SMSectionHeader("Duplicates", size: 28).accessibilityLabel("Duplicates")
                     Text("Compare identical files. Choose which copies to keep before staging the others.")
                         .font(.subheadline).foregroundStyle(Tints.secondaryText)
                 }
                 Spacer(minLength: 8)
                 if isLoading {
-                    Button("Cancel", action: onCancel).buttonStyle(StorageButtonStyle())
+                    Button("cancel", action: onCancel).accessibilityLabel("Cancel").buttonStyle(StorageButtonStyle())
                 } else {
                     Button(hasSearched ? "Find again" : "Find duplicates", action: onFind)
                         .buttonStyle(StorageButtonStyle(prominent: true))
@@ -105,7 +106,7 @@ struct DuplicateReviewView: View {
             } else if let error {
                 statePanel("Duplicate check couldn’t finish", detail: error) {
                     Image(systemName: "exclamationmark.triangle").foregroundStyle(Tints.yellow)
-                    Button("Try again", action: onFind).buttonStyle(StorageButtonStyle(prominent: true))
+                    Button("try again", action: onFind).accessibilityLabel("Try again").buttonStyle(StorageButtonStyle(prominent: true))
                 }
             } else if !hasSearched {
                 statePanel("Duplicates haven’t been checked", detail: "Run a content check for this scan. Nothing is selected for cleanup.") {
@@ -235,7 +236,7 @@ private struct DuplicateGroupInspector: View {
     }
 
     private var stageButton: some View {
-        Button("Stage other copies") { selection.stage(using: onStage) }
+        Button("stage other copies") { selection.stage(using: onStage) }.accessibilityLabel("Stage other copies")
             .buttonStyle(StorageButtonStyle(prominent: true)).disabled(!selection.canStage)
             .help("Send only the selected copies to cleanup review. Files are not moved by this action.")
     }

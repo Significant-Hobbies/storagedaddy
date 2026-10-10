@@ -1,4 +1,5 @@
 import SwiftUI
+import SaaSMakerUI
 import DiskCore
 
 private struct DeveloperStorageFamily: Identifiable, CaseIterable {
@@ -156,7 +157,7 @@ struct DeveloperView: View {
     }
     private var storageFamilyGrid: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Developer storage by type").font(.title2.weight(.semibold))
+            SMSectionHeader("Developer storage by type", size: 22).accessibilityLabel("Developer storage by type")
             Text("Seven useful groups first. Open the category breakdown for the underlying tools and folders.")
                 .font(.callout).foregroundStyle(Tints.secondaryText)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
@@ -164,7 +165,7 @@ struct DeveloperView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Image(systemName: family.symbol).foregroundStyle(family.color)
-                            Text(family.title).font(.system(size: 13, weight: .semibold))
+                            Text(family.title.lowercased()).accessibilityLabel(family.title).font(.system(size: 13, weight: .semibold))
                             Spacer(minLength: 0)
                         }
                         Text(DiskFormat.bytes(family.bytes))
@@ -174,8 +175,8 @@ struct DeveloperView: View {
                     }
                     .padding(15)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.black, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(family.color.opacity(0.28)))
+                    .storagePanel()
+                    .overlay(RoundedRectangle(cornerRadius: DaddyTheme.palette.radius + 4).strokeBorder(family.color.opacity(0.28)))
                 }
             }
         }
@@ -217,7 +218,7 @@ struct DeveloperView: View {
             } else if !m.projectDependenciesBusy && !m.promptAvoidanceFolders.isEmpty {
                 Text("Automatic project search is paused to avoid macOS permission prompts. Choose a project folder to measure its node_modules and other build output.")
                     .font(.callout).foregroundStyle(Tints.secondaryText)
-                Button("Scan a Project Folder…", action: m.chooseFolder)
+                Button("scan a project folder…", action: m.chooseFolder).accessibilityLabel("Scan a Project Folder…")
                     .buttonStyle(StorageButtonStyle())
             } else {
                 Text("Looking for project node_modules folders…")
@@ -231,18 +232,18 @@ struct DeveloperView: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 7) {
-                Text("SCAN RESULTS").font(.system(size: 11, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(Tints.secondaryText)
-                Text("Developer Insights").font(.system(size: 31, weight: .bold, design: .rounded)).tracking(-0.7)
+                Text("scan results").font(.system(size: 11, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(Tints.secondaryText)
+                SMSectionHeader("Developer Insights", size: 31).accessibilityLabel("Developer Insights")
                 Text("Know what belongs to each project—and what removing it would change.").foregroundStyle(Tints.secondaryText)
             }
             DoodleArt(topic: .overview).frame(width: 90, height: 90)
             Spacer(minLength: 16)
             VStack(alignment: .trailing, spacing: 8) {
-            Button("Rescan", action: m.rescan).buttonStyle(StorageButtonStyle()).disabled(m.busy)
-            Button("Scan Home") { m.start(FileManager.default.homeDirectoryForCurrentUser) }
+            Button("rescan", action: m.rescan).accessibilityLabel("Rescan").buttonStyle(StorageButtonStyle()).disabled(m.busy)
+            Button("scan home") { m.start(FileManager.default.homeDirectoryForCurrentUser) }.accessibilityLabel("Scan Home")
                 .buttonStyle(StorageButtonStyle()).disabled(m.busy)
                 .help("Scan your home folder to include hidden Claude and Codex storage. Sensitive paths remain excluded.")
-            Button("Scan Temp") { m.start(FileManager.default.temporaryDirectory) }.buttonStyle(StorageButtonStyle()).disabled(m.busy)
+            Button("scan temp") { m.start(FileManager.default.temporaryDirectory) }.accessibilityLabel("Scan Temp").buttonStyle(StorageButtonStyle()).disabled(m.busy)
                 .help("Scan the current user’s macOS temporary directory. This replaces the current scope.")
             }
         }
@@ -288,7 +289,7 @@ struct DeveloperView: View {
     private var cleanupOpportunities: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Worth reviewing").font(.title2.weight(.semibold))
+                SMSectionHeader("Worth reviewing", size: 22).accessibilityLabel("Worth reviewing")
                 Spacer()
                 Button("Review Cleanup (\(m.staged.count))") { m.openStorage(.cleanup) }
             }
@@ -301,7 +302,7 @@ struct DeveloperView: View {
             }.prefix(5))
             if findings.isEmpty {
                 Text("No recognized cache, build, installer or stale-download candidates in this scan. Explore the largest folders to review other files.").foregroundStyle(Tints.secondaryText)
-                Button("Explore files") { m.openStorage(.explore) }
+                Button("explore files") { m.openStorage(.explore) }.accessibilityLabel("Explore files")
             }
             ForEach(findings) { finding in
                 VStack(alignment: .leading, spacing: 7) {
@@ -310,9 +311,9 @@ struct DeveloperView: View {
                         Text(finding.tool + " · " + finding.category.title).fontWeight(.medium)
                         Spacer()
                         Text(DiskFormat.bytes(finding.allocatedBytes)).monospacedDigit()
-                        Button("Inspect") {
+                        Button("inspect") {
                             if let scan = m.scan, scan.nodes.indices.contains(finding.id) { m.openStorage(.explore); m.open(scan.nodes[finding.id]) }
-                        }
+                        }.accessibilityLabel("Inspect")
                         Button(m.staged.contains(finding.id) ? "Added" : "Add to Cleanup") { m.stage(finding.id) }
                             .disabled(m.busy || m.monitoring || m.staged.contains(finding.id))
                     }
@@ -328,7 +329,7 @@ struct DeveloperView: View {
     private func categoryButton(_ item: DeveloperGroup) -> some View {
         Button { category = item.category } label: {
             VStack(alignment: .leading, spacing: 14) {
-                HStack { Image(systemName: item.category.symbol).foregroundStyle(item.category.color); Text(item.category.title).font(.system(size: 13, weight: .semibold)); Spacer(minLength: 0) }
+                HStack { Image(systemName: item.category.symbol).foregroundStyle(item.category.color); Text(item.category.title.lowercased()).accessibilityLabel(item.category.title).font(.system(size: 13, weight: .semibold)); Spacer(minLength: 0) }
                 Text(DiskFormat.bytes(item.allocatedBytes)).font(.system(size: 27, weight: .semibold, design: .rounded)).monospacedDigit().foregroundStyle(item.category.color)
                 HStack {
                     Text("\(item.fileCount.formatted()) \(item.fileCount == 1 ? "file" : "files")")
@@ -343,7 +344,7 @@ struct DeveloperView: View {
     }
     private var details: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack { Text(category.title).font(.title2.weight(.semibold)); Spacer(); Text("LARGEST FIRST").font(.system(size: 10, weight: .medium, design: .monospaced)).tracking(1).foregroundStyle(Tints.secondaryText) }
+            HStack { SMSectionHeader(category.title, size: 22).accessibilityLabel(category.title); Spacer(); Text("largest first").accessibilityLabel("LARGEST FIRST").font(.system(size: 10, weight: .medium, design: .monospaced)).tracking(1).foregroundStyle(Tints.secondaryText) }
             Text(category.detail).font(.callout).foregroundStyle(Tints.secondaryText)
             if let scan = m.scan, let group, !group.rootIDs.isEmpty {
                 ForEach(Array(group.rootIDs.prefix(30)), id: \.self) { id in
@@ -355,7 +356,7 @@ struct DeveloperView: View {
                         }
                         Spacer()
                         Text(DiskFormat.bytes(group.rootAllocatedBytes[id] ?? scan.nodes[id].allocatedBytes)).monospacedDigit()
-                        Button("Inspect") { m.openStorage(.explore); m.open(scan.nodes[id]) }
+                        Button("inspect") { m.openStorage(.explore); m.open(scan.nodes[id]) }.accessibilityLabel("Inspect")
                         Button { m.reveal(id) } label: { Image(systemName: "arrow.up.forward.square") }.help("Reveal in Finder").accessibilityLabel("Reveal \(scan.nodes[id].name) in Finder")
                     }.padding(.vertical, 10).contextMenu { StorageItemMenu(node: scan.nodes[id]) }
                     Divider().overlay(Tints.mint.opacity(0.15))
@@ -392,11 +393,10 @@ enum SpeedFormat {
 struct CleanupFlag: View {
     let category: DeveloperCategory?
     var body: some View {
-        Text(CleanupGuidance.label(for: category))
-            .font(.caption.weight(.medium))
-            .foregroundStyle(category == .packageCaches || category == .installers ? Tints.mint : Tints.yellow)
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .overlay(Capsule().stroke((category == .packageCaches || category == .installers ? Tints.mint : Tints.yellow).opacity(0.35)))
+        SMStatusPill(CleanupGuidance.label(for: category),
+                     tone: category == .packageCaches || category == .installers ? .success : .warning)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(CleanupGuidance.label(for: category))
             .help(CleanupGuidance.explanation(for: category) + " This does not mean the item is unused. Stop tools using it before cleanup.")
     }
 }
