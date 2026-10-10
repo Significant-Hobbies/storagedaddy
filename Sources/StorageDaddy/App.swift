@@ -24,6 +24,7 @@ struct DiskBuddyApp: App {
                 }
                 CommandGroup(after: .newItem) {
                     Button("Scan Folder…") { model.chooseFolder() }.keyboardShortcut("o")
+                    Button("Find Files") { model.showWelcome = false; model.workspace = .findFiles }.keyboardShortcut("f").disabled(model.scan == nil || model.busy)
                     Button("Rescan") { model.rescan() }.keyboardShortcut("r").disabled(model.scan == nil || model.busy)
                     Button("Cancel Scan") { model.cancel() }.keyboardShortcut(".").disabled(!model.busy)
                 }
@@ -110,11 +111,11 @@ private struct StorageMenu: View {
 }
 
 enum Workspace: String, CaseIterable, Identifiable {
-    case aiSessions = "AI Sessions", developer = "Developer Insights", explore = "Explore", applications = "Applications", snapshots = "Snapshots", duplicates = "Duplicates", projects = "Projects", appData = "App Data", cleanup = "Cleanup", acknowledgments = "Acknowledgments", dashboard = "Dashboard"
+    case findFiles = "Find Files", aiSessions = "AI Sessions", developer = "Developer Insights", explore = "Explore", applications = "Applications", snapshots = "Snapshots", duplicates = "Duplicates", projects = "Projects", appData = "App Data", cleanup = "Cleanup", acknowledgments = "Acknowledgments", dashboard = "Dashboard"
     var id: String { rawValue }
     var title: String { switch self { case .explore: "Storage"; case .cleanup: "Review Cleanup"; case .snapshots: "History"; default: rawValue } }
-    var requiresScan: Bool { [.developer, .cleanup, .duplicates, .projects, .appData].contains(self) }
-    var icon: String { switch self { case .aiSessions: "bubble.left.and.text.bubble.right.fill"; case .developer: "terminal"; case .explore: "internaldrive.fill"; case .applications: "app.badge"; case .snapshots: "clock.arrow.circlepath"; case .duplicates: "doc.on.doc"; case .projects: "folder.badge.gearshape"; case .appData: "questionmark.folder"; case .cleanup: "trash"; case .acknowledgments: "heart.text.square"; case .dashboard: "speedometer" } }
+    var requiresScan: Bool { [.findFiles, .developer, .cleanup, .duplicates, .projects, .appData].contains(self) }
+    var icon: String { switch self { case .findFiles: "magnifyingglass"; case .aiSessions: "bubble.left.and.text.bubble.right.fill"; case .developer: "terminal"; case .explore: "internaldrive.fill"; case .applications: "app.badge"; case .snapshots: "clock.arrow.circlepath"; case .duplicates: "doc.on.doc"; case .projects: "folder.badge.gearshape"; case .appData: "questionmark.folder"; case .cleanup: "trash"; case .acknowledgments: "heart.text.square"; case .dashboard: "speedometer" } }
 }
 
 enum StorageSection: String, CaseIterable, Identifiable {
@@ -287,7 +288,8 @@ struct FileTypeStats: Sendable {
     @Published var showAbout = false
     @Published var showWelcome = false
     @Published var lastTrashedURLs: [URL] = []
-    @Published var scan: ScanResult? { didSet { invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview() } }
+    @Published private(set) var filenameSearchIdentity = UUID()
+    @Published var scan: ScanResult? { didSet { filenameSearchIdentity = UUID(); invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview() } }
     @Published var scanStorageAccounting: ScanStorageAccounting?
     @Published private(set) var promptAvoidanceFolders: [String] = []
     private var lastScanAllowedProtectedFolder = false
@@ -302,6 +304,7 @@ struct FileTypeStats: Sendable {
     @Published var storageSection: StorageSection = .explore
     @Published var mode: MapMode = .treemap { didSet { refreshFocus() } }
     @Published var focus = 0 { didSet { refreshFocus() } }
+    @Published private(set) var storageInspectorRequest = UUID()
     @Published var selected: Int?
     @Published var search = "" { didSet { refreshFocus() } }
     @Published var allocated = true { didSet { refreshFocus() } }
@@ -840,6 +843,13 @@ struct FileTypeStats: Sendable {
         }
     }
     func open(_ n: DiskNode) { selected = n.id; if n.isDirectory { focus = n.id; search = "" } }
+    func inspectSearchResult(_ id: Int) {
+        guard let scan, scan.nodes.indices.contains(id) else { return }
+        let node = scan.nodes[id]
+        search = ""; focus = node.parent ?? 0; selected = id
+        openStorage(.explore)
+        storageInspectorRequest = UUID()
+    }
     func goUp() { guard let scan else { return }; focus = scan.nodes[focus].parent ?? 0; selected = nil }
     func reveal(_ id: Int) { if let scan { NSWorkspace.shared.activateFileViewerSelecting([scan.url(for: id)]) } }
     func copyPath(_ id: Int) { if let scan { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(scan.url(for: id).path, forType: .string) } }

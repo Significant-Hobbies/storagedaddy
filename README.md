@@ -19,6 +19,9 @@ sizes and timing are not a whole-disk benchmark.
 
 - A native SwiftUI and AppKit explorer with live scan results, treemap and
   other visual views, folder drill-down, sorting and an inspector.
+- Find Files: FinderSearch/fsearch fuzzy filename matching, recursive folder
+  scope and filters (`ext:pdf`, `size:>100mb`, `mtime:<7d`, `kind:dir`) over
+  existing scan metadata. Results link to the inspector and reviewed cleanup.
 - Developer Insights for caches, builds, packages, node_modules, Git data and
   recognized AI storage. Scan time, entries per second and sampled memory
   make the cost of scanning visible.
@@ -47,17 +50,19 @@ confirmation. The app menu also provides **Check for Updates…**.
 
 ## Build from source
 
-Requirements: macOS 14+, Xcode with Swift 6, Python 3, Git, and Rust 1.82+
-with Cargo for the Memory Pack helper. Dependencies are pinned with
-`Package.resolved` and `Vendor/MemoryPack/Cargo.lock`.
+Requirements: macOS 14+, Xcode with Swift 6, Python 3, Git, and current stable
+Rust with Cargo for the Memory Pack and FinderSearch helpers. Dependencies are
+pinned with `Package.resolved`, `Vendor/MemoryPack/Cargo.lock`, and
+`Vendor/FinderSearch/adapter/Cargo.lock`.
 
 ```sh
 git clone https://github.com/sarthakagrawal927/storagedaddy.git
 cd storagedaddy
 swift build -c release
 
-# Build the included, compatible archive helper.
+# Build the included archive and filename-search helpers.
 python3 scripts/prepare-memory-pack.py --source Vendor/MemoryPack --build
+python3 scripts/prepare-finder-search.py --build
 python3 scripts/package-app.py
 open artifacts/StorageDaddy.app
 ```
