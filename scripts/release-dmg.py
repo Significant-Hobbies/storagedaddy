@@ -58,7 +58,8 @@ def main():
     binary = ROOT / ".build/release/StorageDaddy"
     helper = ROOT / "artifacts/MemoryPackSupport/memory-pack"
     for source, destination in [(binary, app / "Contents/MacOS/StorageDaddy"),
-                                (helper, app / "Contents/Helpers/memory-pack")]:
+                                (helper, app / "Contents/Helpers/memory-pack"),
+                                (ROOT / "artifacts/FinderSearchSupport/storage-search", app / "Contents/Helpers/storage-search")]:
         shutil.copyfile(source, destination)
         destination.chmod(0o755)
     for name in ["StorageDaddy.png", "StorageDaddy.icns", "Welcome.png", "PageDoodles.png",
@@ -67,6 +68,9 @@ def main():
     for source, name in [("THIRD_PARTY_NOTICES.txt", "MemoryPack-THIRD_PARTY_NOTICES.txt"),
                          ("provenance.json", "MemoryPack-provenance.json")]:
         shutil.copyfile(ROOT / "artifacts/MemoryPackSupport" / source, app / "Contents/Resources" / name)
+    for source, name in [("THIRD_PARTY_NOTICES.txt", "FinderSearch-THIRD_PARTY_NOTICES.txt"),
+                         ("provenance.json", "FinderSearch-provenance.json")]:
+        shutil.copyfile(ROOT / "artifacts/FinderSearchSupport" / source, app / "Contents/Resources" / name)
     # The release must not inherit version/build from an untracked local app.
     info = {
         "CFBundleExecutable": "StorageDaddy", "CFBundleIdentifier": "local.fleet.storagedaddy",
@@ -81,7 +85,7 @@ def main():
     sparkle_support.embed(app)
     sparkle_support.sign(app, args.identity)
     # Stable identity; a distribution signature replaces the local ad-hoc one.
-    for target in [app / "Contents/Helpers/memory-pack", app]:
+    for target in [app / "Contents/Helpers/memory-pack", app / "Contents/Helpers/storage-search", app]:
         run("codesign", "--force", "--sign", args.identity, "--timestamp", "--options", "runtime", target)
     run("codesign", "--verify", "--deep", "--strict", app)
     (stage / "Applications").symlink_to("/Applications")
@@ -98,6 +102,7 @@ def main():
         "signed": True, "hardenedRuntime": True, "notarized": False,
         "stapled": False, "publicReady": False,
         "sourceBinarySha256": sha256(binary), "helperSha256": sha256(helper),
+        "searchHelperSha256": sha256(ROOT / "artifacts/FinderSearchSupport/storage-search"),
         "dmgSha256": sha256(dmg), "dmgBytes": dmg.stat().st_size,
         "sourceSha": args.source_sha,
     }

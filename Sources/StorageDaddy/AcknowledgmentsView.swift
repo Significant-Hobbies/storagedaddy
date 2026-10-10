@@ -14,6 +14,10 @@ struct AcknowledgmentsView: View {
                 if let notices = Bundle.main.url(forResource: "MemoryPack-THIRD_PARTY_NOTICES", withExtension: "txt") {
                     Button("Open Memory Pack license notices") { NSWorkspace.shared.open(notices) }.buttonStyle(StorageButtonStyle())
                 }
+                credit("FinderSearch & fsearch", "FinderSearch by zeusinsight provides the Swift transport pattern. Its MIT-licensed fsearch engine by Noah Dunnagan powers local fuzzy filename search over StorageDaddy scan metadata; it does not run a separate whole-disk daemon.", "https://github.com/zeusinsight/FinderSearch")
+                if let notices = Bundle.main.url(forResource: "FinderSearch-THIRD_PARTY_NOTICES", withExtension: "txt") {
+                    Button("Open FinderSearch license notices") { NSWorkspace.shared.open(notices) }.buttonStyle(StorageButtonStyle())
+                }
                 credit("Sparkle", "The open-source macOS updater checks for new versions and verifies signed downloads before installation. Sparkle uses a permissive license; its notices are bundled with the framework.", "https://sparkle-project.org/")
                 if let license = Bundle.main.url(forResource: "Sparkle-LICENSE", withExtension: "txt") {
                     Button("Open Sparkle license") { NSWorkspace.shared.open(license) }.buttonStyle(StorageButtonStyle())

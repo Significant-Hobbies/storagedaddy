@@ -43,3 +43,5 @@ Assets/StorageDaddy-doodle.*
 Assets/StorageDaddy-mascot*
 site/MEASUREMENT.md
 site/public/storagedaddy/assets/cleanup-review.png
+
+Vendor/FinderSearch/**/target/

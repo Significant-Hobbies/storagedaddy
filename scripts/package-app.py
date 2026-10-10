@@ -7,10 +7,13 @@ import plistlib
 import shutil
 import subprocess
 import sparkle_support
+from importlib import import_module
+finder_search = import_module("prepare-finder-search")
 
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument("binary", nargs="?", type=Path, default=root / ".build/release/StorageDaddy")
+parser.add_argument("--output", type=Path, default=root / "artifacts/StorageDaddy.app", help="Local development app bundle destination")
 parser.add_argument("--check", action="store_true", help="validate prepared support without changing the app bundle")
 parser.add_argument("--version", help="Explicit release version")
 parser.add_argument("--build", type=int, help="Explicit release build number")
@@ -45,11 +48,12 @@ for asset in icon_provenance.get("assets", []):
         raise SystemExit(f"Missing AI provider icon: {name}")
     if hashlib.sha256(path.read_bytes()).hexdigest() != asset.get("sha256"):
         raise SystemExit(f"AI provider icon does not match provenance: {name}")
+finder_support = finder_search.validate_support()
 if args.check:
     print(f"ready: {binary}")
     print(f"ready: {support}")
     raise SystemExit(0)
-bundle = root / "artifacts/StorageDaddy.app"
+bundle = args.output
 contents = bundle / "Contents"
 previous_plist = contents / "Info.plist"
 build_number = 1
@@ -68,7 +72,13 @@ pending_helper = contents / "Helpers/memory-pack.pending"
 shutil.copy2(support / "memory-pack", pending_helper)
 pending_helper.chmod(0o755)
 pending_helper.replace(contents / "Helpers/memory-pack")
+pending_search = contents / "Helpers/storage-search.pending"
+shutil.copy2(finder_support / "storage-search", pending_search)
+pending_search.chmod(0o755)
+pending_search.replace(contents / "Helpers/storage-search")
 (contents / "Resources").mkdir(exist_ok=True)
+for source, name in [("THIRD_PARTY_NOTICES.txt", "FinderSearch-THIRD_PARTY_NOTICES.txt"), ("provenance.json", "FinderSearch-provenance.json")]:
+    shutil.copy2(finder_support / source, contents / "Resources" / name)
 for name in ["StorageDaddy.png", "StorageDaddy.icns", "Welcome.png", "PageDoodles.png",
              "ClaudeOfficial.png", "ChatGPTOfficial.png", "ProviderIcons-provenance.json"]:
     shutil.copy2(root / "Assets" / name, contents / "Resources" / name)
@@ -87,6 +97,7 @@ with (contents / "Info.plist").open("wb") as f:
     }, f)
 sparkle_support.sign(bundle, "-", timestamp=False)
 subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(contents / "Helpers/memory-pack")], check=True)
+subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(contents / "Helpers/storage-search")], check=True)
 subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(bundle)], check=True)
 subprocess.run([
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",

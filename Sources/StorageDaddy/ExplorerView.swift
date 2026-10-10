@@ -97,6 +97,7 @@ struct ExplorerView: View {
         }
         .sheet(isPresented: Binding(get: { m.message != nil }, set: { if !$0 { m.message = nil } })) { StorageMessageSheet(message: m.message ?? "") }
         .sheet(isPresented: $m.showCleanup) { CleanupView().environmentObject(m).frame(width: 640, height: 490) }
+        .onChange(of: m.storageInspectorRequest) { _, _ in inspector = true }
         .onChange(of: m.busy) { _, busy in if busy { accessIntroductionSeen = true } }
         .onAppear {
             guard runsLaunchActions else { return }
@@ -132,6 +133,7 @@ struct ExplorerView: View {
         case .aiSessions: m.aiSessionsSection == .archive ? "Local conversation archive" : "Local AI history inventory"
         case .applications: "Installed applications"
         case .dashboard: "Capacity, cleanup and system details"
+        case .findFiles: "Filename search · Current scan metadata"
         case .acknowledgments: "About storagedaddy"
         default: m.progress
         }
@@ -170,6 +172,7 @@ struct ExplorerView: View {
             VStack(alignment: .leading, spacing: 5) {
                 navigationHeading("STORAGE")
                 navigationItem(.explore)
+                navigationItem(.findFiles)
                 navigationItem(.snapshots)
                 navigationItem(.duplicates)
                 navigationItem(.projects)
@@ -244,6 +247,7 @@ struct ExplorerView: View {
     }
     @ViewBuilder private var content: some View {
         switch m.workspace {
+        case .findFiles: FilenameSearchView()
         case .explore: storageWorkspace
         case .applications: ApplicationsView(applications: m.installedApplications)
         case .aiSessions:
