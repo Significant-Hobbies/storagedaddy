@@ -5,10 +5,12 @@
   "scripts": {
     "dev": "wrangler dev",
     "landing:build": "node scripts/build-landing.mjs",
+    "landing:optimize": "node scripts/optimize-landing.mjs",
     "check": "node --test worker.test.mjs analytics.test.mjs clarity.test.mjs landing.test.mjs && tsc --noEmit && wrangler deploy --dry-run",
     "deploy": "node check-release.mjs && npm run check && wrangler deploy --tag \"$(git rev-parse HEAD)\""
   },
   "devDependencies": {
+    "sharp": "0.35.5",
     "wrangler": "4.148.0",
     "typescript": "6.0.3"
   },

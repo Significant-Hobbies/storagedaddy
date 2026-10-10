@@ -103,10 +103,10 @@ test('all home and Astro assets, including CSS fonts and script chunks, are pack
       if (/\.(?:css|js)$/.test(path)) queue.push({ text: readFileSync(new URL(`.${path}`, root), 'utf8'), base: '/_astro/' });
     }
   }
-  assert.ok(visited.has('/home/icon.png'));
-  assert.ok(visited.has('/home/storage-explorer.png'));
-  assert.ok(visited.has('/home/ai-context.png'));
-  assert.ok(visited.has('/home/storagedaddy-scene-v1.webp'));
+  assert.ok(visited.has('/home/icon-44.webp'));
+  assert.ok(visited.has('/home/storage-explorer-1405.webp'));
+  assert.ok(visited.has('/home/ai-context-700.webp'));
+  assert.ok(visited.has('/home/storagedaddy-scene-1536.webp'));
 });
 
 test('Ask AI opens only the clicked assistant with the edited question and no form submission', () => {
@@ -133,4 +133,29 @@ test('Ask AI opens only the clicked assistant with the edited question and no fo
   const buttons = tags('button').filter((tag) => attr(tag, 'data-assistant-url'));
   assert.equal(buttons.length, 4);
   for (const button of buttons) assert.equal(attr(button, 'type'), 'button');
+});
+
+test('home uses responsive modern images and lazy loads below-fold details', () => {
+  const images = tags('img');
+  assert.equal(images.length, 5);
+  for (const image of images) {
+    assert.ok(attr(image, 'src').endsWith('.webp'));
+    assert.ok(attr(image, 'srcset'));
+    assert.ok(attr(image, 'sizes'));
+    assert.ok(Number(attr(image, 'width')) > 0);
+    assert.ok(Number(attr(image, 'height')) > 0);
+    for (const candidate of attr(image, 'srcset').split(', ')) {
+      assert.ok(existsSync(new URL(`.${candidate.split(' ')[0]}`, root)));
+    }
+  }
+  const hero = images.find((image) => attr(image, 'src').includes('storage-explorer-'));
+  assert.equal(attr(hero, 'loading'), 'eager');
+  assert.equal(attr(hero, 'fetchPriority'), 'high');
+  for (const name of ['storage-detail', 'ai-context']) {
+    assert.equal(attr(images.find((image) => attr(image, 'src').includes(name)), 'loading'), 'lazy');
+  }
+  assert.doesNotMatch(html, /background-image:url\(\/home\//);
+  const fonts = tags('link').filter((tag) => attr(tag, 'as') === 'font');
+  assert.equal(fonts.length, 1);
+  assert.match(attr(fonts[0], 'href'), /figtree-latin-normal.*\.woff2$/);
 });
