@@ -58,6 +58,8 @@ def main():
     # Assemble only known public inputs, never the artifacts directory or logs.
     binary = ROOT / ".build/release/StorageDaddy"
     swiftpm_resources.embed_ui_resources(binary, app)
+    mac_tools_notices = "\n\n".join((ROOT / "Vendor/RemoveMacAI" / name).read_text() for name in ["LICENSE", "THIRD-PARTY-NOTICES.md", "UPSTREAM.md"])
+    (app / "Contents/Resources" / "RemoveMacAI-THIRD_PARTY_NOTICES.txt").write_text(mac_tools_notices)
     helper = ROOT / "artifacts/MemoryPackSupport/memory-pack"
     for source, destination in [(binary, app / "Contents/MacOS/StorageDaddy"),
                                 (helper, app / "Contents/Helpers/memory-pack"),

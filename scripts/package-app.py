@@ -82,6 +82,8 @@ pending_search.replace(contents / "Helpers/storage-search")
 for source, name in [("THIRD_PARTY_NOTICES.txt", "FinderSearch-THIRD_PARTY_NOTICES.txt"), ("provenance.json", "FinderSearch-provenance.json")]:
     shutil.copy2(finder_support / source, contents / "Resources" / name)
 swiftpm_resources.embed_ui_resources(binary, bundle)
+mac_tools_notices = "\n\n".join((root / "Vendor/RemoveMacAI" / name).read_text() for name in ["LICENSE", "THIRD-PARTY-NOTICES.md", "UPSTREAM.md"])
+(contents / "Resources" / "RemoveMacAI-THIRD_PARTY_NOTICES.txt").write_text(mac_tools_notices)
 for name in ["StorageDaddy.png", "StorageDaddy.icns", "Welcome.png", "PageDoodles.png",
              "ClaudeOfficial.png", "ChatGPTOfficial.png", "ProviderIcons-provenance.json"]:
     shutil.copy2(root / "Assets" / name, contents / "Resources" / name)

@@ -48,6 +48,8 @@ Access is optional and helps with protected locations.
 Automatic update checks are enabled by default. Installing an update requires
 confirmation. The app menu also provides **Check for Updates…**.
 
+Mac Controls embeds the MIT-licensed [RemoveMacAI](https://github.com/omlahore/RemoveMacAI) core for Apple Intelligence, privacy, Finder, Dock, typing, background items and storage cleanup. Changes are reviewed before applying; StorageDaddy owns a separate configuration profile and undo journal. Mac Controls requires macOS 26 or newer. Simulator and Time Machine snapshot removal is permanent and explicitly confirmed.
+
 ## Build from source
 
 Requirements: macOS 14+, Xcode with Swift 6, Python 3, Git, and current stable

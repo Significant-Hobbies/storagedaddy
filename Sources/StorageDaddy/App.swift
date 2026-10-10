@@ -1,3 +1,5 @@
+import Combine
+@preconcurrency import MacTools
 import SwiftUI
 import AppKit
 import DiskCore
@@ -111,11 +113,11 @@ private struct StorageMenu: View {
 }
 
 enum Workspace: String, CaseIterable, Identifiable {
-    case findFiles = "Find Files", aiSessions = "AI Sessions", developer = "Developer Insights", explore = "Explore", applications = "Applications", snapshots = "Snapshots", duplicates = "Duplicates", projects = "Projects", appData = "App Data", cleanup = "Cleanup", acknowledgments = "Acknowledgments", dashboard = "Dashboard"
+    case macControls = "Mac Controls", findFiles = "Find Files", aiSessions = "AI Sessions", developer = "Developer Insights", explore = "Explore", applications = "Applications", snapshots = "Snapshots", duplicates = "Duplicates", projects = "Projects", appData = "App Data", cleanup = "Cleanup", acknowledgments = "Acknowledgments", dashboard = "Dashboard"
     var id: String { rawValue }
     var title: String { switch self { case .explore: "Storage"; case .cleanup: "Review Cleanup"; case .snapshots: "History"; default: rawValue } }
     var requiresScan: Bool { [.findFiles, .developer, .cleanup, .duplicates, .projects, .appData].contains(self) }
-    var icon: String { switch self { case .findFiles: "magnifyingglass"; case .aiSessions: "bubble.left.and.text.bubble.right.fill"; case .developer: "terminal"; case .explore: "internaldrive.fill"; case .applications: "app.badge"; case .snapshots: "clock.arrow.circlepath"; case .duplicates: "doc.on.doc"; case .projects: "folder.badge.gearshape"; case .appData: "questionmark.folder"; case .cleanup: "trash"; case .acknowledgments: "heart.text.square"; case .dashboard: "speedometer" } }
+    var icon: String { switch self { case .macControls: "slider.horizontal.3"; case .findFiles: "magnifyingglass"; case .aiSessions: "bubble.left.and.text.bubble.right.fill"; case .developer: "terminal"; case .explore: "internaldrive.fill"; case .applications: "app.badge"; case .snapshots: "clock.arrow.circlepath"; case .duplicates: "doc.on.doc"; case .projects: "folder.badge.gearshape"; case .appData: "questionmark.folder"; case .cleanup: "trash"; case .acknowledgments: "heart.text.square"; case .dashboard: "speedometer" } }
 }
 
 enum StorageSection: String, CaseIterable, Identifiable {
@@ -253,6 +255,7 @@ struct FileTypeStats: Sendable {
     @Published private(set) var excludedFolders: [String] = UserDefaults.standard.stringArray(forKey: "excludedFolders") ?? [] {
         didSet {
             UserDefaults.standard.set(excludedFolders, forKey: "excludedFolders")
+            macTools?.setExcludedFolders(excludedFolders)
             // Existing results remain historical; clear prior cleanup approvals.
             staged.removeAll()
             incompleteCleanup.removeAll()
@@ -264,13 +267,13 @@ struct FileTypeStats: Sendable {
     @Published private(set) var exclusionResultsStale = false
 
     func addExcludedFolders(_ urls: [URL]) {
-        guard !busy else { return }
+        guard macTools?.isBusy != true, !busy else { return }
         let paths = FolderExclusions(paths: excludedFolders + urls.map { $0.standardizedFileURL.path }).paths
         if paths != excludedFolders { excludedFolders = paths }
     }
 
     func removeExcludedFolder(_ path: String) {
-        guard !busy else { return }
+        guard macTools?.isBusy != true, !busy else { return }
         excludedFolders.removeAll { $0 == path }
     }
 
@@ -390,7 +393,20 @@ struct FileTypeStats: Sendable {
         return lastScanSummary
     }
     /// Scans, reviewed cleanup, snapshot saves and conversation exports warn before quitting.
+    private var macToolsSubscription: AnyCancellable?
+    @Published var macTools: MacToolsSession?
+    func macToolsSession() -> MacToolsSession {
+        if let macTools { return macTools }
+        let session = MacToolsSession()
+        macTools = session
+        session.setExcludedFolders(excludedFolders)
+        macToolsSubscription = session.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor [weak self] in self?.objectWillChange.send() }
+        }
+        return session
+    }
     var activeWorkDescription: String? {
+        if macTools?.isBusy == true { return "A Mac Controls operation is still running." }
         if isScanning { return "A storage scan is still running." }
         if busy || snapshotBusy { return "A storage operation is still running." }
         if conversationArchive.busy { return "A conversation export is still running." }
@@ -679,7 +695,7 @@ struct FileTypeStats: Sendable {
     }
     func rescan() { if let scan { start(URL(fileURLWithPath: scan.rootPath), allowProtectedFolder: lastScanAllowedProtectedFolder) } }
     func start(_ url: URL, destination: Workspace? = nil, allowProtectedFolder: Bool = false, notifyOnCompletion: Bool = true) {
-        guard !busy else { return }
+        guard !busy, macTools?.isBusy != true else { return }
         lastScanAllowedProtectedFolder = allowProtectedFolder
         let protectedFolders = allowProtectedFolder ? [] : AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
         promptAvoidanceFolders = protectedFolders
@@ -914,7 +930,7 @@ struct FileTypeStats: Sendable {
         return nil
     }
     func stage(_ id: Int) {
-        guard let scan, !busy, !monitoring, scan.nodes.indices.contains(id) else { return }
+        guard let scan, !busy, macTools?.isBusy != true, !monitoring, scan.nodes.indices.contains(id) else { return }
         if let provider = sessionProvider(for: id) {
             let alert = NSAlert()
             alert.messageText = "Keep the conversation before cleaning up?"
@@ -1081,7 +1097,7 @@ struct FileTypeStats: Sendable {
     }
 
     func trashStaged() {
-        guard let scan, !busy, !monitoring, !staged.isEmpty else { return }
+        guard let scan, !busy, macTools?.isBusy != true, !monitoring, !staged.isEmpty else { return }
         let ids = staged.sorted()
         let version = scanVersion
         let acknowledgements = incompleteCleanup.filter { staged.contains($0.key) }
