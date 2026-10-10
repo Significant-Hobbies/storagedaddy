@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import compat from '../src/content/head-compat.json' with { type: 'json' };
+import { optimizeLanding } from '../../scripts/optimize-landing.mjs';
 
 const escapeHtml = (value) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll("'", '&#x27;');
 
@@ -33,4 +34,5 @@ export async function finalizeLanding(dir) {
     html = html.replace(escaped, `<a href="${escapeHtml(href)}">${escaped}</a>`);
   }
   await writeFile(index, html);
+  await optimizeLanding(dir);
 }
