@@ -1,4 +1,5 @@
 import SwiftUI
+import SaaSMakerUI
 import AppKit
 import QuickLookUI
 import DiskCore
@@ -21,12 +22,12 @@ struct ExplorerView: View {
         } detail: {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    if m.busy { HStack { ProgressView().controlSize(.small); Text(m.progress).lineLimit(1); Spacer(); Button("Cancel") { m.cancel() } }.padding(12).background(Color.black) }
+                    if m.busy { HStack { ProgressView().controlSize(.small); Text(m.progress).lineLimit(1); Spacer(); Button("cancel") { m.cancel() }.accessibilityLabel("Cancel") }.padding(12).background(Color.black) }
                     if !m.busy, m.exclusionResultsStale {
                         HStack {
                             Label("Exclusions changed. Rescan to update these results.", systemImage: "folder.badge.minus")
                             Spacer()
-                            Button("Rescan", action: m.rescan)
+                            Button("rescan", action: m.rescan).accessibilityLabel("Rescan")
                         }.font(.callout).foregroundStyle(Tints.secondaryText).padding(12)
                     }
                     if !m.busy, let path = m.cleanupRefreshPaths.first {
@@ -38,7 +39,7 @@ struct ExplorerView: View {
                                     .font(.caption).foregroundStyle(Tints.secondaryText).lineLimit(2)
                             }
                             Spacer(minLength: 8)
-                            Button("Rescan now", action: m.rescanAfterCleanup)
+                            Button("rescan now", action: m.rescanAfterCleanup).accessibilityLabel("Rescan now")
                                 .disabled(!m.staged.isEmpty)
                                 .help(m.staged.isEmpty ? "Refresh this location" : "Finish or remove your remaining cleanup selections before rescanning.")
                         }.padding(12).overlay(Rectangle().stroke(Tints.mint.opacity(0.25)))
@@ -77,8 +78,8 @@ struct ExplorerView: View {
                 }
             }.background(Color.black)
         }
-        .preferredColorScheme(.dark)
-        .tint(Tints.mint)
+        .font(.custom(DaddyTheme.palette.sansFont, size: 13))
+        .smTheme(DaddyTheme.palette)
         .buttonStyle(StorageButtonStyle())
         .toolbar(.hidden, for: .windowToolbar)
         .sheet(isPresented: $choosingDisk) { DiskPickerView(isPresented: $choosingDisk).environmentObject(m).frame(width: 620, height: 560) }
@@ -92,7 +93,7 @@ struct ExplorerView: View {
                 Text("Yours free forever, including all future versions.").font(.callout).foregroundStyle(Tints.mint)
                 Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
-                Button("Done") { m.showAbout = false }.buttonStyle(StorageButtonStyle(prominent: true))
+                Button("done") { m.showAbout = false }.accessibilityLabel("Done").buttonStyle(StorageButtonStyle(prominent: true))
             }.padding(32).frame(width: 340).background(Color.black)
         }
         .sheet(isPresented: Binding(get: { m.message != nil }, set: { if !$0 { m.message = nil } })) { StorageMessageSheet(message: m.message ?? "") }
@@ -166,8 +167,8 @@ struct ExplorerView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 9) { BrandMark().frame(width: 24, height: 24); Text("storagedaddy").font(.system(size: 17, weight: .bold, design: .rounded)).tracking(-0.6).lineLimit(1).minimumScaleFactor(0.8) }.padding(.top, 20).padding(.bottom, 10)
             VStack(spacing: 8) {
-                Button { choosingDisk = true } label: { Label(m.scan == nil ? "Start Scan…" : "New Scan…", systemImage: "internaldrive.fill").frame(maxWidth: .infinity).frame(height: 28) }.buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy)
-                Button(action: m.chooseFolder) { Label("Scan Folder…", systemImage: "folder.badge.plus").frame(maxWidth: .infinity).frame(height: 28) }.buttonStyle(StorageButtonStyle()).disabled(m.busy)
+                Button { choosingDisk = true } label: { Label(m.scan == nil ? "start scan…" : "new scan…", systemImage: "internaldrive.fill").frame(maxWidth: .infinity).frame(height: 28) }.buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy).accessibilityLabel(m.scan == nil ? "Start Scan…" : "New Scan…")
+                Button(action: m.chooseFolder) { Label("scan folder…", systemImage: "folder.badge.plus").frame(maxWidth: .infinity).frame(height: 28) }.buttonStyle(StorageButtonStyle()).disabled(m.busy).accessibilityLabel("Scan Folder…")
             }
             VStack(alignment: .leading, spacing: 5) {
                 navigationHeading("STORAGE")
@@ -185,7 +186,7 @@ struct ExplorerView: View {
             Spacer(minLength: 12)
             if let scan = m.scan, let root = scan.nodes.first {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("CURRENT SCAN").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
+                    Text("current scan").accessibilityLabel("CURRENT SCAN").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
                     Text(StorageLabels.name(root)).font(.callout).lineLimit(1).help(scan.rootPath)
                     Text("\(DiskFormat.bytes(root.allocatedBytes)) on disk").font(.callout).monospacedDigit()
                     if scan.skipped > 0 {
@@ -197,7 +198,7 @@ struct ExplorerView: View {
                 }.padding(.vertical, 12)
             }
             SettingsLink {
-                Label("Settings", systemImage: "gearshape")
+                Label("settings", systemImage: "gearshape").accessibilityLabel("Settings")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(StorageButtonStyle())
@@ -211,7 +212,7 @@ struct ExplorerView: View {
         .background(Color.black)
     }
     private func navigationHeading(_ title: String) -> some View {
-        Text(title).font(.system(size: 10, weight: .semibold)).tracking(1)
+        Text(title.lowercased()).font(.custom(DaddyTheme.palette.sansFont, size: 10).weight(.semibold))
             .foregroundStyle(Tints.secondaryText).padding(.horizontal, 10).padding(.vertical, 4)
     }
     private func navigationItem(_ item: Workspace) -> some View {
@@ -223,7 +224,7 @@ struct ExplorerView: View {
         } label: {
             HStack {
                 Image(systemName: item.icon).frame(width: 20)
-                Text(item.title)
+                Text(item.title.lowercased()).accessibilityLabel(item.title)
                 Spacer()
                 if item == .cleanup, !m.staged.isEmpty { Text("\(m.staged.count)").monospacedDigit() }
             }
@@ -269,10 +270,10 @@ struct ExplorerView: View {
         case .projects:
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Button("Refresh project evidence", action: m.reviewProjects)
+                    Button("refresh project evidence", action: m.reviewProjects).accessibilityLabel("Refresh project evidence")
                         .buttonStyle(StorageButtonStyle()).disabled(m.busy || m.projectReviewStatus == .loading)
                     if m.projectReviewStatus == .loading {
-                        Button("Cancel review", action: m.cancelProjectReview).buttonStyle(StorageButtonStyle())
+                        Button("cancel review", action: m.cancelProjectReview).accessibilityLabel("Cancel review").buttonStyle(StorageButtonStyle())
                     }
                     ProjectPurgeView(records: m.projectReviewRecords, scan: m.scan, status: m.projectReviewStatus,
                         onRecoveryPlan: m.recordProjectRecoveryPlan, onRetry: m.reviewProjects, onStageArtifactIDs: m.stageProjectArtifacts)
@@ -282,11 +283,11 @@ struct ExplorerView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
-                        Button("Refresh app reference", action: m.refreshAppDataReview)
+                        Button("refresh app reference", action: m.refreshAppDataReview).accessibilityLabel("Refresh app reference")
                             .buttonStyle(StorageButtonStyle()).disabled(m.busy || m.appDataReviewLoading)
                         if m.appDataReviewLoading {
                             ProgressView().controlSize(.small); Text("Reviewing app metadata…")
-                            Button("Cancel", action: m.cancelAppDataReview).buttonStyle(StorageButtonStyle())
+                            Button("cancel", action: m.cancelAppDataReview).accessibilityLabel("Cancel").buttonStyle(StorageButtonStyle())
                         }
                     }
                     Text("Reference covers visible apps in standard application folders. Apps installed elsewhere, ownership and removal safety remain unknown.")
@@ -312,7 +313,7 @@ struct ExplorerView: View {
                     } label: {
                         HStack(spacing: 7) {
                             Image(systemName: section.icon)
-                            Text(section.rawValue)
+                            Text(section.rawValue.lowercased()).accessibilityLabel(section.rawValue)
                             if section == .cleanup, !m.staged.isEmpty {
                                 Text(m.staged.count.formatted()).monospacedDigit()
                             }
@@ -347,9 +348,10 @@ struct ExplorerView: View {
                     }
                     Spacer()
                     if m.snapshotBusy { ProgressView().controlSize(.small) }
-                    Button(m.snapshotAlreadySaved ? "Snapshot Saved" : "Save Snapshot", systemImage: m.snapshotAlreadySaved ? "checkmark" : "square.and.arrow.down") {
+                    Button(m.snapshotAlreadySaved ? "snapshot saved" : "save snapshot", systemImage: m.snapshotAlreadySaved ? "checkmark" : "square.and.arrow.down") {
                         m.saveSnapshot()
                     }
+                    .accessibilityLabel(m.snapshotAlreadySaved ? "Snapshot Saved" : "Save Snapshot")
                     .buttonStyle(StorageButtonStyle())
                     .disabled(m.busy || m.snapshotBusy || m.snapshotAlreadySaved)
                     .help("Save this scan’s location and top-level sizes to History on this Mac. File contents are not copied.")
@@ -403,10 +405,10 @@ struct StorageExplorePanel: View {
               }
                 if !compact { Spacer() }
               HStack {
-                Button(action: m.rescan) { Label("Rescan", systemImage: "arrow.clockwise") }
+                Button(action: m.rescan) { Label("rescan", systemImage: "arrow.clockwise").accessibilityLabel("Rescan") }
                     .buttonStyle(StorageButtonStyle())
                     .disabled(m.scan == nil || m.busy)
-                Button { inspector.toggle() } label: { Label("Inspector", systemImage: "sidebar.right") }
+                Button { inspector.toggle() } label: { Label("inspector", systemImage: "sidebar.right").accessibilityLabel("Inspector") }
                     .buttonStyle(StorageButtonStyle(prominent: inspector))
                     .help(inspector ? "Hide Inspector" : "Show Inspector")
                     .accessibilityAddTraits(inspector ? .isSelected : [])
@@ -434,7 +436,7 @@ struct StorageExplorePanel: View {
                     .accessibilityLabel("View: \(m.mode.rawValue)")
                 if ![.folders, .top, .age, .types].contains(m.mode) {
                     Picker("Tile area", selection: $m.mapMeasure) {
-                        ForEach(MapMeasure.allCases) { measure in Text(measure.rawValue).tag(measure) }
+                        ForEach(MapMeasure.allCases) { measure in Text(measure.rawValue.lowercased()).accessibilityLabel(measure.rawValue).tag(measure) }
                     }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 190)
                 }
               }
@@ -443,10 +445,10 @@ struct StorageExplorePanel: View {
                     Button { explainingSizes = true } label: { Image(systemName: "info.circle") }
                         .accessibilityLabel("Explain disk usage, scan coverage and file sizes")
                         .popover(isPresented: $explainingSizes) { ScrollView { SizeExplanationView(accounting: m.scanStorageAccounting, scan: m.scan).padding(22) }.frame(width: 420, height: 480).background(Color.black) }
-                    Button("On disk") { m.allocated = true }
+                    Button("on disk") { m.allocated = true }.accessibilityLabel("On disk")
                         .buttonStyle(StorageButtonStyle(prominent: m.allocated))
                         .accessibilityAddTraits(m.allocated ? .isSelected : [])
-                    Button("Logical") { m.allocated = false }
+                    Button("logical") { m.allocated = false }.accessibilityLabel("Logical")
                         .buttonStyle(StorageButtonStyle(prominent: !m.allocated))
                         .accessibilityAddTraits(!m.allocated ? .isSelected : [])
                 }
@@ -570,16 +572,16 @@ struct InspectorView: View {
                             .id("\(scan.started.timeIntervalSince1970):\(scan.rootPath):\(n.id)")
                     }
                     Divider().overlay(Tints.secondaryText.opacity(0.18))
-                    Button("Reveal in Finder", systemImage: "arrow.up.forward.square") { m.reveal(n.id) }
-                    if !n.isDirectory { Button("Quick Look", systemImage: "eye") { preview = PreviewSelection(url: scan.url(for: n.id)) } }
-                    Button("Copy Path", systemImage: "doc.on.doc") { m.copyPath(n.id) }
+                    Button("reveal in finder", systemImage: "arrow.up.forward.square") { m.reveal(n.id) }.accessibilityLabel("Reveal in Finder")
+                    if !n.isDirectory { Button("quick look", systemImage: "eye") { preview = PreviewSelection(url: scan.url(for: n.id)) }.accessibilityLabel("Quick Look") }
+                    Button("copy path", systemImage: "doc.on.doc") { m.copyPath(n.id) }.accessibilityLabel("Copy Path")
                     if n.isDirectory {
-                        Button("Explain This Folder", systemImage: "sparkles") { m.explainFolder(n.id) }
+                        Button("explain this folder", systemImage: "sparkles") { m.explainFolder(n.id) }.accessibilityLabel("Explain This Folder")
                             .help("Ask your local Claude or Codex install to explain this folder. Its path, scan measurements and detected folder context are sent.")
-                        Button("Copy Ask AI Prompt", systemImage: "doc.on.doc") { m.copyFolderPrompt(n.id) }
+                        Button("copy ask ai prompt", systemImage: "doc.on.doc") { m.copyFolderPrompt(n.id) }.accessibilityLabel("Copy Ask AI Prompt")
                             .help("Copy a ready-to-paste prompt that asks an AI assistant to explain this folder. Nothing is uploaded.")
                     }
-                    if n.isDirectory { Button("Open Folder", systemImage: "folder") { m.open(n) } }
+                    if n.isDirectory { Button("open folder", systemImage: "folder") { m.open(n) }.accessibilityLabel("Open Folder") }
                     CleanupFlag(category: m.cleanupCategory(n.id))
                     if let assessment = FolderArchetypes.assess(scan, folderID: n.id, category: m.cleanupCategory(n.id)) {
                         Text(assessment.explanation).font(.caption).foregroundStyle(Tints.secondaryText).textSelection(.enabled)
@@ -591,16 +593,16 @@ struct InspectorView: View {
                     if scan.skipped > 0 {
                         Text("Some locations were skipped. Add to Cleanup checks this item separately and asks you to review any contents it cannot verify.")
                             .font(.caption).foregroundStyle(Tints.yellow)
-                        Button("Scan This Folder", systemImage: "arrow.clockwise") {
+                        Button("scan this folder", systemImage: "arrow.clockwise") {
                             m.start(n.isDirectory ? scan.url(for: n.id) : scan.url(for: n.id).deletingLastPathComponent())
-                        }.disabled(m.busy)
+                        }.accessibilityLabel("Scan This Folder").disabled(m.busy)
                     } else if n.parent == nil {
                         Text("The scan root is protected. Select an item inside this folder to review cleanup.").font(.caption).foregroundStyle(Tints.secondaryText)
                     } else if m.monitoring {
                         Text("Stop monitoring before staging cleanup.").font(.caption).foregroundStyle(Tints.secondaryText)
                     }
                     if !n.children.isEmpty {
-                        Divider().overlay(Tints.secondaryText.opacity(0.18)); Text("LARGEST INSIDE").font(.caption).foregroundStyle(Tints.secondaryText)
+                        Divider().overlay(Tints.secondaryText.opacity(0.18)); Text("largest inside").accessibilityLabel("LARGEST INSIDE").font(.caption).foregroundStyle(Tints.secondaryText)
                         ForEach(Array(n.children.map { scan.nodes[$0] }.sorted { m.bytes($0) > m.bytes($1) }.prefix(8))) { child in
                             Button { m.selected = child.id } label: { HStack { Text(StorageLabels.name(child)).lineLimit(1); Spacer(); Text(StorageLabels.size(child, allocated: m.allocated)) }.font(.caption) }.buttonStyle(.plain).contextMenu { StorageItemMenu(node: child) }
                         }
@@ -615,13 +617,13 @@ struct InspectorView: View {
                 HStack {
                     Text(item.url.lastPathComponent).font(.headline).lineLimit(1)
                     Spacer()
-                    Button("Done") { preview = nil }.keyboardShortcut(.cancelAction)
+                    Button("done") { preview = nil }.accessibilityLabel("Done").keyboardShortcut(.cancelAction)
                 }.padding(16)
                 NativePreview(url: item.url)
                 HStack {
                     Text("No preview? Open its location in Finder.").font(.caption).foregroundStyle(Tints.secondaryText)
                     Spacer()
-                    Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([item.url]) }
+                    Button("reveal in finder") { NSWorkspace.shared.activateFileViewerSelecting([item.url]) }.accessibilityLabel("Reveal in Finder")
                 }.padding(16)
             }
             .frame(width: 700, height: 540)

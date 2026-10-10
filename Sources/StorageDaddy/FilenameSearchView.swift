@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import SaaSMakerUI
 import DiskCore
 
 protocol FilenameSearchService: Sendable {
@@ -74,7 +75,7 @@ struct FilenameSearchView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Find Files").font(.largeTitle.weight(.semibold))
+            SMSectionHeader("Find Files", size: 28).accessibilityLabel("Find Files")
             Text("Fuzzy filename search across your scan, powered by FinderSearch. Results use scan metadata; rescan to include changes.")
                 .font(.callout).foregroundStyle(Tints.secondaryText)
             HStack(spacing: 10) {

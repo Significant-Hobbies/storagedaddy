@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sparkle_support
 from importlib import import_module
+import swiftpm_resources
 finder_search = import_module("prepare-finder-search")
 
 root = Path(__file__).resolve().parents[1]
@@ -26,6 +27,7 @@ binary = args.binary
 update_configuration = sparkle_support.configuration()
 if not binary.is_file():
     raise SystemExit(f"Build the executable first: {binary}")
+swiftpm_resources.ui_resource_bundle(binary)
 support = root / "artifacts/MemoryPackSupport"
 required_support = [support / "memory-pack", support / "THIRD_PARTY_NOTICES.txt", support / "provenance.json", support / "cargo-metadata.json"]
 missing = [path for path in required_support if not path.is_file()]
@@ -79,6 +81,7 @@ pending_search.replace(contents / "Helpers/storage-search")
 (contents / "Resources").mkdir(exist_ok=True)
 for source, name in [("THIRD_PARTY_NOTICES.txt", "FinderSearch-THIRD_PARTY_NOTICES.txt"), ("provenance.json", "FinderSearch-provenance.json")]:
     shutil.copy2(finder_support / source, contents / "Resources" / name)
+swiftpm_resources.embed_ui_resources(binary, bundle)
 for name in ["StorageDaddy.png", "StorageDaddy.icns", "Welcome.png", "PageDoodles.png",
              "ClaudeOfficial.png", "ChatGPTOfficial.png", "ProviderIcons-provenance.json"]:
     shutil.copy2(root / "Assets" / name, contents / "Resources" / name)

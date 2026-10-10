@@ -1,6 +1,7 @@
 import AppKit
 import DiskCore
 import SwiftUI
+import SaaSMakerUI
 
 enum AISessionsSection: String, CaseIterable {
     case sessions = "Sessions"
@@ -68,7 +69,7 @@ struct AISessionsView: View {
             header
             HStack(spacing: 10) {
                 ForEach(AISessionsSection.allCases, id: \.self) { section in
-                    Button(section.rawValue) { m.aiSessionsSection = section }
+                    Button(section.rawValue.lowercased()) { m.aiSessionsSection = section }.accessibilityLabel(section.rawValue)
                         .buttonStyle(StorageButtonStyle(prominent: m.aiSessionsSection == section))
                 }
                 Spacer()
@@ -89,18 +90,18 @@ struct AISessionsView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
-                Text("LOCAL AI HISTORY")
+                Text("local ai history").accessibilityLabel("LOCAL AI HISTORY")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .tracking(2)
                     .foregroundStyle(Tints.mint)
-                Text("AI Sessions").font(.largeTitle.weight(.semibold))
+                SMSectionHeader("AI Sessions", size: 28).accessibilityLabel("AI Sessions")
                 Text("See how much space Claude and Codex history files use, without running a disk scan.")
                     .foregroundStyle(Tints.secondaryText)
             }
             DoodleArt(topic: .agents).frame(width: 94, height: 94)
             Spacer()
             if model.loading { ProgressView().controlSize(.small) }
-            Button("Refresh", systemImage: "arrow.clockwise") { m.requestAISessionsRefresh() }
+            Button("refresh", systemImage: "arrow.clockwise") { m.requestAISessionsRefresh() }.accessibilityLabel("Refresh")
                 .disabled(model.loading)
         }
     }
@@ -111,7 +112,7 @@ struct AISessionsView: View {
         } else if let error = model.errorMessage, model.report == nil {
             VStack(spacing: 14) {
                 StorageEmptyView("Session inventory needs attention", systemImage: "exclamationmark.bubble", description: Text(error))
-                Button("Try Again", systemImage: "arrow.clockwise") { m.requestAISessionsRefresh() }
+                Button("try again", systemImage: "arrow.clockwise") { m.requestAISessionsRefresh() }.accessibilityLabel("Try Again")
                     .buttonStyle(StorageButtonStyle(prominent: true))
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let report = model.report {
@@ -134,7 +135,7 @@ struct AISessionsView: View {
                             : "Try another project, provider, session ID or filename.")
                     )
                     if !report.sessions.isEmpty, hasFilters {
-                        Button("Clear filters", systemImage: "xmark.circle") { clearFilters() }
+                        Button("clear filters", systemImage: "xmark.circle") { clearFilters() }.accessibilityLabel("Clear filters")
                             .buttonStyle(StorageButtonStyle(prominent: true))
                     }
                 } else {
@@ -172,7 +173,7 @@ struct AISessionsView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+        .storagePanel()
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.24)))
     }
 
@@ -186,7 +187,7 @@ struct AISessionsView: View {
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Tints.mint.opacity(0.38)))
                     .accessibilityLabel("Search AI sessions by project, provider, session ID or filename")
                 Text("Provider").font(.caption).foregroundStyle(Tints.secondaryText)
-                Button("All") { provider = nil }.buttonStyle(StorageButtonStyle(prominent: provider == nil))
+                Button("all") { provider = nil }.accessibilityLabel("All").buttonStyle(StorageButtonStyle(prominent: provider == nil))
                 ForEach(AISessionProvider.allCases, id: \.self) { item in
                     Button { provider = item } label: {
                         HStack(spacing: 6) {
@@ -197,7 +198,7 @@ struct AISessionsView: View {
                         .buttonStyle(StorageButtonStyle(prominent: provider == item))
                 }
                 if hasFilters {
-                    Button("Clear filters", systemImage: "xmark.circle") { clearFilters() }
+                    Button("clear filters", systemImage: "xmark.circle") { clearFilters() }.accessibilityLabel("Clear filters")
                         .buttonStyle(StorageButtonStyle())
                 }
                 Spacer()
@@ -205,13 +206,13 @@ struct AISessionsView: View {
             HStack(spacing: 10) {
                 Text("Sort by").font(.caption).foregroundStyle(Tints.secondaryText)
                 ForEach(AISessionSort.allCases, id: \.self) { item in
-                    Button(item.rawValue) { sort = item }
+                    Button(item.rawValue.lowercased()) { sort = item }.accessibilityLabel(item.rawValue)
                         .buttonStyle(StorageButtonStyle(prominent: sort == item))
                 }
                 Spacer()
                 Text("Showing \(matchingRows.count.formatted()) · \(DiskFormat.bytes(matchingRows.reduce(0) { $0 + $1.allocatedBytes }))")
                     .foregroundStyle(Tints.secondaryText)
-                Button("Archive Older…", systemImage: "archivebox") { m.openConversationArchive() }
+                Button("archive older…", systemImage: "archivebox") { m.openConversationArchive() }.accessibilityLabel("Archive Older…")
                     .buttonStyle(StorageButtonStyle(prominent: true))
             }
         }
@@ -263,7 +264,7 @@ struct AISessionsView: View {
                 Image(systemName: "exclamationmark.triangle")
             }
             Spacer()
-            Button("View coverage") { showCoverage = true }
+            Button("view coverage") { showCoverage = true }.accessibilityLabel("View coverage")
                 .font(.caption.weight(.semibold))
         }
         .font(.caption)
@@ -299,7 +300,7 @@ struct AISessionsView: View {
             Spacer()
             HStack(spacing: 6) {
                 Text(session.provider.rawValue)
-                if session.isArchived { Text("ARCHIVED BY CODEX").foregroundStyle(Tints.yellow) }
+                if session.isArchived { Text("archived by codex").accessibilityLabel("ARCHIVED BY CODEX").foregroundStyle(Tints.yellow) }
             }.font(.caption.weight(.semibold)).frame(width: 125, alignment: .leading)
             VStack(alignment: .trailing, spacing: 4) {
                 Text(session.modified, style: .relative)
@@ -318,13 +319,13 @@ struct AISessionsView: View {
             .accessibilityLabel("Reveal \(projectName(session)) session in Finder")
         }
         .contextMenu {
-            Button("Copy session identifier") {
+            Button("copy session identifier") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(session.historyIdentifier, forType: .string)
-            }
-            Button("Reveal in Finder") {
+            }.accessibilityLabel("Copy session identifier")
+            Button("reveal in finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: session.path)])
-            }
+            }.accessibilityLabel("Reveal in Finder")
         }
         .padding(.vertical, 11)
         .padding(.horizontal, 4)
@@ -350,16 +351,16 @@ struct AISessionsView: View {
             Spacer()
             Text("\(report.coverage.visitedEntries.formatted()) entries checked · \(String(format: "%.2f", report.elapsed)) s")
                 .foregroundStyle(Tints.secondaryText)
-            Button("Coverage", systemImage: "info.circle") { showCoverage = true }
+            Button("coverage", systemImage: "info.circle") { showCoverage = true }.accessibilityLabel("Coverage")
         }.font(.caption)
     }
 
     private var coverageSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("AI history coverage").font(.title2.bold())
+                SMSectionHeader("AI history coverage", size: 22).accessibilityLabel("AI history coverage")
                 Spacer()
-                Button("Done") { showCoverage = false }
+                Button("done") { showCoverage = false }.accessibilityLabel("Done")
             }
             Text("storagedaddy inventories regular JSONL transcript files in the standard local Claude and Codex folders. Claude totals include nested subagent transcripts. It does not display conversation text, upload data, alter files, or require a storage scan.")
                 .foregroundStyle(Tints.secondaryText)
