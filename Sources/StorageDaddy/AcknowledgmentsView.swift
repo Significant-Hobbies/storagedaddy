@@ -19,6 +19,10 @@ struct AcknowledgmentsView: View {
                 if let notices = Bundle.main.url(forResource: "FinderSearch-THIRD_PARTY_NOTICES", withExtension: "txt") {
                     Button("Open FinderSearch license notices") { NSWorkspace.shared.open(notices) }.buttonStyle(StorageButtonStyle())
                 }
+                credit("RemoveMacAI & pared", "RemoveMacAI by omlahore supplies the native Mac controls, reviewed settings changes, storage candidates and undo journal. Its Apple Intelligence asset integration builds on pared by 4evy. Both are MIT-licensed; StorageDaddy uses its own profile and undo history.", "https://github.com/omlahore/RemoveMacAI")
+                if let notices = Bundle.main.url(forResource: "RemoveMacAI-THIRD_PARTY_NOTICES", withExtension: "txt") {
+                    Button("Open RemoveMacAI license notices") { NSWorkspace.shared.open(notices) }.buttonStyle(StorageButtonStyle())
+                }
                 credit("Sparkle", "The open-source macOS updater checks for new versions and verifies signed downloads before installation. Sparkle uses a permissive license; its notices are bundled with the framework.", "https://sparkle-project.org/")
                 if let license = Bundle.main.url(forResource: "Sparkle-LICENSE", withExtension: "txt") {
                     Button("open sparkle license") { NSWorkspace.shared.open(license) }.accessibilityLabel("Open Sparkle license").buttonStyle(StorageButtonStyle())

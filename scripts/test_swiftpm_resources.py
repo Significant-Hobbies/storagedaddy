@@ -64,6 +64,10 @@ class SwiftPMResourcesTests(unittest.TestCase):
             (search_support / "storage-search").chmod(0o755)
             (search_support / "provenance.json").write_text("{}")
             (search_support / "THIRD_PARTY_NOTICES.txt").write_text("fixture search notices")
+            mac_tools = root / "Vendor/RemoveMacAI"
+            mac_tools.mkdir(parents=True)
+            for name in ["LICENSE", "THIRD-PARTY-NOTICES.md", "UPSTREAM.md"]:
+                (mac_tools / name).write_text("fixture Mac tools notices")
             assets = root / "Assets"; assets.mkdir()
             for name in ["StorageDaddy.png", "StorageDaddy.icns", "Welcome.png", "PageDoodles.png",
                          "ClaudeOfficial.png", "ChatGPTOfficial.png", "AppHealth-LICENSE.txt"]:

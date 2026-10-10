@@ -6,7 +6,7 @@ import Combine
     func start(model: ExplorerModel) {
         start(observing: model.objectWillChange.merge(with: model.conversationArchive.objectWillChange).eraseToAnyPublisher()) { [weak model] in
             guard let model else { return false }
-            return !model.busy && !model.monitoring && model.staged.isEmpty && !model.conversationArchive.busy && !model.snapshotBusy && !model.showCleanup
+            return model.macTools?.allowsUpdateInstallation != false && !model.busy && !model.monitoring && model.staged.isEmpty && !model.conversationArchive.busy && !model.snapshotBusy && !model.showCleanup
         }
     }
 }

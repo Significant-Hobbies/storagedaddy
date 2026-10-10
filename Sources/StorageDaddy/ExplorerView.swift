@@ -1,3 +1,4 @@
+@preconcurrency import MacTools
 import SwiftUI
 import SaaSMakerUI
 import AppKit
@@ -134,6 +135,7 @@ struct ExplorerView: View {
         case .aiSessions: m.aiSessionsSection == .archive ? "Local conversation archive" : "Local AI history inventory"
         case .applications: "Installed applications"
         case .dashboard: "Capacity, cleanup and system details"
+        case .macControls: "Apple Intelligence, privacy and Mac settings"
         case .findFiles: "Filename search · Current scan metadata"
         case .acknowledgments: "About storagedaddy"
         default: m.progress
@@ -182,6 +184,7 @@ struct ExplorerView: View {
                 navigationItem(.dashboard)
                 navigationItem(.applications)
                 navigationItem(.aiSessions)
+                navigationItem(.macControls)
             }
             Spacer(minLength: 12)
             if let scan = m.scan, let root = scan.nodes.first {
@@ -248,6 +251,9 @@ struct ExplorerView: View {
     }
     @ViewBuilder private var content: some View {
         switch m.workspace {
+        case .macControls: StorageDaddyMacToolsView(session: m.macToolsSession(), accent: Tints.mint, secondaryInk: Tints.secondaryText, operationAllowed: !m.busy && !m.monitoring && m.staged.isEmpty && !m.snapshotBusy && !m.conversationArchive.busy)
+            .onAppear { m.macTools?.setExcludedFolders(m.excludedFolders) }
+            .onChange(of: m.excludedFolders) { _, paths in m.macTools?.setExcludedFolders(paths) }
         case .findFiles: FilenameSearchView()
         case .explore: storageWorkspace
         case .applications: ApplicationsView(applications: m.installedApplications)
