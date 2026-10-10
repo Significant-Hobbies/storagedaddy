@@ -1,0 +1,17 @@
+{
+  "twitterDescription": "Open-source Mac storage cleanup for developers. Free forever, including future versions.",
+  "faqLinks": [
+    {
+      "text": "See Apple’s storage guidance.",
+      "href": "https://support.apple.com/102624"
+    },
+    {
+      "text": "download storagedaddy",
+      "href": "/download"
+    },
+    {
+      "text": "Read the code, report an issue, or contribute on GitHub.",
+      "href": "https://github.com/sarthakagrawal927/storagedaddy"
+    }
+  ]
+}

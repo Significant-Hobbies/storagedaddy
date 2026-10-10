@@ -1,0 +1,30 @@
+---
+import Base from '@saas-maker/templates/Base.astro';
+import { WorkbenchPage } from '@saas-maker/templates/workbench-page';
+import { baseProps } from '@saas-maker/templates/page';
+import { workbenchContent } from '@saas-maker/templates/schema';
+import { studioFromProjects, studioProjectsFeed } from '@saas-maker/ui/blocks/footer';
+import json from '../content/storagedaddy.json';
+
+const content = workbenchContent.parse(json);
+let projects = [];
+try {
+  const response = await fetch(studioProjectsFeed, { signal: AbortSignal.timeout(5000) });
+  if (response.ok) projects = await response.json();
+} catch {
+  // Offline builds retain the library's default studio strip.
+}
+if (content.footer) content.footer.studio = studioFromProjects(projects, { current: 'storagedaddy' });
+---
+
+<Base {...baseProps(content)}>
+  <Fragment slot="head">
+    <meta name="theme-color" content="#050706" />
+    <link rel="alternate" type="text/markdown" href="/index.md" title="Product information in Markdown" />
+    <link rel="alternate" type="application/json" href="/api/ai" title="AI discovery catalog" />
+    <script defer src="/clarity.js"></script>
+    <script defer src="/analytics.js" data-key="ahk_pub_ab3311cd5d9186c1910936f52a28e4c523575518aa3991a9ffded4952e55cb8f" data-project="app-3262e567-f7cc-48bc-a528-4e3845185b41"></script>
+  </Fragment>
+  <WorkbenchPage content={content} />
+  <script src="../scripts/ask-ai.js"></script>
+</Base>

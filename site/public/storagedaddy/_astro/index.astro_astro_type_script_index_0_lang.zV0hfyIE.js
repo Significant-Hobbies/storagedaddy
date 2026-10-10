@@ -1,0 +1,1 @@
+document.addEventListener(`click`,e=>{let t=e.target.closest?.(`[data-assistant-url]`);if(!t)return;let n=t.closest(`form`)?.querySelector(`[name="q"]`)?.value;if(!n?.trim())return;e.preventDefault();let r=new URL(t.dataset.assistantUrl);r.searchParams.set(`q`,n),window.open(r.href,`_blank`,`noopener,noreferrer`)});

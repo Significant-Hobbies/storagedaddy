@@ -1,0 +1,29 @@
+{
+  "name": "storagedaddy-landing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build"
+  },
+  "dependencies": {
+    "@astrojs/react": "7.0.0",
+    "@saas-maker/motion": "github:sass-maker/ui-library#v0.1.13&path:/packages/motion",
+    "@saas-maker/templates": "github:sass-maker/ui-library#v0.1.13&path:/packages/templates",
+    "@saas-maker/ui": "github:sass-maker/ui-library#v0.1.13&path:/packages/ui",
+    "@tailwindcss/vite": "4.3.3",
+    "astro": "7.3.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tailwindcss": "4.3.3"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
+  }
+}
