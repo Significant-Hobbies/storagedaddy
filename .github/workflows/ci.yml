@@ -21,7 +21,7 @@ jobs:
       - run: python3 scripts/prepare-finder-search.py --build
       - run: swift test
       - run: swift build -c release
-      - run: python3 -m unittest test_sparkle_support test_finder_search_support
+      - run: python3 -m unittest test_sparkle_support test_finder_search_support test_swiftpm_resources
         working-directory: scripts
 
   shared_candidate:

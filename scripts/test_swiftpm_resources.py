@@ -9,6 +9,8 @@ import unittest
 from unittest.mock import patch
 import sparkle_support
 import swiftpm_resources
+from importlib import import_module
+finder_search = import_module("prepare-finder-search")
 
 
 class SwiftPMResourcesTests(unittest.TestCase):
@@ -56,6 +58,12 @@ class SwiftPMResourcesTests(unittest.TestCase):
             (support / "provenance.json").write_text(json.dumps({"binarySha256": hashlib.sha256(helper.read_bytes()).hexdigest()}))
             (support / "cargo-metadata.json").write_text("{}")
             (support / "THIRD_PARTY_NOTICES.txt").write_text("fixture notices")
+            search_support = root / "artifacts/FinderSearchSupport"
+            search_support.mkdir(parents=True)
+            (search_support / "storage-search").write_bytes(b"fixture search helper")
+            (search_support / "storage-search").chmod(0o755)
+            (search_support / "provenance.json").write_text("{}")
+            (search_support / "THIRD_PARTY_NOTICES.txt").write_text("fixture search notices")
             assets = root / "Assets"; assets.mkdir()
             for name in ["StorageDaddy.png", "StorageDaddy.icns", "Welcome.png", "PageDoodles.png",
                          "ClaudeOfficial.png", "ChatGPTOfficial.png", "AppHealth-LICENSE.txt"]:
@@ -78,6 +86,7 @@ class SwiftPMResourcesTests(unittest.TestCase):
                         Path(command[-1]).write_bytes(b"fixture disk image")
                 with redirect_stdout(io.StringIO()), patch("sys.argv", arguments), patch.object(sparkle_support, "configuration", return_value={}), \
                      patch.object(sparkle_support, "embed"), patch.object(sparkle_support, "sign"), \
+                     patch.object(finder_search, "validate_support", return_value=search_support), \
                      patch("subprocess.run", side_effect=fake_run), patch("subprocess.check_output", return_value="a" * 40):
                     runpy.run_path(str(script), run_name="__main__")
                 app = root / "artifacts/StorageDaddy.app" if name == "package-app.py" else output / "image-contents/storagedaddy.app"
@@ -89,6 +98,7 @@ class SwiftPMResourcesTests(unittest.TestCase):
                     bundle.rename(binary.parent / "held-bundle")
                     with patch("sys.argv", [str(script), "--check"]), \
                          patch.object(sparkle_support, "configuration", return_value={}), \
+                         patch.object(finder_search, "validate_support", return_value=search_support), \
                          self.assertRaisesRegex(SystemExit, "Missing SwiftPM resource bundle"):
                         runpy.run_path(str(script), run_name="__main__")
                     (binary.parent / "held-bundle").rename(bundle)
