@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "check": "node --test worker.test.mjs analytics.test.mjs clarity.test.mjs && tsc --noEmit && wrangler deploy --dry-run",
+    "landing:build": "node scripts/build-landing.mjs",
+    "check": "node --test worker.test.mjs analytics.test.mjs clarity.test.mjs landing.test.mjs && tsc --noEmit && wrangler deploy --dry-run",
     "deploy": "node check-release.mjs && npm run check && wrangler deploy --tag \"$(git rev-parse HEAD)\""
   },
   "devDependencies": {
