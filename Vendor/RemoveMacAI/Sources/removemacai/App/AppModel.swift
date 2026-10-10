@@ -211,7 +211,7 @@ final class AppModel {
       // Models only go once the profile blocks their download.
       if problems.isEmpty, !plan.models.isEmpty, let approvedTarget, Profile.matches(approvedTarget), approvedTarget.ai != nil {
         await MainActor.run { self.run = .working("Deleting Apple Intelligence models") }
-        let result = Self.deleteModels(plan.models)
+        let result = Self.deleteModels(plan.models, approved: approvedTarget)
         problems += result.problems
         freed = result.freed
       } else if !plan.models.isEmpty && problems.isEmpty {
@@ -225,7 +225,8 @@ final class AppModel {
     }
   }
 
-  nonisolated static func deleteModels(_ sets: [String]) -> (problems: [String], freed: Int64?) {
+  nonisolated static func deleteModels(_ sets: [String], approved: Profile.Contents) -> (problems: [String], freed: Int64?) {
+    guard Profile.matches(approved) else { return (["The approved profile changed; no removal was requested."], nil) }
     guard Models.available() else { return (["Apple's asset service didn't answer, so the models stay for now."], nil) }
     var problems: [String] = []
     var removing = sets
@@ -236,7 +237,9 @@ final class AppModel {
     } catch { return (["\(error)"], nil) }
     let before = Models.total(removing)
     do {
-      let result = try Commands.removeModels(removing, before: before)
+      let result = try Commands.removeModels(removing, before: before, remove: {
+        try Models.remove($0, approval: { Profile.matches(approved) })
+      })
       problems += result.failures.map { "\(Catalog.modelSet($0.0)?.title ?? $0.0): \($0.1)" }
       if !result.verified { problems.append("Removal couldn't be confirmed yet. Check again in a minute.") }
       return (problems, result.deletedBytes)
@@ -268,7 +271,7 @@ final class AppModel {
         return
       }
       let sets = Catalog.setsToRemove(keeping: kept).filter { Models.present($0) }
-      let result = Self.deleteModels(sets)
+      let result = Self.deleteModels(sets, approved: approved)
       let outcome = RunState.finished(problems: result.problems, freed: result.freed)
       await MainActor.run {
         self.run = outcome

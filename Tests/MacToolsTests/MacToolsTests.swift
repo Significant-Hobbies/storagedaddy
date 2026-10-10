@@ -42,6 +42,7 @@ final class MacToolsTests: XCTestCase {
         XCTAssertEqual(split.skipped.count, 1)
         XCTAssertThrowsError(try Models.matching(["unknown.model"], assetType: { _ in nil }))
         XCTAssertEqual(Settings.modelState(["unknown"], read: { _ in nil }), .unknown)
+        XCTAssertThrowsError(try Models.remove([Catalog.foundationModels], approval: { false }))
     }
     func testExplicitPartialUndoIsInReviewedPlan() {
         var snapshot = Snapshot()

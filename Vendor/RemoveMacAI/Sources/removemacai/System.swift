@@ -126,10 +126,15 @@ enum Models {
   /// catalog, and leaves alone any set whose asset type no longer matches it.
   /// Returns the sets that stayed, with the reason.
   @discardableResult
-  static func remove(_ sets: [String], timeout: TimeInterval = 120) throws -> [(String, String)] {
+  static func remove(_ sets: [String], timeout: TimeInterval = 120, approval: () -> Bool = { true }) throws -> [(String, String)] {
     guard !sets.isEmpty else { throw Failure("no model sets selected") }
+    guard approval() else { throw Failure("the approved profile changed; no removal was requested") }
     var (matched, failed) = try matching(sets)
     for name in matched where present(name) {
+      guard approval() else {
+        failed.append((name, "the approved profile changed; this set was left alone"))
+        continue
+      }
       let done = DispatchSemaphore(value: 0)
       var failure: NSError?
       UAFResetAssetSets([name]) { error in
