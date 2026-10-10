@@ -1,4 +1,5 @@
 import SwiftUI
+import SaaSMakerUI
 import AppKit
 import DiskCore
 
@@ -120,14 +121,14 @@ struct DashboardView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("YOUR MAC").font(.system(size: 11, weight: .bold)).tracking(1.5).foregroundStyle(Tints.mint)
-                Text("Storage dashboard").font(.system(size: 32, weight: .semibold, design: .rounded)).tracking(-0.7)
+                Text("your mac").font(.system(size: 11, weight: .bold)).tracking(1.5).foregroundStyle(Tints.mint)
+                SMSectionHeader("Storage dashboard", size: 32).accessibilityLabel("Storage dashboard")
                 Text("Space, the latest scan, and what is worth reviewing.")
                     .font(.callout).foregroundStyle(Tints.secondaryText)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 8) {
-                Button("Refresh", action: dashboard.refresh).disabled(dashboard.loading || m.busy)
+                Button("refresh", action: dashboard.refresh).accessibilityLabel("Refresh").disabled(dashboard.loading || m.busy)
                 if let report = dashboard.report {
                     Text("Checked \(report.collectedAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption).foregroundStyle(Tints.secondaryText)
@@ -143,7 +144,7 @@ struct DashboardView: View {
         let startup = report.volumes.first(where: \.isStartupData)
             ?? report.volumes.first(where: { $0.mountPoint == "/" })
         return VStack(alignment: .leading, spacing: 18) {
-            Label("STARTUP STORAGE", systemImage: "internaldrive.fill")
+            Label("startup storage", systemImage: "internaldrive.fill")
                 .font(.system(size: 11, weight: .bold)).tracking(1.2).foregroundStyle(Tints.mint)
             if let capacity {
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
@@ -189,7 +190,7 @@ struct DashboardView: View {
         }
         .padding(22)
         .frame(maxWidth: .infinity, minHeight: 294, alignment: .topLeading)
-        .background(Tints.mint.opacity(0.10), in: RoundedRectangle(cornerRadius: 17))
+        .storagePanel()
     }
 
     private func apfsVolumeSummary(_ report: SystemStorageReport) -> String {
@@ -201,14 +202,14 @@ struct DashboardView: View {
 
     private func cleanupPanel(minHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("EASY CLEANUP", systemImage: "sparkles")
+            Label("easy cleanup", systemImage: "sparkles")
                 .font(.system(size: 11, weight: .bold)).tracking(1.2).foregroundStyle(Tints.yellow)
             if let scan = m.scan {
                 if m.exclusionResultsStale {
                     Text("Rescan needed").font(.system(size: 30, weight: .semibold, design: .rounded))
                     Text("Excluded folders changed since this scan. Refresh before reviewing candidates.")
                         .font(.callout).foregroundStyle(Tints.secondaryText)
-                    Button("Rescan this location", action: m.rescan).disabled(m.busy)
+                    Button("rescan this location", action: m.rescan).accessibilityLabel("Rescan this location").disabled(m.busy)
                 } else {
                     Text(DiskFormat.bytes(m.easyCleanupBytes))
                         .font(.system(size: 48, weight: .semibold, design: .rounded))
@@ -217,7 +218,7 @@ struct DashboardView: View {
                         .font(.callout.weight(.medium))
                     Text("Candidates only. Each item is checked before staging and nothing moves until you confirm.")
                         .font(.caption).foregroundStyle(Tints.secondaryText)
-                    Button("Review candidates") { m.openStorage(.cleanup) }
+                    Button("review candidates") { m.openStorage(.cleanup) }.accessibilityLabel("Review candidates")
                         .disabled(m.busy || m.easyCleanupIDs.isEmpty)
                     if !m.staged.isEmpty {
                         Text("\(m.staged.count) already staged for review")
@@ -232,21 +233,22 @@ struct DashboardView: View {
                     .font(.title3.weight(.semibold))
                 Text("Build outputs, dependency folders and package caches can be suggested after a scan.")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
-                Button("Scan user caches", action: m.scanUserCaches).disabled(m.busy)
+                Button("scan user caches", action: m.scanUserCaches).accessibilityLabel("Scan user caches").disabled(m.busy)
             }
             Spacer(minLength: 0)
         }
         .padding(22)
         .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
-        .background(Tints.yellow.opacity(0.11), in: RoundedRectangle(cornerRadius: 17))
+        .storagePanel()
+        .overlay(RoundedRectangle(cornerRadius: DaddyTheme.palette.radius + 4).strokeBorder(Tints.yellow.opacity(0.22)))
     }
 
     private var latestScanPanel: some View {
         VStack(alignment: .leading, spacing: 15) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Latest scan").font(.title3.weight(.semibold))
+                SMSectionHeader("Latest scan", size: 18).accessibilityLabel("Latest scan")
                 Spacer()
-                if m.scan != nil { Button("Open Explore") { m.openStorage(.explore) }.font(.callout) }
+                if m.scan != nil { Button("open explore") { m.openStorage(.explore) }.accessibilityLabel("Open Explore").font(.callout) }
             }
             if let scan = m.scan, let root = scan.nodes.first {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -311,7 +313,7 @@ struct DashboardView: View {
 
     private func usefulSignals(_ report: SystemStorageReport) -> some View {
         VStack(alignment: .leading, spacing: 13) {
-            Text("Coverage & signals").font(.title3.weight(.semibold))
+            SMSectionHeader("Coverage & signals", size: 18).accessibilityLabel("Coverage & signals")
             if let scan = m.scan, scan.skipped > 0 {
                 Label("\(scan.skipped.formatted()) items skipped by the latest scan", systemImage: "exclamationmark.triangle")
                     .font(.callout).foregroundStyle(Tints.yellow)
@@ -337,7 +339,7 @@ struct DashboardView: View {
                 Text("Scan coverage appears here after a scan.")
                     .font(.callout).foregroundStyle(Tints.secondaryText)
             }
-            Button("Drive and volume details") { showingSystemDetails = true }
+            Button("drive and volume details") { showingSystemDetails = true }.accessibilityLabel("Drive and volume details")
                 .font(.callout)
             Spacer(minLength: 0)
         }
@@ -364,14 +366,14 @@ struct DashboardView: View {
             }
         }
         .padding(20)
-        .background(Tints.secondaryText.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
+        .storagePanel()
     }
 
     private func otherContainersSection(_ report: SystemStorageReport) -> some View {
         let startupContainer = report.volumes.first(where: \.isStartupData)?.apfsContainer
         let others = report.containers.filter { $0.name != startupContainer }
         return VStack(alignment: .leading, spacing: 9) {
-            Text("OTHER APFS POOLS").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
+            Text("other apfs pools").accessibilityLabel("OTHER APFS POOLS").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
             if others.isEmpty {
                 Text("No other APFS pools found.").font(.caption).foregroundStyle(Tints.secondaryText)
             }
@@ -396,7 +398,7 @@ struct DashboardView: View {
 
     private func volumesSection(_ volumes: [MountedVolumeInfo]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("MOUNTED VOLUMES").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
+            Text("mounted volumes").accessibilityLabel("MOUNTED VOLUMES").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
             ForEach(volumes, id: \.mountPoint) { volume in
                 HStack(spacing: 12) {
                     Image(systemName: volumeIcon(volume))
@@ -460,7 +462,7 @@ struct DashboardView: View {
 
     private var healthSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("DRIVES").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
+            Text("drives").accessibilityLabel("DRIVES").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
             let physical = dashboard.report?.devices.filter { !$0.isDiskImage } ?? []
             ForEach(Array(physical.enumerated()), id: \.offset) { _, device in
                 let health = dashboard.health.first { $0.deviceName == device.productName }
@@ -507,7 +509,7 @@ struct DashboardView: View {
                     }
                 }
                 .padding(12)
-                .background(Tints.secondaryText.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+                .storagePanel()
             }
             if physical.isEmpty {
                 Text("No physical storage devices were found in the I/O registry.")
@@ -528,7 +530,7 @@ struct DashboardView: View {
 
     private func pressureSection(_ pressure: PressureInfo) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("PRESSURE").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
+            Text("pressure").accessibilityLabel("PRESSURE").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
             VStack(alignment: .leading, spacing: 10) {
                 if let total = pressure.swapTotalBytes {
                     HStack {
@@ -577,7 +579,7 @@ struct DashboardView: View {
                 }
             }
             .padding(12)
-            .background(Tints.secondaryText.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+            .storagePanel()
         }
     }
 }
@@ -596,7 +598,7 @@ private struct DashboardTrashPanel: View {
                 Spacer()
                 if inventory.loading { ProgressView().controlSize(.small) }
                 if inventory.scan != nil {
-                    Button("Refresh") { inventory.refresh(excludedFolders: excludedFolders) }
+                    Button("refresh") { inventory.refresh(excludedFolders: excludedFolders) }.accessibilityLabel("Refresh")
                         .font(.caption).disabled(inventory.loading)
                 }
             }
@@ -632,7 +634,7 @@ private struct DashboardTrashPanel: View {
                 Text("Reading Home Trash item names and sizes…")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
             }
-            Button("Open Trash in Finder") { NSWorkspace.shared.open(trash) }
+            Button("open trash in finder") { NSWorkspace.shared.open(trash) }.accessibilityLabel("Open Trash in Finder")
                 .font(.callout)
             Text("Current user's Home Trash only. Nothing is emptied here.")
                 .font(.caption2).foregroundStyle(Tints.secondaryText)

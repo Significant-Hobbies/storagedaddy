@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sparkle_support
+import swiftpm_resources
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,6 +57,7 @@ def main():
         (app / "Contents" / name).mkdir(parents=True, exist_ok=True)
     # Assemble only known public inputs, never the artifacts directory or logs.
     binary = ROOT / ".build/release/StorageDaddy"
+    swiftpm_resources.embed_ui_resources(binary, app)
     helper = ROOT / "artifacts/MemoryPackSupport/memory-pack"
     for source, destination in [(binary, app / "Contents/MacOS/StorageDaddy"),
                                 (helper, app / "Contents/Helpers/memory-pack")]:

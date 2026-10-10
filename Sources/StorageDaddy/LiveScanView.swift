@@ -1,4 +1,5 @@
 import SwiftUI
+import SaaSMakerUI
 import DiskCore
 
 struct LiveScanView: View {
@@ -8,7 +9,7 @@ struct LiveScanView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 Text("LIVE DISCOVERY").font(.system(size: 11, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(Tints.mint)
-                HStack { Text("Your storage, taking shape.").font(.system(size: 32, weight: .bold, design: .rounded)); DoodleArt(topic: .explore).frame(width: 82, height: 82); Spacer() }
+                HStack { SMSectionHeader("Your storage, taking shape.", size: 32).accessibilityLabel("Your storage, taking shape."); DoodleArt(topic: .explore).frame(width: 82, height: 82); Spacer() }
                 Text("Results grow as folders are explored. Final totals and developer insights appear when the scan finishes.").foregroundStyle(Tints.secondaryText)
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 6) {

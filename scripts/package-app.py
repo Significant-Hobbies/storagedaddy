@@ -7,6 +7,7 @@ import plistlib
 import shutil
 import subprocess
 import sparkle_support
+import swiftpm_resources
 
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
@@ -23,6 +24,7 @@ binary = args.binary
 update_configuration = sparkle_support.configuration()
 if not binary.is_file():
     raise SystemExit(f"Build the executable first: {binary}")
+swiftpm_resources.ui_resource_bundle(binary)
 support = root / "artifacts/MemoryPackSupport"
 required_support = [support / "memory-pack", support / "THIRD_PARTY_NOTICES.txt", support / "provenance.json", support / "cargo-metadata.json"]
 missing = [path for path in required_support if not path.is_file()]
@@ -69,6 +71,7 @@ shutil.copy2(support / "memory-pack", pending_helper)
 pending_helper.chmod(0o755)
 pending_helper.replace(contents / "Helpers/memory-pack")
 (contents / "Resources").mkdir(exist_ok=True)
+swiftpm_resources.embed_ui_resources(binary, bundle)
 for name in ["StorageDaddy.png", "StorageDaddy.icns", "Welcome.png", "PageDoodles.png",
              "ClaudeOfficial.png", "ChatGPTOfficial.png", "ProviderIcons-provenance.json"]:
     shutil.copy2(root / "Assets" / name, contents / "Resources" / name)

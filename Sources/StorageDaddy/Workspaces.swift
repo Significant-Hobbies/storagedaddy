@@ -1,4 +1,5 @@
 import SwiftUI
+import SaaSMakerUI
 import DiskCore
 import AppKit
 import Charts
@@ -36,11 +37,11 @@ struct ApplicationsView: View {
         GeometryReader { geometry in
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Text("Applications").font(.largeTitle.weight(.semibold))
+                SMSectionHeader("Applications", size: 28).accessibilityLabel("Applications")
                 DoodleArt(topic: .applications).frame(width: 72, height: 72)
                 Spacer()
-                if applications.loading { Button("Cancel", action: applications.cancel) }
-                Button("Refresh", action: applications.refresh).disabled(applications.loading || applications.removalBusy)
+                if applications.loading { Button("cancel", action: applications.cancel).accessibilityLabel("Cancel") }
+                Button("refresh", action: applications.refresh).accessibilityLabel("Refresh").disabled(applications.loading || applications.removalBusy)
             }
             Text("Apps are discovered automatically in Applications, your personal Applications folder, and macOS app folders. Bundle sizes load in the background; support data is excluded. Use Scan Folder for apps stored elsewhere.").foregroundStyle(Tints.secondaryText)
             applicationSummary
@@ -54,7 +55,7 @@ struct ApplicationsView: View {
                 HStack {
                     ProgressView().controlSize(.small)
                     Text("Checking the app before removal…").font(.callout)
-                    Button("Cancel", action: applications.cancelRemoval)
+                    Button("cancel", action: applications.cancelRemoval).accessibilityLabel("Cancel")
                 }
             }
             if !applications.status.isEmpty {
@@ -69,7 +70,7 @@ struct ApplicationsView: View {
                     .toggleStyle(.checkbox).tint(Tints.mint).font(.caption).fixedSize()
                     .help("Group installed apps by category. Turn off to compare all apps in one list.")
                 if !searchText.isEmpty {
-                    Button("Clear") { searchText = "" }
+                    Button("clear") { searchText = "" }.accessibilityLabel("Clear")
                         .buttonStyle(StorageButtonStyle())
                         .accessibilityLabel("Clear application search")
                 }
@@ -82,7 +83,7 @@ struct ApplicationsView: View {
                 StorageEmptyView("No installed apps found", systemImage: "app.dashed", description: Text("Refresh to search standard application folders."))
             } else if visibleApps.isEmpty {
                 StorageEmptyView("No matching applications", systemImage: "magnifyingglass", description: Text("Try a different name, path or category, or clear the search to show all installed apps."))
-                Button("Clear search") { searchText = "" }.buttonStyle(StorageButtonStyle(prominent: true))
+                Button("clear search") { searchText = "" }.accessibilityLabel("Clear search").buttonStyle(StorageButtonStyle(prominent: true))
             } else {
                 applicationColumnHeader
                 ScrollView {
@@ -122,7 +123,7 @@ struct ApplicationsView: View {
                             Text("Pending…").font(.caption).foregroundStyle(Tints.secondaryText)
                         }
                         }.frame(width: 96, alignment: .trailing)
-                        Button("Analyze") { m.openStorage(.explore); m.start(app.url) }
+                        Button("analyze") { m.openStorage(.explore); m.start(app.url) }.accessibilityLabel("Analyze")
                             .buttonStyle(StorageButtonStyle())
                             .frame(width: 80)
                         Button { NSWorkspace.shared.activateFileViewerSelecting([app.url]) } label: { Image(systemName: "arrow.up.forward.square") }
@@ -142,7 +143,7 @@ struct ApplicationsView: View {
                     .contextMenu {
                         Button("Remove \(app.name)…") { applications.reviewRemoval(of: app) }
                             .disabled(applications.removalBusy || m.busy || m.monitoring || removalBlock != nil)
-                        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
+                        Button("reveal in finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }.accessibilityLabel("Reveal in Finder")
                     }
                     .padding(.vertical, 8)
                     .padding(.horizontal, 4)
@@ -242,7 +243,7 @@ struct ApplicationsView: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Text(title)
+                Text(title.lowercased()).accessibilityLabel(title)
                 Image(systemName: active && applications.ascending ? "chevron.up" : "chevron.down")
                     .font(.system(size: 8, weight: .bold))
                     .opacity(active ? 1 : 0)
@@ -288,8 +289,9 @@ private struct InstalledAppIcon: View {
 struct CleanupView: View {
     @EnvironmentObject var m: ExplorerModel
     var body: some View {
+        GeometryReader { geometry in
         VStack(alignment: .leading, spacing: 16) {
-            HStack { Text("Review Cleanup").font(.largeTitle.weight(.semibold)); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("Done") { m.showCleanup = false } } }
+            HStack { SMSectionHeader("Review Cleanup", size: 28).accessibilityLabel("Review Cleanup"); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") } }
             Text(m.staged.isEmpty ? "Add files and folders from Explore or Developer Insights. Nothing is removed until you confirm." : "Review the list before moving it to Trash. Items added with an incomplete check are marked below. We check paths and known contents again after confirmation.").foregroundStyle(Tints.secondaryText)
             if !m.showCleanup && m.staged.isEmpty { TrashInventoryView() }
             if let scan = m.scan, !m.autoCleanerSuggestions.isEmpty {
@@ -300,8 +302,8 @@ struct CleanupView: View {
                     Label("Moved to Trash", systemImage: "checkmark.circle.fill").font(.title2).foregroundStyle(Tints.mint)
                     Text("You can review or restore these items from Trash. Trash still uses disk space until emptied.").foregroundStyle(Tints.secondaryText)
                     HStack {
-                        Button("Show in Trash") { NSWorkspace.shared.activateFileViewerSelecting(m.lastTrashedURLs) }
-                        Button("Refresh scan results", action: m.rescan).buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy)
+                        Button("show in trash") { NSWorkspace.shared.activateFileViewerSelecting(m.lastTrashedURLs) }.accessibilityLabel("Show in Trash")
+                        Button("refresh scan results", action: m.rescan).accessibilityLabel("Refresh scan results").buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy)
                     }
                 }.padding(.vertical, 24)
                 Spacer()
@@ -328,7 +330,7 @@ struct CleanupView: View {
                             if let review = m.incompleteCleanup[id] {
                                 Label("Added anyway · \(review.skipped) \(review.skipped == 1 ? "item" : "items") not checked", systemImage: "exclamationmark.triangle")
                                     .font(.caption).foregroundStyle(Tints.coral)
-                                Button("Review warning") { m.reviewIncompleteCleanup(id) }.font(.caption).disabled(m.busy)
+                                Button("review warning") { m.reviewIncompleteCleanup(id) }.accessibilityLabel("Review warning").font(.caption).disabled(m.busy)
                             }
                             if scan.nodes[id].isDirectory {
                                 FolderSymlinksView(scan: scan, folderID: id, cleanupReview: true)
@@ -339,14 +341,16 @@ struct CleanupView: View {
                         Spacer()
                         Text(DiskFormat.bytes(scan.nodes[id].allocatedBytes)).monospacedDigit()
                             .foregroundStyle(Tints.forNode(scan.nodes[id])).frame(width: 104, alignment: .trailing)
-                        Button("Remove") { m.unstage(id) }.disabled(m.busy)
+                        Button("remove") { m.unstage(id) }.accessibilityLabel("Remove").disabled(m.busy)
                     }.accessibilityElement(children: .contain).listRowBackground(Color.black)
                 }.scrollContentBackground(.hidden).listStyle(.plain)
-                HStack { Text("\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") · \(DiskFormat.bytes(m.staged.reduce(0) { $0 + scan.nodes[$1].allocatedBytes })) allocated").fontWeight(.medium); Spacer(); Button("Move to Trash…", action: m.trashStaged).buttonStyle(StorageButtonStyle(prominent: true)).tint(Tints.coral).disabled(m.busy || m.monitoring) }
+                HStack { Text("\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") · \(DiskFormat.bytes(m.staged.reduce(0) { $0 + scan.nodes[$1].allocatedBytes })) allocated").fontWeight(.medium); Spacer(); Button("move to trash…", action: m.trashStaged).accessibilityLabel("Move to Trash…").buttonStyle(StorageButtonStyle(prominent: true)).tint(Tints.coral).disabled(m.busy || m.monitoring) }
                 Text("Trash still uses disk space until it is emptied.").font(.caption).foregroundStyle(Tints.secondaryText)
                 if m.monitoring { Text("Stop monitoring before cleanup.").font(.caption).foregroundStyle(Tints.secondaryText) }
             }
-        }.padding(24).background(Color.black).buttonStyle(StorageButtonStyle())
+        }.padding(24)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+        }.background(Color.black).buttonStyle(StorageButtonStyle())
     }
 }
 
@@ -385,12 +389,12 @@ private struct AutoCleanerCard: View {
                     }
                     Spacer()
                     Text(DiskFormat.bytes(suggestion.allocatedBytes)).font(.caption).monospacedDigit()
-                    Button("Inspect") {
+                    Button("inspect") {
                         m.showCleanup = false
                         m.workspace = .explore
                         if scan.nodes.indices.contains(suggestion.id) { m.open(scan.nodes[suggestion.id]) }
-                    }.font(.caption)
-                    Button("Add for Review") { m.stage(suggestion.id) }.font(.caption).disabled(m.busy)
+                    }.accessibilityLabel("Inspect").font(.caption)
+                    Button("add for review") { m.stage(suggestion.id) }.accessibilityLabel("Add for Review").font(.caption).disabled(m.busy)
                 }
             }
             if m.autoCleanerSuggestions.count > suggestions.count {
@@ -399,7 +403,6 @@ private struct AutoCleanerCard: View {
             }
         }
         .padding(14)
-        .background(Tints.secondaryText.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .storagePanel()
     }
 }
