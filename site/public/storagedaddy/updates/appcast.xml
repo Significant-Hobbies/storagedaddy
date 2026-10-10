@@ -3,13 +3,13 @@
     <channel>
         <title>storagedaddy</title>
         <item>
-            <title>0.1.5</title>
-            <pubDate>Fri, 09 Oct 2026 06:19:54 +0000</pubDate>
-            <sparkle:version>115</sparkle:version>
-            <sparkle:shortVersionString>0.1.5</sparkle:shortVersionString>
+            <title>0.1.6</title>
+            <pubDate>Sat, 10 Oct 2026 16:22:18 +0000</pubDate>
+            <sparkle:version>116</sparkle:version>
+            <sparkle:shortVersionString>0.1.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://storage.daddyrad.com/updates/storagedaddy-0.1.5-build115-arm64.dmg" length="7837153" type="application/octet-stream" sparkle:edSignature="CK4qUALMd3FMh9LJINJiFB3JHHPJofKfaVmIZqpWYKdzOmZBst5rMGXDFqnly0MHDFlmTPMuDjlLuERhDA6sBw=="/>
+            <enclosure url="https://storage.daddyrad.com/updates/storagedaddy-0.1.6-build116-arm64.dmg" length="11041773" type="application/octet-stream" sparkle:edSignature="llBo/0Yn0V+dM3j1oLp4CtCh0tegIjPWg+1b87kyKXZNMVqt49JqM89FcmjwJeYD8XLq4rhsH3T0wuVoP70+BQ=="/>
         </item>
     </channel>
 </rss>
