@@ -191,7 +191,7 @@ struct ExplorerView: View {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("current scan").accessibilityLabel("CURRENT SCAN").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
                     Text(StorageLabels.name(root)).font(.callout).lineLimit(1).help(scan.rootPath)
-                    Text("\(DiskFormat.bytes(root.allocatedBytes)) on disk").font(.callout).monospacedDigit()
+                    Text("\(DiskFormat.bytes(root.allocatedBytes)) allocated").font(.callout).monospacedDigit()
                     if scan.skipped > 0 {
                         Button("\(scan.skipped.formatted()) skipped · Details") {
                             m.message = [m.scanStorageAccounting?.measuredBreakdown, m.scanStorageAccounting?.explanation, scan.coverageExplanation]
@@ -469,8 +469,12 @@ struct StorageExplorePanel: View {
                         .foregroundStyle(Tints.secondaryText)
                 }.font(.caption).fixedSize(horizontal: false, vertical: true)
             }
+            if m.allocated {
+                Text(ScanStorageAccounting.fileAllocationExplanation)
+                    .font(.caption).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
+            }
             Divider().overlay(Tints.secondaryText.opacity(0.18))
-            StorageFreeSpaceView()
+            StorageFreeSpaceView().fixedSize(horizontal: false, vertical: true)
             if m.mapItems.isEmpty || ([.folders, .top, .age, .types].contains(m.mode) && m.visible.isEmpty) { StorageEmptyView("No matching items", systemImage: "folder", description: Text("Try another filter or open a different folder.")) }
             else if m.mode == .folders { folderList.frame(height: compact ? 400 : nil) }
             else { DiskMapView(compact: compact).frame(minHeight: compact && [.top, .age, .types].contains(m.mode) ? 400 : 0) }

@@ -5,6 +5,7 @@ import DiskCore
 /// The difference is unclassified occupied space, never free space or a
 /// measurement of any individual skipped folder.
 struct ScanStorageAccounting: Sendable {
+    static let fileAllocationExplanation = "File allocations can count shared APFS blocks more than once, so their total can exceed your drive's capacity. They are not a measurement of physical space used or space you can recover."
     let capacity: StartupCapacity
     let scanned: Int64
     let apfs: StartupAPFSAccounting?
@@ -39,7 +40,7 @@ struct ScanStorageAccounting: Sendable {
 
     var summary: String {
         if exceedsUsed {
-            return "\(DiskFormat.bytes(scanned)) scanned · \(DiskFormat.bytes(capacity.used)) used across startup storage · \(DiskFormat.bytes(capacity.available)) available"
+            return "\(DiskFormat.bytes(capacity.used)) used of \(DiskFormat.bytes(capacity.total)) startup storage · \(DiskFormat.bytes(capacity.available)) available · \(DiskFormat.bytes(scanned)) file allocations (shared blocks can count more than once)"
         }
         return "\(DiskFormat.bytes(scanned)) scanned · \(DiskFormat.bytes(outsideBreakdown)) used outside this breakdown · \(DiskFormat.bytes(capacity.available)) available"
     }

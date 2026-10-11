@@ -316,6 +316,7 @@ struct FileTypeStats: Sendable {
     @Published var volumeFree: Int64?
     @Published var volumeCapacity: Int64?
     @Published var liveProgress: ScanProgress?
+    @Published var liveStorageCapacity: StartupCapacity?
     @Published var busy = false
     @Published private(set) var lastScanSummary = "No scan yet"
     @Published var progress = "Choose what to scan to begin"
@@ -708,6 +709,7 @@ struct FileTypeStats: Sendable {
         task?.cancel(); scanVersion = UUID(); staged = []; incompleteCleanup = [:]; busy = true; message = nil
         scopedURL?.stopAccessingSecurityScopedResource(); scopedURL = url; _ = url.startAccessingSecurityScopedResource()
         liveProgress = nil
+        liveStorageCapacity = nil
         progress = "Scanning \(StorageLabels.location(url.path))…"
         let priorRSS = scanPeakRSS
         priorScanPeakRSS = priorRSS
@@ -731,6 +733,16 @@ struct FileTypeStats: Sendable {
                 }
             }
             do {
+                if ["/", "/System/Volumes/Data"].contains(url.path) {
+                    let capacity = await Task.detached(priority: .utility) {
+                        let values = try? url.resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityKey])
+                        guard let total = values?.volumeTotalCapacity, let available = values?.volumeAvailableCapacity else { return StartupCapacity?.none }
+                        return StartupCapacity(total: Int64(total), available: Int64(available))
+                    }.value
+                    try Task.checkCancellation()
+                    guard scanVersion == version else { return }
+                    liveStorageCapacity = capacity
+                }
                 let result = try await DiskScanner.scan(root: url, excludedFolders: excludedFolders,
                     promptAvoidanceFolders: protectedFolders, progress: { [weak self] p in
                     Task { @MainActor [weak self] in guard let self, self.scanVersion == version, self.busy else { return }; self.liveProgress = p; self.progress = "\(p.entries.formatted()) entries · \(StorageLabels.location(p.path))" }
