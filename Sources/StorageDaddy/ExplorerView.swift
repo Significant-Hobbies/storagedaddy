@@ -383,7 +383,7 @@ struct StorageExplorePanel: View {
     @State private var explainingSizes = false
     var body: some View {
         GeometryReader { geometry in
-            let compact = geometry.size.width < 660 || geometry.size.height < 650
+            let compact = geometry.size.width < 760 || geometry.size.height < 650
             if compact {
                 ScrollView {
                     panel(compact: true)
@@ -474,7 +474,7 @@ struct StorageExplorePanel: View {
                     .font(.caption).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
             }
             Divider().overlay(Tints.secondaryText.opacity(0.18))
-            StorageFreeSpaceView().fixedSize(horizontal: false, vertical: true)
+            StorageFreeSpaceView().fixedSize(horizontal: false, vertical: true).layoutPriority(1)
             if m.mapItems.isEmpty || ([.folders, .top, .age, .types].contains(m.mode) && m.visible.isEmpty) { StorageEmptyView("No matching items", systemImage: "folder", description: Text("Try another filter or open a different folder.")) }
             else if m.mode == .folders { folderList.frame(height: compact ? 400 : nil) }
             else { DiskMapView(compact: compact).frame(minHeight: compact && [.top, .age, .types].contains(m.mode) ? 400 : 0) }
