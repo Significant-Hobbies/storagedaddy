@@ -142,7 +142,7 @@ public enum CleanupPreflight {
                   inode == other.inode else { return false }
             if isDirectory {
                 // Directory byte totals are derived, not directory metadata.
-                // Hard links may be charged outside this subtree in the full
+                // Hard links and full clones may be charged outside this subtree in the full
                 // scan, then inside it during preflight. Every known descendant
                 // is compared separately below, including file sizes/identities.
                 return true

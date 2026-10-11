@@ -5,7 +5,7 @@ import DiskCore
 /// The difference is unclassified occupied space, never free space or a
 /// measurement of any individual skipped folder.
 struct ScanStorageAccounting: Sendable {
-    static let fileAllocationExplanation = "File allocations can count shared APFS blocks more than once, so their total can exceed your drive's capacity. They are not a measurement of physical space used or space you can recover."
+    static let fileAllocationExplanation = "Full APFS clones and hard links count once when macOS identifies them. Partial block sharing and snapshots can still inflate allocations beyond physical usage or recoverable space."
     let capacity: StartupCapacity
     let scanned: Int64
     let apfs: StartupAPFSAccounting?

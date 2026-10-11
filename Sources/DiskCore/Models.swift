@@ -14,6 +14,8 @@ public struct DiskNode: Codable, Sendable, Identifiable {
     public var isScanIncomplete: Bool? = nil
     public var name: String
     public var logicalBytes: Int64
+    /// Allocation attributed to this entry within the scan. Hard links and
+    /// identified full APFS clones share one owner; partial sharing is unknown.
     public var allocatedBytes: Int64
     public var modified: Date
     public var device: UInt64
