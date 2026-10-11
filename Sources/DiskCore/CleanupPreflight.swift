@@ -80,9 +80,17 @@ public enum CleanupPreflight {
             try Task.checkCancellation()
 
             let result = try await DiskScanner.scan(root: candidate.url)
+            // Broad parent selections must not bypass signing-copy checks.
+            for node in result.nodes where node.isDirectory && node.name == "com.google.Chrome.code_sign_clone" {
+                try ChromeSigningClones.validateForCleanup(at: result.url(for: node.id))
+            }
             let before = try records(in: scan, rootID: candidate.node.id)
             let after = try records(in: result, rootID: 0)
             try compare(before: before, after: after)
+            if result.skipped > 0, ChromeSigningClones.location(path: candidate.url.path) == .copy {
+                throw NSError(domain: "ChromeSigningCopies", code: 1, userInfo: [NSLocalizedDescriptionKey:
+                    "The signing copy could not be checked completely. Keep it and rescan after resolving unreadable or excluded contents."])
+            }
 
             if result.skipped > 0 {
                 let rawEvidence = result.incompleteEvidence ?? []

@@ -16,7 +16,9 @@ struct LiveScanView: View {
                         Text(DiskFormat.bytes(m.liveStorageCapacity?.used ?? progress.allocatedBytes)).font(.system(size: 48, weight: .semibold, design: .rounded)).monospacedDigit().foregroundStyle(Tints.mint)
                         if let capacity = m.liveStorageCapacity {
                             Text("used of \(DiskFormat.bytes(capacity.total)) startup storage · macOS measurement at scan start").foregroundStyle(Tints.secondaryText)
-                            Text("\(DiskFormat.bytes(progress.allocatedBytes)) in file allocations found so far").foregroundStyle(Tints.secondaryText)
+                            Text("Folder allocations are partial; shared storage is reconciled as files are discovered.")
+                                .font(.caption).foregroundStyle(Tints.secondaryText)
+                                .help("\(DiskFormat.bytes(progress.allocatedBytes)) currently attributed to scanned files. This is not physical disk usage.")
                         } else {
                             Text("file allocations found so far").foregroundStyle(Tints.secondaryText)
                         }

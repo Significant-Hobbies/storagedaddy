@@ -34,15 +34,20 @@ final class CloneScannerTests: XCTestCase {
         XCTAssertEqual(reference.nodes[0].logicalBytes, Int64(bytes.count * 7))
         XCTAssertEqual(reference.nodes.filter { !$0.isDirectory && $0.allocatedBytes > 0 }.count, 3)
         XCTAssertEqual(reference.skipped, 0)
+        let allocationIndex = StorageAllocationIndex(scan: reference)
+        XCTAssertEqual(allocationIndex.summary(for: reference.nodes[0]).exclusiveBytes, try allocation(independent))
+        XCTAssertEqual(allocationIndex.summary(for: reference.nodes[0]).sharedFiles, 6)
         // Allocation ownership can move into a selected subtree on rescan.
         // Cleanup must compare file identities and sizes rather than that total.
         let beta = try XCTUnwrap(reference.nodes.first { $0.name == "beta" })
+        XCTAssertEqual(allocationIndex.summary(for: beta).exclusiveBytes, 0)
         try await CleanupPreflight.validate(ids: [beta.id], in: reference)
 
         for (backend, workers) in [(ScanBackend.bulk, 0), (.parallel, 1), (.parallel, 4), (.parallel, 8)] {
             let updates = CloneProgressSink()
             let scan = try await DiskScanner.scan(root: root, backend: backend, parallelism: workers) { updates.append($0) }
             XCTAssertEqual(signature(scan), signature(reference), "\(backend), \(workers) readers")
+            XCTAssertEqual(scan.fileAllocationDetails, reference.fileAllocationDetails)
             XCTAssertEqual(scan.skipped, 0)
             let final = try XCTUnwrap(updates.values.last)
             XCTAssertEqual(final.allocatedBytes, expected)
@@ -73,6 +78,11 @@ final class CloneScannerTests: XCTestCase {
             let scan = try await DiskScanner.scan(root: root, backend: backend)
             XCTAssertEqual(scan.nodes[0].allocatedBytes, expected)
             XCTAssertEqual(scan.nodes.filter { !$0.isDirectory && $0.allocatedBytes > 0 }.count, 2)
+            let summary = StorageAllocationIndex(scan: scan).summary(for: scan.nodes[0])
+            let exclusive = try XCTUnwrap(summary.exclusiveBytes)
+            XCTAssertGreaterThan(exclusive, 0)
+            XCTAssertLessThan(exclusive, expected)
+            XCTAssertEqual(summary.sharedFiles, 2)
         }
     }
 

@@ -76,7 +76,7 @@ private func accountingCapacity() -> StartupCapacity {
     #expect(value.explanation.contains("cannot be reconciled"))
     #expect(!value.summary.contains("used outside this breakdown"))
     #expect(value.summary.hasPrefix("\(DiskFormat.bytes(value.capacity.used)) used of \(DiskFormat.bytes(value.capacity.total)) startup storage"))
-    #expect(value.summary.contains("file allocations (shared blocks can count more than once)"))
+    #expect(value.summary == "\(DiskFormat.bytes(value.capacity.used)) used of \(DiskFormat.bytes(value.capacity.total)) startup storage · \(DiskFormat.bytes(value.capacity.available)) available")
 }
 
 @Test func scanCoverageDoesNotPresentBoundedEvidenceAsCompleteCountsOrSizes() {

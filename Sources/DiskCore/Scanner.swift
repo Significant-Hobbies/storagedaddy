@@ -47,6 +47,7 @@ private struct Scanner {
     private let parallelism: Int
     private let cancellation: ScanCancellation
     private var sharedAllocations: [(id: Int, bytes: Int64, identity: AllocationIdentity)] = []
+    private var fileAllocationDetails: [FileAllocationDetail] = []
     private let progress: (@Sendable (ScanProgress) -> Void)?
     private var nodes: [DiskNode] = []
     private var errors: [String] = []
@@ -105,7 +106,7 @@ private struct Scanner {
         reportProgress(path: rootPath, force: true)
         try cancellation.check()
         let elapsed = Date().timeIntervalSince(started)
-        let result = ScanResult(
+        var result = ScanResult(
             rootPath: rootPath,
             nodes: nodes,
             started: started,
@@ -116,6 +117,7 @@ private struct Scanner {
             incompleteEvidence: incompleteEvidence,
             incompleteEvidenceTruncated: incompleteEvidenceTruncated
         )
+        result.fileAllocationDetails = fileAllocationDetails
         DiskScannerDiagnostics.shared.record(backendCounters)
         return result
     }
@@ -252,6 +254,10 @@ private struct Scanner {
             nodes[allocation.id].allocatedBytes = allocatedIdentities.insert(allocation.identity).inserted ? allocation.bytes : 0
         }
         sharedAllocations.removeAll(keepingCapacity: false)
+        for index in fileAllocationDetails.indices {
+            fileAllocationDetails[index].nodeID = Int(mapping[fileAllocationDetails[index].nodeID])
+        }
+        fileAllocationDetails.sort { $0.nodeID < $1.nodeID }
     }
 
     private mutating func refreshFinalLiveLocations() {
@@ -279,6 +285,12 @@ private struct Scanner {
         }
 
         let id = nodes.count
+        if !metadata.isDirectory, !metadata.isSymlink, metadata.allocatedBytes > 0,
+           metadata.privateBytes != metadata.allocatedBytes || metadata.sharesStorage || metadata.linkCount != 1 {
+            fileAllocationDetails.append(FileAllocationDetail(nodeID: id, reportedBytes: metadata.allocatedBytes,
+                privateBytes: metadata.privateBytes.map { min(metadata.allocatedBytes, $0) }, sharesStorage: metadata.sharesStorage || metadata.linkCount != 1,
+                linkCount: metadata.linkCount))
+        }
         if backend == .parallel, !metadata.isDirectory, !metadata.isSymlink, metadata.inode != 0, let identity {
             sharedAllocations.append((id, metadata.allocatedBytes, identity))
         }
@@ -569,7 +581,7 @@ private final class DirectoryReader: @unchecked Sendable {
             | UInt32(ATTR_CMN_FILEID)
         attributes.dirattr = UInt32(ATTR_DIR_MOUNTSTATUS)
         attributes.fileattr = UInt32(ATTR_FILE_LINKCOUNT) | UInt32(ATTR_FILE_DATALENGTH) | UInt32(ATTR_FILE_DATAALLOCSIZE)
-        attributes.forkattr = UInt32(ATTR_CMNEXT_CLONEID) | UInt32(ATTR_CMNEXT_EXT_FLAGS)
+        attributes.forkattr = UInt32(ATTR_CMNEXT_PRIVATESIZE) | UInt32(ATTR_CMNEXT_CLONEID) | UInt32(ATTR_CMNEXT_EXT_FLAGS)
 
         var entries: [EntryMetadata] = []
         while true {
@@ -676,6 +688,11 @@ private final class DirectoryReader: @unchecked Sendable {
             }
             var cloneID: UInt64 = 0
             var extendedFlags: UInt64 = 0
+            var privateBytes: Int64?
+            if has(returned.forkattr, ATTR_CMNEXT_PRIVATESIZE) {
+                privateBytes = max(0, Int64(try read(off_t.self, from: bytes, at: cursor, through: recordEnd)))
+                cursor += MemoryLayout<off_t>.size
+            }
             if has(returned.forkattr, ATTR_CMNEXT_CLONEID) {
                 cloneID = try read(UInt64.self, from: bytes, at: cursor, through: recordEnd)
                 cursor += MemoryLayout<UInt64>.size
@@ -700,7 +717,9 @@ private final class DirectoryReader: @unchecked Sendable {
                     inode: inode,
                     linkCount: linkCount,
                     isMountPoint: mountPoint,
-                    fullCloneID: extendedFlags & sharesAllBlocks != 0 ? cloneID : 0
+                    fullCloneID: extendedFlags & sharesAllBlocks != 0 ? cloneID : 0,
+                    privateBytes: privateBytes,
+                    sharesStorage: extendedFlags & 1 != 0 || privateBytes.map { $0 < allocatedBytes } == true
                 )
             )
             offset = recordEnd
@@ -725,6 +744,8 @@ private struct EntryMetadata: Sendable {
     let linkCount: UInt32
     let isMountPoint: Bool
     let fullCloneID: UInt64
+    let privateBytes: Int64?
+    let sharesStorage: Bool
 
     var allocationIdentity: AllocationIdentity? {
         // Pure clones share a data-stream ID, not an inode. Keep partial clones
@@ -800,43 +821,67 @@ final class DiskScannerDiagnosticsStore: @unchecked Sendable {
 private func metadata(from info: stat, name: String, path: String) -> EntryMetadata {
     let directory = isDirectory(info)
     let symlink = isSymlink(info)
+    let details = directory || symlink ? nil : allocationDetails(at: path, matching: info)
+    let bytes = directory || symlink ? 0 : allocatedSize(for: info)
     return EntryMetadata(
         name: name,
         isDirectory: directory,
         isSymlink: symlink,
         logicalBytes: directory || symlink ? 0 : max(0, Int64(info.st_size)),
-        allocatedBytes: directory || symlink ? 0 : allocatedSize(for: info),
+        allocatedBytes: bytes,
         modified: modificationDate(for: info),
         device: UInt64(info.st_dev),
         inode: UInt64(info.st_ino),
         linkCount: UInt32(info.st_nlink),
         isMountPoint: false,
-        fullCloneID: directory || symlink ? 0 : fullCloneID(at: path, matching: info)
+        fullCloneID: details?.cloneID ?? 0,
+        privateBytes: details?.privateBytes,
+        sharesStorage: details?.mayShare == true || details?.privateBytes.map { $0 < bytes } == true
     )
 }
 
-private func fullCloneID(at path: String, matching info: stat) -> UInt64 {
+private struct AllocationDetails {
+    let cloneID: UInt64
+    let privateBytes: Int64?
+    let mayShare: Bool
+}
+
+private func allocationDetails(at path: String, matching info: stat) -> AllocationDetails? {
     var attributes = attrlist()
     attributes.bitmapcount = UInt16(ATTR_BIT_MAP_COUNT)
     attributes.commonattr = UInt32(ATTR_CMN_RETURNED_ATTRS) | UInt32(ATTR_CMN_DEVID) | UInt32(ATTR_CMN_FILEID)
-    attributes.forkattr = UInt32(ATTR_CMNEXT_CLONEID) | UInt32(ATTR_CMNEXT_EXT_FLAGS)
+    attributes.forkattr = UInt32(ATTR_CMNEXT_PRIVATESIZE) | UInt32(ATTR_CMNEXT_CLONEID) | UInt32(ATTR_CMNEXT_EXT_FLAGS)
     var buffer = [UInt8](repeating: 0, count: 128)
     return buffer.withUnsafeMutableBytes { bytes in
         guard getattrlist(path, &attributes, bytes.baseAddress, bytes.count,
-                          UInt32(FSOPT_ATTR_CMN_EXTENDED | FSOPT_NOFOLLOW)) == 0 else { return 0 }
+                          UInt32(FSOPT_ATTR_CMN_EXTENDED | FSOPT_NOFOLLOW)) == 0 else { return nil }
         let raw = UnsafeRawBufferPointer(bytes)
         guard let length = try? read(UInt32.self, from: raw, at: 0, through: raw.count),
               Int(length) <= raw.count,
               let returned = try? read(attribute_set_t.self, from: raw, at: 4, through: Int(length)),
-              has(returned.commonattr, ATTR_CMN_DEVID), has(returned.commonattr, ATTR_CMN_FILEID),
-              has(returned.forkattr, ATTR_CMNEXT_CLONEID), has(returned.forkattr, ATTR_CMNEXT_EXT_FLAGS) else { return 0 }
-        let cursor = 4 + MemoryLayout<attribute_set_t>.size
+              has(returned.commonattr, ATTR_CMN_DEVID), has(returned.commonattr, ATTR_CMN_FILEID) else { return nil }
+        var cursor = 4 + MemoryLayout<attribute_set_t>.size
         guard let device = try? read(dev_t.self, from: raw, at: cursor, through: Int(length)),
-              let inode = try? read(UInt64.self, from: raw, at: cursor + 4, through: Int(length)),
-              let cloneID = try? read(UInt64.self, from: raw, at: cursor + 12, through: Int(length)),
-              let flags = try? read(UInt64.self, from: raw, at: cursor + 20, through: Int(length)),
-              device == info.st_dev, inode == info.st_ino, flags & sharesAllBlocks != 0 else { return 0 }
-        return cloneID
+              let inode = try? read(UInt64.self, from: raw, at: cursor + MemoryLayout<dev_t>.size, through: Int(length)),
+              device == info.st_dev, inode == info.st_ino else { return nil }
+        cursor += MemoryLayout<dev_t>.size + MemoryLayout<UInt64>.size
+        var privateBytes: Int64?
+        var cloneID: UInt64 = 0
+        var flags: UInt64 = 0
+        if has(returned.forkattr, ATTR_CMNEXT_PRIVATESIZE) {
+            guard let value = try? read(off_t.self, from: raw, at: cursor, through: Int(length)) else { return nil }
+            privateBytes = max(0, Int64(value)); cursor += MemoryLayout<off_t>.size
+        }
+        if has(returned.forkattr, ATTR_CMNEXT_CLONEID) {
+            guard let value = try? read(UInt64.self, from: raw, at: cursor, through: Int(length)) else { return nil }
+            cloneID = value; cursor += MemoryLayout<UInt64>.size
+        }
+        if has(returned.forkattr, ATTR_CMNEXT_EXT_FLAGS) {
+            guard let value = try? read(UInt64.self, from: raw, at: cursor, through: Int(length)) else { return nil }
+            flags = value
+        }
+        return AllocationDetails(cloneID: flags & sharesAllBlocks != 0 ? cloneID : 0,
+                                 privateBytes: privateBytes, mayShare: flags & 1 != 0)
     }
 }
 

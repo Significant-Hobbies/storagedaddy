@@ -4,7 +4,7 @@ import Foundation
 /// ownership, current use, recoverability or reclaimable bytes.
 public enum FolderArchetype: String, Sendable {
     case project, gitMetadata, dependencies, buildOutputs, cache, models, virtualMachines
-    case application, appData, personalFiles, systemStorage, agentHistory, unknown
+    case application, appData, personalFiles, systemStorage, agentHistory, appSigningCopies, unknown
 
     public var label: String {
         switch self {
@@ -20,6 +20,7 @@ public enum FolderArchetype: String, Sendable {
         case .personalFiles: "Personal files"
         case .systemStorage: "System-managed storage"
         case .agentHistory: "AI conversation history"
+        case .appSigningCopies: "Chrome signing copies"
         case .unknown: "Folder type unconfirmed"
         }
     }
@@ -50,6 +51,8 @@ public enum FolderArchetype: String, Sendable {
             "Use macOS or the owning system tool's storage controls. Protected folders and APFS volumes may not expand into ordinary files; missing access is not evidence of unused space."
         case .agentHistory:
             "Archive conversations before cleanup. Reinstalling the agent cannot regenerate prompts and replies, and a conversation export may not restore a resumable session."
+        case .appSigningCopies:
+            ChromeSigningClones.explanation + " " + ChromeSigningClones.cleanupExplanation
         case .unknown:
             "The scanned metadata does not establish this folder's role. Inspect its owner and contents before deciding what can be regenerated or removed."
         }
@@ -98,6 +101,9 @@ public enum FolderArchetypes {
         }
 
         // Persistent stores take precedence over generic directory-name hints.
+        if ChromeSigningClones.location(path: path) != nil {
+            return assessment(.appSigningCopies, "Matched Chrome's temporary signing-copy location.")
+        }
         let vmOwners: Set<String> = ["huaq24hbr6.dev.orbstack", "orbstack", "com.docker.docker", "group.com.docker", "com.podman.desktop", "com.utmapp.utm", "com.parallels.desktop", "com.vmware.fusion"]
         let inAppStore = homeLower.starts(with: ["library", "group containers"]) || homeLower.starts(with: ["library", "containers"]) || homeLower.starts(with: ["library", "application support"])
         if (inAppStore && homeLower.dropFirst(2).first.map(vmOwners.contains) == true) || homeLower.first == ".orbstack" || lower.contains(where: { $0.hasSuffix(".utm") || $0.hasSuffix(".pvm") || $0.hasSuffix(".vmwarevm") }) {

@@ -322,11 +322,17 @@ struct CleanupView: View {
                             .foregroundStyle(Tints.forNode(scan.nodes[id])).font(.title3).frame(width: 32)
                         VStack(alignment: .leading, spacing: 5) {
                             Text(StorageLabels.name(scan.nodes[id]))
-                            CleanupFlag(category: m.cleanupCategory(id))
+                            if ChromeSigningClones.location(path: scan.url(for: id).path) != nil {
+                                Label("Signing copy · Quit Chrome first", systemImage: "square.on.square").font(.caption).foregroundStyle(Tints.yellow)
+                            } else { CleanupFlag(category: m.cleanupCategory(id)) }
                             Text(StorageLabels.location(scan.url(for: id).path)).help(scan.url(for: id).path).font(.caption).foregroundStyle(Tints.secondaryText).lineLimit(1).truncationMode(.middle)
                             if let note = CleanupGuidance.chromeCacheNote(path: scan.url(for: id).path) {
                                 Text(note).font(.caption).foregroundStyle(Tints.yellow)
                             }
+                            if ChromeSigningClones.location(path: scan.url(for: id).path) != nil {
+                                Text(ChromeSigningClones.cleanupExplanation).font(.caption).foregroundStyle(Tints.yellow)
+                            }
+                            StorageAllocationDetailsView(node: scan.nodes[id])
                             if let review = m.incompleteCleanup[id] {
                                 Label("Added anyway · \(review.skipped) \(review.skipped == 1 ? "item" : "items") not checked", systemImage: "exclamationmark.triangle")
                                     .font(.caption).foregroundStyle(Tints.coral)
@@ -339,12 +345,12 @@ struct CleanupView: View {
                             }
                         }
                         Spacer()
-                        Text(DiskFormat.bytes(scan.nodes[id].allocatedBytes)).monospacedDigit()
+                        Text(scan.nodes[id].allocatedBytes == 0 && (m.allocationSummary(scan.nodes[id])?.sharedFiles ?? 0) > 0 ? "Shared" : DiskFormat.bytes(scan.nodes[id].allocatedBytes)).monospacedDigit()
                             .foregroundStyle(Tints.forNode(scan.nodes[id])).frame(width: 104, alignment: .trailing)
                         Button("remove") { m.unstage(id) }.accessibilityLabel("Remove").disabled(m.busy)
                     }.accessibilityElement(children: .contain).listRowBackground(Color.black)
                 }.scrollContentBackground(.hidden).listStyle(.plain)
-                HStack { Text("\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") · \(DiskFormat.bytes(m.staged.reduce(0) { $0 + scan.nodes[$1].allocatedBytes })) allocated").fontWeight(.medium); Spacer(); Button("move to trash…", action: m.trashStaged).accessibilityLabel("Move to Trash…").buttonStyle(StorageButtonStyle(prominent: true)).tint(Tints.coral).disabled(m.busy || m.monitoring) }
+                HStack { Text("\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") · \(m.stagedExclusiveBytes.map(DiskFormat.bytes) ?? "Unknown") exclusive allocation").fontWeight(.medium); Spacer(); Button("move to trash…", action: m.trashStaged).accessibilityLabel("Move to Trash…").buttonStyle(StorageButtonStyle(prominent: true)).tint(Tints.coral).disabled(m.busy || m.monitoring) }
                 Text("Trash still uses disk space until it is emptied.").font(.caption).foregroundStyle(Tints.secondaryText)
                 if m.monitoring { Text("Stop monitoring before cleanup.").font(.caption).foregroundStyle(Tints.secondaryText) }
             }

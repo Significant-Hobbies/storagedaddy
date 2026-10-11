@@ -39,16 +39,13 @@ struct ScanStorageAccounting: Sendable {
     }
 
     var summary: String {
-        if exceedsUsed {
-            return "\(DiskFormat.bytes(capacity.used)) used of \(DiskFormat.bytes(capacity.total)) startup storage · \(DiskFormat.bytes(capacity.available)) available · \(DiskFormat.bytes(scanned)) file allocations (shared blocks can count more than once)"
-        }
-        return "\(DiskFormat.bytes(scanned)) scanned · \(DiskFormat.bytes(outsideBreakdown)) used outside this breakdown · \(DiskFormat.bytes(capacity.available)) available"
+        "\(DiskFormat.bytes(capacity.used)) used of \(DiskFormat.bytes(capacity.total)) startup storage · \(DiskFormat.bytes(capacity.available)) available"
     }
 
     var explanation: String {
         let comparison = exceedsUsed
             ? "File allocations exceed the startup storage estimate. APFS files can share blocks, and storage can change between measurements; these figures cannot be reconciled as separate physical allocations."
-            : "macOS reports \(DiskFormat.bytes(capacity.used)) used across \(DiskFormat.bytes(capacity.total)) of startup storage. This scan accounts for \(DiskFormat.bytes(scanned)) in file allocations. The remaining \(DiskFormat.bytes(outsideBreakdown)) is used space outside this breakdown, not unused space."
+            : "macOS reports \(DiskFormat.bytes(capacity.used)) used across \(DiskFormat.bytes(capacity.total)) of startup storage. This scan attributes \(DiskFormat.bytes(scanned)) in file allocations. Subtracting file allocations from disk usage does not measure a missing folder: shared blocks, snapshots and incomplete coverage prevent an exact physical breakdown."
         return comparison + "\n\nThe file scan cannot enumerate everything counted by macOS: protected or unreadable folders, exclusions, and separate APFS system volumes are outside its coverage. Snapshots and filesystem metadata can also occupy space without appearing as ordinary files. The difference is an estimate, not a measured size for any one of these causes. Shared APFS blocks and changes since the scan also affect the comparison.\n\nOnly \(DiskFormat.bytes(capacity.available)) is reported as available. Purgeable space is part of used space that macOS may reclaim; do not add it to the breakdown again. Use Scan Folder to include a specific omitted folder, or optionally grant Full Disk Access and rescan for broader coverage. Snapshot blocks and filesystem metadata have no ordinary folder tree to expand here."
     }
 }

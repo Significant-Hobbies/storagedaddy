@@ -32,6 +32,15 @@ public enum SnapshotArchive {
             referenced.formUnion(n.children)
         }
         guard referenced.count == value.nodes.count - 1 else { throw invalid("Snapshot contains an orphaned item.") }
+        var measured = Set<Int>()
+        for detail in value.fileAllocationDetails ?? [] {
+            guard value.nodes.indices.contains(detail.nodeID), measured.insert(detail.nodeID).inserted,
+                  !value.nodes[detail.nodeID].isDirectory, !value.nodes[detail.nodeID].isSymlink,
+                  detail.reportedBytes >= 0, detail.linkCount > 0,
+                  detail.privateBytes.map({ $0 >= 0 && $0 <= detail.reportedBytes }) ?? true else {
+                throw invalid("Snapshot contains invalid file-allocation metadata.")
+            }
+        }
     }
     private static func invalid(_ text: String) -> NSError { NSError(domain: "Snapshot", code: 1, userInfo: [NSLocalizedDescriptionKey: text]) }
 }

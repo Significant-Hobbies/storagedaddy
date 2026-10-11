@@ -40,6 +40,9 @@ public struct ScanResult: Codable, Sendable {
     /// Optional to preserve decoding of snapshots written before this field existed.
     public var incompleteEvidence: [ScanIncompleteEvidence]?
     public var incompleteEvidenceTruncated: Bool?
+    /// Sparse allocation exceptions keep the compact DiskNode layout unchanged.
+    /// nil means sharing/private-byte metadata was not recorded by this scan.
+    public var fileAllocationDetails: [FileAllocationDetail]? = nil
     public init(rootPath: String, nodes: [DiskNode], started: Date = Date(), elapsed: Double = 0, processDiskReadBytes: UInt64? = nil, errors: [String] = [], skipped: Int = 0, incompleteEvidence: [ScanIncompleteEvidence]? = nil, incompleteEvidenceTruncated: Bool? = nil) {
         self.rootPath = rootPath; self.nodes = nodes; self.started = started; self.elapsed = elapsed; self.errors = errors; self.skipped = skipped; self.incompleteEvidence = incompleteEvidence; self.incompleteEvidenceTruncated = incompleteEvidenceTruncated
         self.processDiskReadBytes = processDiskReadBytes

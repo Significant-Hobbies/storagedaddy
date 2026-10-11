@@ -163,13 +163,13 @@ struct DiskMapView: View {
                                 Text(StorageLabels.name(n)).lineLimit(1)
                                 Text(itemStatus(n)).font(.caption).foregroundStyle(Tints.secondaryText)
                             }
-                            Spacer(); Text(StorageLabels.size(n, allocated: m.allocated)).monospacedDigit()
+                            Spacer(); Text(m.itemSizeDescription(n)).monospacedDigit()
                             if n.isDirectory { Image(systemName: "chevron.right") }
                         }.padding(.vertical, 9).padding(.horizontal, 8).contentShape(Rectangle())
                     }.buttonStyle(.plain).background(m.selected == n.id ? Tints.electricBlue.opacity(0.2) : .clear)
                         .accessibilityLabel(StorageLabels.name(n))
-                        .accessibilityValue("\(StorageLabels.size(n, allocated: m.allocated)) · \(itemStatus(n))")
-                        .help("\(StorageLabels.name(n)) · \(StorageLabels.size(n, allocated: m.allocated)) \(m.allocated ? "on disk" : "logical")")
+                        .accessibilityValue("\(m.itemSizeDescription(n)) · \(itemStatus(n))")
+                        .help("\(StorageLabels.name(n)) · \(StorageLabels.size(n, allocated: m.allocated)) \(m.allocated ? "attributed allocation" : "logical")")
                         .simultaneousGesture(TapGesture(count: 2).onEnded { m.open(n) })
                         .contextMenu { StorageItemMenu(node: n) }
                     Divider()

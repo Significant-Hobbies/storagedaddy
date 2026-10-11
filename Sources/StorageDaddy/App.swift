@@ -292,7 +292,8 @@ struct FileTypeStats: Sendable {
     @Published var showWelcome = false
     @Published var lastTrashedURLs: [URL] = []
     @Published private(set) var filenameSearchIdentity = UUID()
-    @Published var scan: ScanResult? { didSet { filenameSearchIdentity = UUID(); invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview() } }
+    @Published var scan: ScanResult? { didSet { allocationIndex = nil; filenameSearchIdentity = UUID(); invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview() } }
+    @Published var allocationIndex: StorageAllocationIndex?
     @Published var scanStorageAccounting: ScanStorageAccounting?
     @Published private(set) var promptAvoidanceFolders: [String] = []
     private var lastScanAllowedProtectedFolder = false
@@ -448,14 +449,27 @@ struct FileTypeStats: Sendable {
     func toggleStage(_ id: Int) {
         if staged.contains(id) { unstage(id) } else { stage(id) }
     }
-    var projectedFreeUpperBound: Int64? {
-        guard let scan, let volumeFree else { return nil }
-        let stagedBytes = staged.filter { scan.nodes.indices.contains($0) }.reduce(Int64.zero) { sum, id in
-            let (value, overflow) = sum.addingReportingOverflow(max(0, scan.nodes[id].allocatedBytes))
-            return overflow ? Int64.max : value
+    func allocationSummary(_ node: DiskNode) -> StorageAllocationSummary? { allocationIndex?.summary(for: node) }
+    func itemSizeDescription(_ node: DiskNode) -> String {
+        if allocated, node.allocatedBytes == 0, (allocationSummary(node)?.sharedFiles ?? 0) > 0 { return "Shared" }
+        return StorageLabels.size(node, allocated: allocated)
+    }
+    func folderSizeDescription(_ node: DiskNode) -> String {
+        if allocated, let summary = allocationSummary(node), summary.sharedFiles > 0 {
+            return "\(summary.exclusiveBytes.map(DiskFormat.bytes) ?? "Unknown") exclusive · Shared storage"
         }
-        let (sum, overflow) = volumeFree.addingReportingOverflow(stagedBytes)
-        return min(volumeCapacity ?? Int64.max, overflow ? Int64.max : sum)
+        return "\(StorageLabels.size(node, allocated: allocated)) in this folder"
+    }
+    var stagedExclusiveBytes: Int64? {
+        guard let scan, let allocationIndex else { return nil }
+        var total: Int64 = 0
+        for id in staged where scan.nodes.indices.contains(id) {
+            if hasAncestor(id, in: staged.subtracting([id])) { continue }
+            guard let bytes = allocationIndex.summary(for: scan.nodes[id]).exclusiveBytes else { return nil }
+            let (sum, overflow) = total.addingReportingOverflow(bytes)
+            total = overflow ? .max : sum
+        }
+        return total
     }
     func refreshFocus() {
         focusTask?.cancel(); ageTask?.cancel()
@@ -782,7 +796,8 @@ struct FileTypeStats: Sendable {
                     }
                     let mapIndex = try StorageMapIndex(scan: result, groups: groups, cancellationCheck: { try Task.checkCancellation() })
                     let volume = try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey, .volumeTotalCapacityKey])
-                    return (quick.sorted, apps, fileCount, groups, report, growth, findingIndex, projectNames, mapIndex, volume?.volumeAvailableCapacity.map(Int64.init), volume?.volumeTotalCapacity.map(Int64.init), accounting)
+                    let allocationIndex = try StorageAllocationIndex(scan: result, cancellationCheck: { try Task.checkCancellation() })
+                    return (quick.sorted, apps, fileCount, groups, report, growth, findingIndex, projectNames, mapIndex, volume?.volumeAvailableCapacity.map(Int64.init), volume?.volumeTotalCapacity.map(Int64.init), accounting, allocationIndex)
                 }
                 let summary = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
 
@@ -804,6 +819,7 @@ struct FileTypeStats: Sendable {
                 if result.nodes.count > 1 || result.skipped == 0 { cleanupRefreshPaths.removeAll { $0 == result.rootPath } }
                 self.scan = result; exclusionResultsStale = false; quickWinNodes = summary.0; appNodes = summary.1; fileCount = summary.2; focus = 0; selected = nil
                 scanStorageAccounting = summary.11
+                allocationIndex = summary.12
                 // A manual scan must land on results, even when launched from credits or another utility page.
                 if let destination {
                     if destination == .explore { openStorage(.explore) }
@@ -993,6 +1009,40 @@ struct FileTypeStats: Sendable {
                 message = "Could not add \(StorageLabels.name(scan.nodes[id])) to cleanup. \(error.localizedDescription)"
                 progress = "Item needs attention · Nothing added"
             }
+        }
+    }
+    func stageChromeSigningCopies(_ storeID: Int) {
+        guard let scan, !busy, !monitoring, macTools?.isBusy != true, scan.nodes.indices.contains(storeID),
+              ChromeSigningClones.location(path: scan.url(for: storeID).path) == .store else { return }
+        let ids = ChromeSigningClones.copyIDs(in: scan, storeID: storeID)
+        let version = scanVersion
+        busy = true; progress = "Reviewing Chrome signing copies…"
+        task = Task {
+            defer { busy = false }
+            var added = 0; var kept = 0; var firstReason: String?
+            for id in ids {
+                do {
+                    try Task.checkCancellation()
+                    guard scanVersion == version else { return }
+                    if hasAncestor(id, in: staged) { continue }
+                    try await CleanupPreflight.validate(ids: [id], in: scan, excludedFolders: excludedFolders)
+                    try Task.checkCancellation()
+                    guard scanVersion == version else { return }
+                    let path = scan.url(for: id).path
+                    for other in Array(staged) where scan.url(for: other).path.hasPrefix(path + "/") { unstage(other) }
+                    staged.insert(id); added += 1
+                } catch is CancellationError {
+                    progress = "Signing-copy review cancelled · \(added) staged · Nothing moved"
+                    return
+                } catch {
+                    kept += 1
+                    if firstReason == nil { firstReason = error.localizedDescription }
+                }
+            }
+            progress = "\(added) signing copies staged · \(kept) kept · Nothing moved"
+            if added > 0 { openStorage(.cleanup) }
+            if let firstReason { message = "Kept \(kept) signing copies. \(firstReason)" }
+            else if ids.isEmpty { message = "No signing copies were found in this scan. Rescan the folder to refresh it." }
         }
     }
     var suggestedCacheIDs: [Int] {

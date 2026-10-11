@@ -413,6 +413,7 @@ public enum CleanupSafety {
         if !actual.isDirectory, actual.size != expected.logicalBytes {
             throw DiskAnalysisError.fileMutated(path: candidate.path)
         }
+        try ChromeSigningClones.validateForCleanup(at: candidate)
     }
 
     private struct State {
