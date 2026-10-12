@@ -1,4 +1,4 @@
-"""Package an already-built local executable and prepared local helper support."""
+"""Build or package a local executable with prepared local helper support."""
 import argparse
 import hashlib
 import json
@@ -13,7 +13,7 @@ finder_search = import_module("prepare-finder-search")
 
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
-parser.add_argument("binary", nargs="?", type=Path, default=root / ".build/release/StorageDaddy")
+parser.add_argument("binary", nargs="?", type=Path, help="Already-built executable; otherwise build with Swift Build")
 parser.add_argument("--output", type=Path, default=root / "artifacts/StorageDaddy.app", help="Local development app bundle destination")
 parser.add_argument("--check", action="store_true", help="validate prepared support without changing the app bundle")
 parser.add_argument("--version", help="Explicit release version")
@@ -23,7 +23,7 @@ if (args.version is None) != (args.build is None):
     parser.error("--version and --build must be passed together")
 if args.version is not None and (not all(part.isdigit() for part in args.version.split(".")) or args.build < 1):
     parser.error("Version must be numeric and build must be positive")
-binary = args.binary
+binary = args.binary or swiftpm_resources.build_app(root)
 update_configuration = sparkle_support.configuration()
 if not binary.is_file():
     raise SystemExit(f"Build the executable first: {binary}")
@@ -104,6 +104,7 @@ sparkle_support.sign(bundle, "-", timestamp=False)
 subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(contents / "Helpers/memory-pack")], check=True)
 subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(contents / "Helpers/storage-search")], check=True)
 subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(bundle)], check=True)
+swiftpm_resources.check_ui_resources(binary, bundle)
 subprocess.run([
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
     "-f", str(bundle)

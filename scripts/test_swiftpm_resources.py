@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import runpy
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -14,6 +15,33 @@ finder_search = import_module("prepare-finder-search")
 
 
 class SwiftPMResourcesTests(unittest.TestCase):
+    def test_build_resolves_the_selected_backends_product_directory(self):
+        root = Path("/fixture/source")
+        with patch("subprocess.run") as build, patch("subprocess.check_output", return_value="/fixture/products/Release\n") as products:
+            binary = swiftpm_resources.build_app(root)
+        self.assertEqual(binary, Path("/fixture/products/Release/StorageDaddy"))
+        command = build.call_args.args[0]
+        self.assertEqual(command[command.index("--build-system") + 1], "swiftbuild")
+        self.assertIn("--only-use-versions-from-resolved-file", command)
+        self.assertEqual(products.call_args.args[0], [*command, "--show-bin-path"])
+
+    def test_packaged_loader_runs_without_build_path_fallback(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            binary = root / "products/StorageDaddy"
+            bundle = binary.parent / swiftpm_resources.UI_BUNDLE
+            bundle.mkdir(parents=True)
+            (bundle / "font.ttf").write_bytes(b"fixture font")
+            app = root / "StorageDaddy.app"
+            def check(command, **kwargs):
+                self.assertFalse(bundle.exists())
+                self.assertEqual(command, [str(app.resolve() / "Contents/MacOS/StorageDaddy"), "--check-ui-resources"])
+                self.assertTrue(kwargs["check"])
+                raise subprocess.CalledProcessError(5, command)
+            with patch("subprocess.run", side_effect=check), self.assertRaises(subprocess.CalledProcessError):
+                swiftpm_resources.check_ui_resources(binary, app)
+            self.assertEqual((bundle / "font.ttf").read_bytes(), b"fixture font")
+
     def test_missing_bundle_blocks_packaging_with_build_guidance(self):
         with tempfile.TemporaryDirectory() as folder:
             binary = Path(folder) / "StorageDaddy"
@@ -80,7 +108,7 @@ class SwiftPMResourcesTests(unittest.TestCase):
                 script = root / "scripts" / name
                 script.write_text((scripts / name).read_text())
                 output = root / "candidate"
-                arguments = [str(script)] if name == "package-app.py" else [
+                arguments = [str(script), str(binary)] if name == "package-app.py" else [
                     str(script), "--identity", "fixture", "--output", str(output),
                     "--version", "0.1.3", "--build", "1", "--source-sha", "a" * 40
                 ]
@@ -88,7 +116,8 @@ class SwiftPMResourcesTests(unittest.TestCase):
                     # Simulate hdiutil's output for checksum validation; execute no external tools.
                     if command[0] == "hdiutil" and command[1] == "create":
                         Path(command[-1]).write_bytes(b"fixture disk image")
-                with redirect_stdout(io.StringIO()), patch("sys.argv", arguments), patch.object(sparkle_support, "configuration", return_value={}), \
+                with redirect_stdout(io.StringIO()), patch("sys.argv", arguments), patch.object(swiftpm_resources, "build_app", return_value=binary), \
+                     patch.object(sparkle_support, "configuration", return_value={}), \
                      patch.object(sparkle_support, "embed"), patch.object(sparkle_support, "sign"), \
                      patch.object(finder_search, "validate_support", return_value=search_support), \
                      patch("subprocess.run", side_effect=fake_run), patch("subprocess.check_output", return_value="a" * 40):
@@ -100,7 +129,7 @@ class SwiftPMResourcesTests(unittest.TestCase):
                 if name == "package-app.py":
                     bundle = binary.parent / swiftpm_resources.UI_BUNDLE
                     bundle.rename(binary.parent / "held-bundle")
-                    with patch("sys.argv", [str(script), "--check"]), \
+                    with patch("sys.argv", [str(script), str(binary), "--check"]), \
                          patch.object(sparkle_support, "configuration", return_value={}), \
                          patch.object(finder_search, "validate_support", return_value=search_support), \
                          self.assertRaisesRegex(SystemExit, "Missing SwiftPM resource bundle"):
