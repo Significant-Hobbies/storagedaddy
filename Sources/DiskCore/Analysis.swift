@@ -369,6 +369,11 @@ public enum DuplicateFinder {
 
 public enum CleanupSafety {
     public static func validate(url: URL, expected: DiskNode, root: URL) throws {
+        try validate(url: url, expected: expected, root: root, allowingRegenerableChanges: false)
+    }
+
+    public static func validate(url: URL, expected: DiskNode, root: URL, allowingRegenerableChanges: Bool,
+                                home: String = FileManager.default.homeDirectoryForCurrentUser.path) throws {
         let candidate = url.standardizedFileURL
         let rootURL = root.standardizedFileURL
         let resolvedCandidate = candidate.resolvingSymlinksInPath().standardizedFileURL
@@ -393,8 +398,17 @@ public enum CleanupSafety {
         guard !DuplicateFinder.isSensitive(resolvedCandidate) else {
             throw DiskAnalysisError.unsafePath(path: candidate.path, reason: "sensitive path")
         }
+        let ancestors = candidate.path.lowercased().split(separator: "/").dropLast()
+        guard !ancestors.contains(where: { $0.hasSuffix(".app") || $0.hasSuffix(".framework") || $0.hasSuffix(".xpc") }) else {
+            throw DiskAnalysisError.unsafePath(path: candidate.path, reason: "an installed app component; remove the whole app through Applications instead")
+        }
 
         let actual = try state(at: candidate)
+        let regenerable = allowingRegenerableChanges && expected.isDirectory
+            && CleanupGuidance.isRegenerableFolder(path: candidate.path, home: home)
+        guard !allowingRegenerableChanges || regenerable else {
+            throw DiskAnalysisError.unsafePath(path: candidate.path, reason: "rebuild or download inputs changed; review this folder again")
+        }
         guard !actual.isSymlink else {
             throw DiskAnalysisError.unsafePath(path: candidate.path, reason: "symlink")
         }
@@ -405,7 +419,7 @@ public enum CleanupSafety {
               actual.device == expected.device,
               actual.inode == expected.inode,
               expected.modified != .distantPast,
-              actual.modified == expected.modified else {
+              regenerable || actual.modified == expected.modified else {
             throw DiskAnalysisError.fileMutated(path: candidate.path)
         }
         // Directory st_size describes the directory record, while DiskNode stores

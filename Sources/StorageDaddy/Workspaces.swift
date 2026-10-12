@@ -290,12 +290,30 @@ struct CleanupView: View {
     @EnvironmentObject var m: ExplorerModel
     var body: some View {
         GeometryReader { geometry in
+        ScrollView {
         VStack(alignment: .leading, spacing: 16) {
-            HStack { SMSectionHeader("Review Cleanup", size: 28).accessibilityLabel("Review Cleanup"); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") } }
-            Text(m.staged.isEmpty ? "Add files and folders from Explore or Developer Insights. Nothing is removed until you confirm." : "Review the list before moving it to Trash. Items added with an incomplete check are marked below. We check paths and known contents again after confirmation.").foregroundStyle(Tints.secondaryText)
+            HStack { SMSectionHeader("Quick Cleanup", size: 28).accessibilityLabel("Quick Cleanup"); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") } }
+            Text(m.staged.isEmpty ? "Review rebuildable items below, or add a folder from Storage. Nothing is removed until you confirm." : "Review the list before moving it to Trash. Items added with an incomplete check are marked below. We check paths and known contents again after confirmation.").foregroundStyle(Tints.secondaryText)
             if !m.showCleanup && m.staged.isEmpty { TrashInventoryView() }
-            if let scan = m.scan, !m.autoCleanerSuggestions.isEmpty {
+            if let scan = m.scan, !m.easyCleanupIDs.isEmpty {
                 AutoCleanerCard(scan: scan)
+            }
+            if let scan = m.scan, !m.quickCleanupFailures.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Kept out of this review").font(.headline)
+                    ForEach(m.quickCleanupFailures.keys.sorted(), id: \.self) { id in
+                        if scan.nodes.indices.contains(id), let reason = m.quickCleanupFailures[id] {
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(StorageLabels.location(scan.url(for: id).path)).font(.callout).help(scan.url(for: id).path)
+                                    Text(reason).font(.caption).foregroundStyle(Tints.yellow).fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer()
+                                Button("inspect") { m.openStorage(.explore); m.open(scan.nodes[id]) }.accessibilityLabel("Inspect kept item")
+                            }
+                        }
+                    }
+                }.padding(16).storagePanel()
             }
             if m.staged.isEmpty, !m.lastTrashedURLs.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
@@ -308,15 +326,13 @@ struct CleanupView: View {
                 }.padding(.vertical, 24)
                 Spacer()
             } else if m.staged.isEmpty {
-                StorageEmptyView("Choose what to clean up", systemImage: "tray", description: Text("Right-click a file or folder and choose Add to Cleanup. Each item is checked before it appears here."))
-                if !m.easyCleanupIDs.isEmpty {
-                    Button("Easy Cleanup — stage \(m.easyCleanupIDs.count) regenerable items (\(DiskFormat.bytes(m.easyCleanupBytes)))…", action: m.stageEasyCleanup)
-                        .buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy || m.monitoring)
-                    Text("Stale builds, dependency folders and package caches. Each is verified, then listed here for your confirmation — nothing moves until Move to Trash.").font(.caption).foregroundStyle(Tints.secondaryText)
+                if m.easyCleanupIDs.isEmpty {
+                    StorageEmptyView("No rebuildable items found in this scan", systemImage: "tray", description: Text("Scan another folder, or add an item from Storage for individual review."))
                 }
             }
             else if let scan = m.scan {
-                List(m.staged.sorted(), id: \.self) { id in
+                LazyVStack(alignment: .leading, spacing: 16) {
+                ForEach(m.staged.sorted(), id: \.self) { id in
                     HStack(alignment: .top) {
                         Image(systemName: scan.nodes[id].isDirectory ? "folder.fill" : "doc.fill")
                             .foregroundStyle(Tints.forNode(scan.nodes[id])).font(.title3).frame(width: 32)
@@ -324,6 +340,8 @@ struct CleanupView: View {
                             Text(StorageLabels.name(scan.nodes[id]))
                             if ChromeSigningClones.location(path: scan.url(for: id).path) != nil {
                                 Label("Signing copy · Quit Chrome first", systemImage: "square.on.square").font(.caption).foregroundStyle(Tints.yellow)
+                            } else if m.quickCleanupCandidateIDs.contains(id) {
+                                Label("Rebuildable · Downloads or rebuilds may be needed", systemImage: "arrow.clockwise").font(.caption).foregroundStyle(Tints.mint)
                             } else { CleanupFlag(category: m.cleanupCategory(id)) }
                             Text(StorageLabels.location(scan.url(for: id).path)).help(scan.url(for: id).path).font(.caption).foregroundStyle(Tints.secondaryText).lineLimit(1).truncationMode(.middle)
                             if let note = CleanupGuidance.chromeCacheNote(path: scan.url(for: id).path) {
@@ -348,14 +366,17 @@ struct CleanupView: View {
                         Text(scan.nodes[id].allocatedBytes == 0 && (m.allocationSummary(scan.nodes[id])?.sharedFiles ?? 0) > 0 ? "Shared" : DiskFormat.bytes(scan.nodes[id].allocatedBytes)).monospacedDigit()
                             .foregroundStyle(Tints.forNode(scan.nodes[id])).frame(width: 104, alignment: .trailing)
                         Button("remove") { m.unstage(id) }.accessibilityLabel("Remove").disabled(m.busy)
-                    }.accessibilityElement(children: .contain).listRowBackground(Color.black)
-                }.scrollContentBackground(.hidden).listStyle(.plain)
+                    }.accessibilityElement(children: .contain)
+                    Divider()
+                }
+                }
                 HStack { Text("\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") · \(m.stagedExclusiveBytes.map(DiskFormat.bytes) ?? "Unknown") exclusive allocation").fontWeight(.medium); Spacer(); Button("move to trash…", action: m.trashStaged).accessibilityLabel("Move to Trash…").buttonStyle(StorageButtonStyle(prominent: true)).tint(Tints.coral).disabled(m.busy || m.monitoring) }
                 Text("Trash still uses disk space until it is emptied.").font(.caption).foregroundStyle(Tints.secondaryText)
                 if m.monitoring { Text("Stop monitoring before cleanup.").font(.caption).foregroundStyle(Tints.secondaryText) }
             }
         }.padding(24)
-            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
         }.background(Color.black).buttonStyle(StorageButtonStyle())
     }
 }
@@ -366,49 +387,47 @@ struct CleanupView: View {
 private struct AutoCleanerCard: View {
     let scan: ScanResult
     @EnvironmentObject var m: ExplorerModel
-
-    private var suggestions: [AutoCleanerSuggestion] { Array(m.autoCleanerSuggestions.prefix(6)) }
-    private var totalBytes: Int64 { m.autoCleanerSuggestions.reduce(0) { $0 + $1.allocatedBytes } }
+    private var suggestions: [Int] { Array(m.easyCleanupIDs.prefix(8)) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "wand.and.stars").foregroundStyle(Tints.yellow)
-                Text("Auto Cleaner").font(.headline)
-                Text("\(m.autoCleanerSuggestions.count) stale \(m.autoCleanerSuggestions.count == 1 ? "folder" : "folders") · \(DiskFormat.bytes(totalBytes))")
-                    .font(.caption).foregroundStyle(Tints.secondaryText)
+        VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                HStack { Text("Rebuildable items").font(.headline); Spacer(); summary }
+                VStack(alignment: .leading) { Text("Rebuildable items").font(.headline); summary }
             }
-            Text("Suggestions only — nothing moves automatically. Modification dates are metadata, not proof a folder is unused.")
-                .font(.caption).foregroundStyle(Tints.secondaryText)
-            Button("Easy Cleanup — stage all \(m.easyCleanupIDs.count) regenerable items (\(DiskFormat.bytes(m.easyCleanupBytes)))…", action: m.stageEasyCleanup)
-                .font(.callout).buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy || m.monitoring || m.easyCleanupIDs.isEmpty)
-            ForEach(suggestions) { suggestion in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: suggestion.category.symbol)
-                        .foregroundStyle(suggestion.category.color).font(.title3).frame(width: 26)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(StorageLabels.name(scan.nodes[suggestion.id])).font(.callout)
-                        Text("\(suggestion.category.title) · unchanged \(suggestion.staleDays) days")
-                            .font(.caption).foregroundStyle(Tints.secondaryText)
-                        Text(suggestion.path).font(.caption2).foregroundStyle(Tints.secondaryText.opacity(0.8))
-                            .lineLimit(1).truncationMode(.middle).help(suggestion.path)
+            Text("Caches, project dependencies and build outputs. Apps may need to download or rebuild them afterward. Nothing moves automatically.")
+                .font(.caption).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
+            Button("Review \(m.easyCleanupIDs.count) items (\(DiskFormat.bytes(m.easyCleanupBytes)))…", action: m.stageEasyCleanup)
+                .buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy || m.monitoring)
+            ForEach(suggestions, id: \.self) { id in
+                let category = m.cleanupCategory(id) ?? .packageCaches
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 10) {
+                        Image(systemName: category.symbol).foregroundStyle(category.color).frame(width: 20)
+                        Text(StorageLabels.name(scan.nodes[id])).fontWeight(.medium)
+                        Spacer()
+                        Text(DiskFormat.bytes(scan.nodes[id].allocatedBytes)).monospacedDigit()
                     }
-                    Spacer()
-                    Text(DiskFormat.bytes(suggestion.allocatedBytes)).font(.caption).monospacedDigit()
-                    Button("inspect") {
-                        m.showCleanup = false
-                        m.workspace = .explore
-                        if scan.nodes.indices.contains(suggestion.id) { m.open(scan.nodes[suggestion.id]) }
-                    }.accessibilityLabel("Inspect").font(.caption)
-                    Button("add for review") { m.stage(suggestion.id) }.accessibilityLabel("Add for Review").font(.caption).disabled(m.busy)
+                    Text(StorageLabels.location(scan.url(for: id).path)).font(.caption)
+                        .foregroundStyle(Tints.secondaryText).lineLimit(2).help(scan.url(for: id).path)
+                    HStack {
+                        Text(category.title).font(.caption).foregroundStyle(Tints.secondaryText)
+                        Spacer()
+                        Button("inspect") { m.showCleanup = false; m.openStorage(.explore); m.open(scan.nodes[id]) }
+                            .accessibilityLabel("Inspect").font(.caption)
+                        Button("add for review") { m.stage(id) }.accessibilityLabel("Add for Review").font(.caption).disabled(m.busy)
+                    }
+                    Divider()
                 }
             }
-            if m.autoCleanerSuggestions.count > suggestions.count {
-                Text("+ \(m.autoCleanerSuggestions.count - suggestions.count) more in Developer Insights")
+            if m.easyCleanupIDs.count > suggestions.count {
+                Text("+ \(m.easyCleanupIDs.count - suggestions.count) more included in Review items")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
             }
-        }
-        .padding(14)
-        .storagePanel()
+        }.padding(16).storagePanel()
+    }
+    private var summary: some View {
+        Text("\(m.easyCleanupIDs.count) folders · \(DiskFormat.bytes(m.easyCleanupBytes))")
+            .font(.caption).foregroundStyle(Tints.secondaryText)
     }
 }

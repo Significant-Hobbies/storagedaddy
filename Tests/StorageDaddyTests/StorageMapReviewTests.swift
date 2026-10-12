@@ -6,6 +6,15 @@ import DiskCore
 
 @MainActor @Suite(.serialized)
 struct StorageMapReviewTests {
+    @Test func dashboardIsHomeAndUnclassifiedFoldersRetainDistinctColors() {
+        #expect(ExplorerModel().workspace == .dashboard)
+        let first = DiskNode(id: 1, parent: 0, name: "Users", isDirectory: true)
+        let second = DiskNode(id: 2, parent: 0, name: "Applications", isDirectory: true)
+        #expect(MapTileFill.resolved(Tints.forMapNode(first, kind: .generic), intensity: 0.9)
+            != MapTileFill.resolved(Tints.forMapNode(second, kind: .generic), intensity: 0.9))
+        #expect(Tints.forMapNode(first, kind: .caches) == Tints.forKind(.caches))
+    }
+
     private func fixture() -> ScanResult {
         ScanResult(rootPath: "/tmp/storage-map-fixture", nodes: [
             DiskNode(id: 0, parent: nil, name: "Fixture", isDirectory: true, allocatedBytes: 900_000_000, children: [1, 7, 8, 9]),
@@ -168,9 +177,10 @@ struct StorageMapReviewTests {
                 .appendingPathComponent("artifacts/compact-map")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         for (width, height) in [(880, 600), (1200, 850), (1440, 900)] {
-            let states = ["bytes", "files", "filter", "staged", "inspector-hidden"]
+            let states = ["bytes", "files", "filter", "staged", "inspector-hidden", "cleanup"]
                 + (width == 880 ? MapMode.allCases.filter { $0 != .treemap }.map(\.rawValue) : [])
             for state in states {
+                m.openStorage(state == "cleanup" ? .cleanup : .explore)
                 m.mode = MapMode(rawValue: state) ?? .treemap
                 m.mapMeasure = state == "files" ? .files : .bytes
                 m.search = state == "filter" ? "report" : ""

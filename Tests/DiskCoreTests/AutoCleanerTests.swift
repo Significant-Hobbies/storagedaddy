@@ -98,4 +98,14 @@ final class AutoCleanerTests: XCTestCase {
         )
         XCTAssertTrue(suggestions.isEmpty)
     }
+
+    func testInstalledAppAndToolRuntimeDependenciesAreNeverSuggested() {
+        for root in ["/Applications/OpenClaw.app/Contents/Resources", "/System/Volumes/Data/Applications/OpenClaw.app/Contents/Resources", "/Users/test/Library/Application Support/Buzz/node-tools/lib"] {
+            let scan = ScanResult(rootPath: root, nodes: [
+                DiskNode(id: 0, parent: nil, name: "Resources", isDirectory: true, children: [1]),
+                DiskNode(id: 1, parent: 0, name: "node_modules", isDirectory: true)
+            ])
+            XCTAssertTrue(AutoCleaner.suggestions(scan: scan, findings: [finding(1, .nodeModules, bytes: 100 * mb, modified: daysAgo(90))], now: now, home: "/Users/test").isEmpty, root)
+        }
+    }
 }

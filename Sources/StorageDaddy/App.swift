@@ -128,7 +128,7 @@ private struct StorageMenu: View {
 enum Workspace: String, CaseIterable, Identifiable {
     case macControls = "Mac Controls", findFiles = "Find Files", aiSessions = "AI Sessions", developer = "Developer Insights", explore = "Explore", applications = "Applications", snapshots = "Snapshots", duplicates = "Duplicates", projects = "Projects", appData = "App Data", cleanup = "Cleanup", acknowledgments = "Acknowledgments", dashboard = "Dashboard"
     var id: String { rawValue }
-    var title: String { switch self { case .explore: "Storage"; case .cleanup: "Review Cleanup"; case .snapshots: "History"; default: rawValue } }
+    var title: String { switch self { case .explore: "Storage"; case .cleanup: "Quick Cleanup"; case .snapshots: "History"; default: rawValue } }
     var requiresScan: Bool { [.findFiles, .developer, .cleanup, .duplicates, .projects, .appData].contains(self) }
     var icon: String { switch self { case .macControls: "slider.horizontal.3"; case .findFiles: "magnifyingglass"; case .aiSessions: "bubble.left.and.text.bubble.right.fill"; case .developer: "terminal"; case .explore: "internaldrive.fill"; case .applications: "app.badge"; case .snapshots: "clock.arrow.circlepath"; case .duplicates: "doc.on.doc"; case .projects: "folder.badge.gearshape"; case .appData: "questionmark.folder"; case .cleanup: "trash"; case .acknowledgments: "heart.text.square"; case .dashboard: "speedometer" } }
 }
@@ -305,7 +305,7 @@ struct FileTypeStats: Sendable {
     @Published var showWelcome = false
     @Published var lastTrashedURLs: [URL] = []
     @Published private(set) var filenameSearchIdentity = UUID()
-    @Published var scan: ScanResult? { didSet { allocationIndex = nil; filenameSearchIdentity = UUID(); invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview() } }
+    @Published var scan: ScanResult? { didSet { allocationIndex = nil; filenameSearchIdentity = UUID(); invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview(); quickCleanupFailures = [:]; quickCleanupCandidateIDs = [] } }
     @Published var allocationIndex: StorageAllocationIndex?
     @Published var scanStorageAccounting: ScanStorageAccounting?
     @Published private(set) var promptAvoidanceFolders: [String] = []
@@ -317,7 +317,7 @@ struct FileTypeStats: Sendable {
     }
     @Published private(set) var aiSessionsRefreshID = UUID()
     @Published var aiSessionsSection: AISessionsSection = .sessions
-    @Published var workspace: Workspace = .explore
+    @Published var workspace: Workspace = .dashboard
     @Published var storageSection: StorageSection = .explore
     @Published var mode: MapMode = .treemap { didSet { refreshFocus() } }
     @Published var focus = 0 { didSet { refreshFocus() } }
@@ -337,6 +337,8 @@ struct FileTypeStats: Sendable {
     @Published var folderExplanation: FolderExplanationState?
     @Published var message: String?
     @Published var staged: Set<Int> = []
+    @Published var quickCleanupFailures: [Int: String] = [:]
+    @Published var quickCleanupCandidateIDs: [Int] = []
     @Published private(set) var incompleteCleanup: [Int: CleanupIncompleteReview] = [:]
     @Published var showCleanup = false
     // No background monitoring in the current product flow.
@@ -732,6 +734,10 @@ struct FileTypeStats: Sendable {
         projectDependencies = nil
         projectDependenciesBusy = false
         showWelcome = false
+        if let destination { workspace = destination }
+        else { openStorage(.explore) }
+        let initialWorkspace = workspace
+        let initialStorageSection = storageSection
         lastTrashedURLs = []
         task?.cancel(); scanVersion = UUID(); staged = []; incompleteCleanup = [:]; busy = true; message = nil
         scopedURL?.stopAccessingSecurityScopedResource(); scopedURL = url; _ = url.startAccessingSecurityScopedResource()
@@ -810,7 +816,8 @@ struct FileTypeStats: Sendable {
                     let mapIndex = try StorageMapIndex(scan: result, groups: groups, cancellationCheck: { try Task.checkCancellation() })
                     let volume = try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey, .volumeTotalCapacityKey])
                     let allocationIndex = try StorageAllocationIndex(scan: result, cancellationCheck: { try Task.checkCancellation() })
-                    return (quick.sorted, apps, fileCount, groups, report, growth, findingIndex, projectNames, mapIndex, volume?.volumeAvailableCapacity.map(Int64.init), volume?.volumeTotalCapacity.map(Int64.init), accounting, allocationIndex)
+                    let cleanupIDs = CleanupGuidance.quickCleanupIDs(in: result, findings: report.findings)
+                    return (quick.sorted, apps, fileCount, groups, report, growth, findingIndex, projectNames, mapIndex, volume?.volumeAvailableCapacity.map(Int64.init), volume?.volumeTotalCapacity.map(Int64.init), accounting, allocationIndex, cleanupIDs)
                 }
                 let summary = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
 
@@ -833,11 +840,14 @@ struct FileTypeStats: Sendable {
                 self.scan = result; exclusionResultsStale = false; quickWinNodes = summary.0; appNodes = summary.1; fileCount = summary.2; focus = 0; selected = nil
                 scanStorageAccounting = summary.11
                 allocationIndex = summary.12
-                // A manual scan must land on results, even when launched from credits or another utility page.
-                if let destination {
-                    if destination == .explore { openStorage(.explore) }
-                    else { workspace = destination }
-                } else { openStorage(.explore) }
+                quickCleanupCandidateIDs = summary.13
+                // Show results unless the owner navigated elsewhere during the scan.
+                if workspace == initialWorkspace && storageSection == initialStorageSection {
+                    if let destination {
+                        if destination == .explore { openStorage(.explore) }
+                        else { workspace = destination }
+                    } else { openStorage(.explore) }
+                }
                 snapshotNotice = nil
                 progress = "\(fileCount.formatted()) files · \(SpeedFormat.duration(result.elapsed)) scan · \(result.skipped) skipped"
                 lastScanSummary = "Last scan: \(fileCount.formatted()) files · \(Date().formatted(date: .abbreviated, time: .shortened))"
@@ -984,6 +994,8 @@ struct FileTypeStats: Sendable {
             guard choice == .alertSecondButtonReturn else { return }
         }
         let version = scanVersion
+        lastTrashedURLs = []
+        quickCleanupFailures.removeValue(forKey: id)
         busy = true
         progress = "Checking \(StorageLabels.name(scan.nodes[id]))…"
         task = Task {
@@ -991,7 +1003,8 @@ struct FileTypeStats: Sendable {
             do {
                 var acknowledgement: CleanupIncompleteReview?
                 do {
-                    try await CleanupPreflight.validate(ids: [id], in: scan, excludedFolders: excludedFolders)
+                    try await CleanupPreflight.validate(ids: [id], in: scan, excludedFolders: excludedFolders,
+                                                        regenerableIDs: regenerableCleanupIDs([id], in: scan))
                 } catch let CleanupPreflightError.incompleteRescan(_, review) {
                     try Task.checkCancellation()
                     guard scanVersion == version else { return }
@@ -1000,7 +1013,8 @@ struct FileTypeStats: Sendable {
                         progress = "Nothing added · Keep exploring"
                         return
                     }
-                    try await CleanupPreflight.validate(ids: [id], in: scan, acknowledgedIncomplete: [id: review], excludedFolders: excludedFolders)
+                    try await CleanupPreflight.validate(ids: [id], in: scan, acknowledgedIncomplete: [id: review], excludedFolders: excludedFolders,
+                                                        regenerableIDs: regenerableCleanupIDs([id], in: scan))
                     acknowledgement = review
                 }
                 try Task.checkCancellation()
@@ -1071,7 +1085,12 @@ struct FileTypeStats: Sendable {
     /// Staging is the only side effect — Trash still requires the review
     /// list's own confirmation.
     var easyCleanupIDs: [Int] {
-        Array(Set(suggestedCacheIDs + autoCleanerSuggestions.map(\.id)))
+        quickCleanupCandidateIDs.filter { !hasAncestor($0, in: staged) }
+    }
+
+    private func regenerableCleanupIDs(_ ids: [Int], in scan: ScanResult) -> Set<Int> {
+        Set(ids.filter { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory
+            && CleanupGuidance.isRegenerableFolder(path: scan.url(for: $0).path) })
     }
 
     var easyCleanupBytes: Int64 {
@@ -1085,16 +1104,18 @@ struct FileTypeStats: Sendable {
         guard !ids.isEmpty else { return }
         let alert = NSAlert()
         alert.messageText = "Stage \(ids.count) regenerable items for review?"
-        alert.informativeText = "Build outputs, dependency folders and package caches that tools can usually rebuild or download again. Stop active installs and builds first. This does not check whether a tool is using them. Incomplete or changed folders will be skipped. Nothing moves until you review the list and confirm Move to Trash."
+        alert.informativeText = "Review caches, project dependencies and generated builds. Tools will need to download or rebuild them afterward; keep anything you need offline. Normal cache writes do not block review. Installed app components and currently open files are kept. Unreadable or excluded contents require an additional warning review. Nothing moves until Move to Trash."
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Stage for Review")
         guard alert.runModal() == .alertSecondButtonReturn else { return }
         let version = scanVersion
+        lastTrashedURLs = []
+        quickCleanupFailures = [:]
         busy = true
         task = Task {
             defer { busy = false }
             var added = 0
-            var skipped: [String] = []
+            var pending: [(Int, CleanupIncompleteReview)] = []
             for id in ids {
                 do {
                     try Task.checkCancellation()
@@ -1102,7 +1123,13 @@ struct FileTypeStats: Sendable {
                     let path = scan.url(for: id).path
                     if staged.contains(where: { let parent = scan.url(for: $0).path; return path == parent || path.hasPrefix(parent + "/") }) { continue }
                     progress = "Checking \(StorageLabels.name(scan.nodes[id]))…"
-                    try await CleanupPreflight.validate(ids: [id], in: scan, excludedFolders: excludedFolders)
+                    do {
+                        try await CleanupPreflight.validate(ids: [id], in: scan, excludedFolders: excludedFolders,
+                                                            regenerableIDs: regenerableCleanupIDs([id], in: scan))
+                    } catch let CleanupPreflightError.incompleteRescan(_, review) where review.canAcknowledge {
+                        pending.append((id, review))
+                        continue
+                    }
                     try Task.checkCancellation()
                     guard scanVersion == version else { return }
                     for other in Array(staged) where scan.url(for: other).path.hasPrefix(path + "/") { unstage(other) }
@@ -1112,19 +1139,36 @@ struct FileTypeStats: Sendable {
                     progress = "Check cancelled · \(added) added for review · Nothing moved"
                     return
                 } catch {
-                    skipped.append(StorageLabels.name(scan.nodes[id]))
+                    quickCleanupFailures[id] = error.localizedDescription
                 }
             }
-            progress = "\(added) staged for review · \(skipped.count) skipped · Nothing moved"
-            if !skipped.isEmpty {
-                message = "Staged \(added) items for review. Could not fully verify: \(skipped.joined(separator: ", ")). Inspect these individually in Explore. Nothing was moved."
+            if !pending.isEmpty {
+                let combined = CleanupIncompleteReview(skipped: pending.reduce(0) { $0 + $1.1.skipped }, details: pending.flatMap { id, review in
+                    [StorageLabels.location(scan.url(for: id).path)] + review.details
+                })
+                let include = showIncompleteReview(combined, name: "\(pending.count) rebuildable folders", allowsOverride: true)
+                for (id, review) in pending {
+                    guard include else {
+                        quickCleanupFailures[id] = "Kept because \(review.skipped) excluded or unreadable items were not approved."
+                        continue
+                    }
+                    do {
+                        try Task.checkCancellation()
+                        guard scanVersion == version else { return }
+                        try await CleanupPreflight.validate(ids: [id], in: scan, acknowledgedIncomplete: [id: review], excludedFolders: excludedFolders,
+                                                            regenerableIDs: regenerableCleanupIDs([id], in: scan))
+                        staged.insert(id); incompleteCleanup[id] = review; added += 1
+                    } catch is CancellationError { return }
+                    catch { quickCleanupFailures[id] = error.localizedDescription }
+                }
             }
-            if added > 0 { openStorage(.cleanup) }
+            progress = "\(added) staged for review · \(quickCleanupFailures.count) kept · Nothing moved"
+            openStorage(.cleanup)
         }
     }
 
     func cleanupCategory(_ id: Int) -> DeveloperCategory? {
-        developerReport?.findings.first(where: { $0.id == id })?.category
+        reportFindingsByID[id]?.category ?? developerReport?.findings.first(where: { $0.id == id })?.category
     }
 
     /// Auto Cleaner suggestions: stale, usually-regenerable developer folders.
@@ -1174,6 +1218,7 @@ struct FileTypeStats: Sendable {
     func trashStaged() {
         guard let scan, !busy, macTools?.isBusy != true, !monitoring, !staged.isEmpty else { return }
         let ids = staged.sorted()
+        let regenerable = regenerableCleanupIDs(ids, in: scan)
         let version = scanVersion
         let acknowledgements = incompleteCleanup.filter { staged.contains($0.key) }
         let duplicateSelections = duplicateSurvivorSelections.values.filter { selection in
@@ -1217,7 +1262,8 @@ struct FileTypeStats: Sendable {
                         fresh.candidates.contains { $0.id == id && $0.path == path }
                     }) else { throw NSError(domain: "AppDataReview", code: 1, userInfo: [NSLocalizedDescriptionKey: "App reference changed or is incomplete. Refresh App Data and review again."]) }
                 }
-                try await CleanupPreflight.validate(ids: ids, in: scan, acknowledgedIncomplete: acknowledgements, excludedFolders: excludedFolders)
+                try await CleanupPreflight.validate(ids: ids, in: scan, acknowledgedIncomplete: acknowledgements, excludedFolders: excludedFolders,
+                                                    regenerableIDs: regenerable)
                 try Task.checkCancellation()
                 guard scanVersion == version, staged == Set(ids) else {
                     throw NSError(domain: "Cleanup", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selection changed. Review it again."])
@@ -1231,7 +1277,8 @@ struct FileTypeStats: Sendable {
                         if FolderExclusions(paths: excludedFolders).blocksCleanup(url) {
                             throw CleanupPreflightError.excludedFolder(url.path)
                         }
-                        try CleanupSafety.validate(url: url, expected: scan.nodes[id], root: URL(fileURLWithPath: scan.rootPath))
+                        try CleanupSafety.validate(url: url, expected: scan.nodes[id], root: URL(fileURLWithPath: scan.rootPath),
+                                                   allowingRegenerableChanges: regenerable.contains(id))
                         var trashedURL: NSURL?
                         try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
                         if !cleanupRefreshPaths.contains(scan.rootPath) { cleanupRefreshPaths.append(scan.rootPath) }

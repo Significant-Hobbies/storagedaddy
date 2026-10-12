@@ -4,6 +4,7 @@ import DiskCore
 
 struct DiskMapView: View {
     var compact = false
+    var chartHeight: CGFloat = 320
     @EnvironmentObject var m: ExplorerModel
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -20,7 +21,7 @@ struct DiskMapView: View {
                             let isChild = m.mode == .treemap && shape.depth == 1
                             let isStaged = m.hasAncestor(shape.node.id, in: m.staged)
                             let matches = m.matchesFilter(shape.node)
-                            let tint = isStaged ? Tints.coral : Tints.forKind(m.storageKind(shape.node))
+                            let tint = isStaged ? Tints.coral : Tints.forMapNode(shape.node, kind: m.storageKind(shape.node))
                             let opacity = matches ? (isChild ? 0.65 : 0.9) : 0.18
                             ctx.fill(shape.path, with: .color(MapTileFill.color(tint, intensity: opacity)))
                             if isStaged {
@@ -99,8 +100,8 @@ struct DiskMapView: View {
                     )
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("\(m.mode.rawValue) of \(m.mapItems.count) items. Select items using the list below.")
-                }.frame(minHeight: 210, maxHeight: compact ? 260 : .infinity)
-                    .frame(height: compact ? 260 : nil)
+                }.frame(minHeight: 210, maxHeight: compact ? chartHeight : .infinity)
+                    .frame(height: compact ? chartHeight : nil)
                 mapLegend
                 Text(caption + " " + (m.mapMeasure == .bytes ? "Areas use the selected byte measure." : "Areas count file entries, including links; empty folders have no area.") + " Filters dim nonmatching tiles without changing area.").font(.caption).foregroundStyle(Tints.secondaryText)
                 Divider()
@@ -112,6 +113,8 @@ struct DiskMapView: View {
         VStack(alignment: .leading, spacing: 6) {
             legendKinds
             Text("Diagonal lines: review candidate · Coral and dashed outline: staged for cleanup · M toggles Cleanup")
+                .font(.caption).foregroundStyle(Tints.secondaryText)
+            Text("Known categories use the legend colors. Other folders use stable colors by name.")
                 .font(.caption).foregroundStyle(Tints.secondaryText)
             Button(stagingActionLabel) { if let id = m.selected { m.toggleStage(id) } }
                 .keyboardShortcut("m", modifiers: [])

@@ -42,6 +42,7 @@ public enum AutoCleaner {
                   finding.allocatedBytes >= minimumBytes,
                   scan.nodes.indices.contains(finding.id) else { return nil }
             let path = scan.url(for: finding.id).path
+            guard !CleanupGuidance.isInstalledRuntime(path: path) else { return nil }
             if finding.category == .packageCaches,
                !CleanupGuidance.isSuggestedCache(category: finding.category, path: path, home: home) {
                 return nil
