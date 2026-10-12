@@ -3,6 +3,7 @@ from contextlib import redirect_stdout
 import hashlib
 import io
 import json
+import plistlib
 import runpy
 import subprocess
 import tempfile
@@ -117,7 +118,7 @@ class SwiftPMResourcesTests(unittest.TestCase):
                     if command[0] == "hdiutil" and command[1] == "create":
                         Path(command[-1]).write_bytes(b"fixture disk image")
                 with redirect_stdout(io.StringIO()), patch("sys.argv", arguments), patch.object(swiftpm_resources, "build_app", return_value=binary), \
-                     patch.object(sparkle_support, "configuration", return_value={}), \
+                     patch.object(sparkle_support, "configuration", return_value={"SUFeedURL": "https://example.com/appcast.xml"}), \
                      patch.object(sparkle_support, "embed"), patch.object(sparkle_support, "sign"), \
                      patch.object(finder_search, "validate_support", return_value=search_support), \
                      patch("subprocess.run", side_effect=fake_run), patch("subprocess.check_output", return_value="a" * 40):
@@ -126,6 +127,11 @@ class SwiftPMResourcesTests(unittest.TestCase):
                 copied = app / "Contents/Resources" / swiftpm_resources.UI_BUNDLE / "Contents/Resources/Fonts/Figtree.ttf"
                 self.assertEqual(copied.read_bytes(), b"fixture font")
                 self.assertEqual((app / "Contents/Resources/StorageDaddy.icns").read_bytes(), b"fixture asset")
+                info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+                if name == "package-app.py":
+                    self.assertNotIn("SUFeedURL", info)
+                else:
+                    self.assertEqual(info["SUFeedURL"], "https://example.com/appcast.xml")
                 if name == "package-app.py":
                     bundle = binary.parent / swiftpm_resources.UI_BUNDLE
                     bundle.rename(binary.parent / "held-bundle")

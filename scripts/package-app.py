@@ -24,7 +24,9 @@ if (args.version is None) != (args.build is None):
 if args.version is not None and (not all(part.isdigit() for part in args.version.split(".")) or args.build < 1):
     parser.error("Version must be numeric and build must be positive")
 binary = args.binary or swiftpm_resources.build_app(root)
-update_configuration = sparkle_support.configuration()
+# Local repairs must not offer a public update that replaces their fixes.
+# Release packaging writes its own configured plist in release-dmg.py.
+update_configuration = sparkle_support.configuration() if args.check else {}
 if not binary.is_file():
     raise SystemExit(f"Build the executable first: {binary}")
 swiftpm_resources.ui_resource_bundle(binary)
