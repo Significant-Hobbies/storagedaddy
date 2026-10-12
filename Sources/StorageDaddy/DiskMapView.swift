@@ -21,8 +21,11 @@ struct DiskMapView: View {
                             let isChild = m.mode == .treemap && shape.depth == 1
                             let isStaged = m.hasAncestor(shape.node.id, in: m.staged)
                             let matches = m.matchesFilter(shape.node)
-                            let tint = isStaged ? Tints.coral : Tints.forMapNode(shape.node, kind: m.storageKind(shape.node))
-                            let opacity = matches ? (isChild ? 0.65 : 0.9) : 0.18
+                            let colorNode = isChild
+                                ? shape.node.parent.flatMap { m.scan?.nodes[$0] } ?? shape.node
+                                : shape.node
+                            let tint = isStaged ? Tints.coral : Tints.forMapNode(colorNode, kind: m.storageKind(colorNode))
+                            let opacity = matches ? (m.mode == .treemap && !isChild ? 0.72 : 0.9) : 0.18
                             ctx.fill(shape.path, with: .color(MapTileFill.color(tint, intensity: opacity)))
                             if isStaged {
                                 ctx.stroke(shape.path, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2, dash: [5, 3]))
@@ -114,7 +117,7 @@ struct DiskMapView: View {
             legendKinds
             Text("Diagonal lines: review candidate · Coral and dashed outline: staged for cleanup · M toggles Cleanup")
                 .font(.caption).foregroundStyle(Tints.secondaryText)
-            Text("Known categories use the legend colors. Other folders use stable colors by name.")
+            Text("Top-level folders use category or location colors. Nested tiles use a lighter shade of their parent.")
                 .font(.caption).foregroundStyle(Tints.secondaryText)
             Button(stagingActionLabel) { if let id = m.selected { m.toggleStage(id) } }
                 .keyboardShortcut("m", modifiers: [])
@@ -144,7 +147,7 @@ struct DiskMapView: View {
         case .flame: "Width shows size; each row is a deeper folder level. Up to four levels."
         case .bubbles: "Circle area shows size among the 36 largest items. Select an item below to inspect or open."
         case .mindMap: "Branch width shows relative size. The 18 largest items branch from the current folder."
-        case .treemap: "Area shows each item's share of this folder. Larger folders show one level of contents in darker tiles; their area shows each child's share inside that folder. Select to inspect or double-click to open. Up to 120 top-level items drawn."
+        case .treemap: "Area shows each item's share of this folder. Larger folders show one level of contents in lighter tiles of the same color; their area shows each child's share inside that folder. Select to inspect or double-click to open. Up to 120 top-level items drawn."
         default: "Area shows size in this folder. Select to inspect; double-click a folder tile or list item to explore it."
         }
     }
