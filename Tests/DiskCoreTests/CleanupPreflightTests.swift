@@ -4,6 +4,79 @@ import XCTest
 @testable import DiskCore
 
 final class CleanupPreflightTests: XCTestCase {
+    func testRegenerableCacheAcceptsNormalWritesWithoutWeakeningExactReview() async throws {
+        let fixture = try PreflightFixture()
+        try fixture.write(".cache/uv/archive-v0/pkg/__pycache__/one.pyc", bytes: [1])
+        let scan = try await fixture.scan()
+        let id = try fixture.nodeID(".cache/uv", in: scan)
+        try fixture.write(".cache/uv/archive-v0/pkg/__pycache__/one.pyc", bytes: [2, 3])
+        try fixture.write(".cache/uv/new-cache-entry", bytes: [4])
+        do {
+            try await CleanupPreflight.validate(ids: [id], in: scan)
+            XCTFail("Exact review must still reject a changed subtree")
+        } catch { }
+        try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id], home: fixture.root.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent(".cache/uv/new-cache-entry").path))
+
+        let cache = fixture.root.appendingPathComponent(".cache/uv")
+        try FileManager.default.moveItem(at: cache, to: fixture.root.appendingPathComponent("held-uv"))
+        try fixture.write(".cache/uv/replacement", bytes: [5])
+        do {
+            try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id], home: fixture.root.path)
+            XCTFail("Replacing the cache root must still be rejected")
+        } catch { }
+    }
+
+    func testRegenerableRequestCannotBypassPersonalDataChanges() async throws {
+        let fixture = try PreflightFixture()
+        try fixture.write("folder/original.txt", bytes: [1])
+        let scan = try await fixture.scan()
+        let id = try fixture.nodeID("folder", in: scan)
+        try fixture.write("folder/original.txt", bytes: [2, 3])
+        do {
+            try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id], home: fixture.root.path)
+            XCTFail("A requested mode cannot turn personal data into a cache")
+        } catch { }
+    }
+
+    func testRegenerableCacheStillRequiresApprovalForExcludedContents() async throws {
+        let fixture = try PreflightFixture()
+        try fixture.write(".cache/uv/item", bytes: [1])
+        try fixture.write(".cache/uv/.env.example", bytes: [2])
+        let scan = try await fixture.scan()
+        let id = try fixture.nodeID(".cache/uv", in: scan)
+        let review: CleanupIncompleteReview
+        do {
+            try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id], home: fixture.root.path)
+            return XCTFail("Excluded contents still require a reviewed warning")
+        } catch let CleanupPreflightError.incompleteRescan(_, value) { review = value }
+        try await CleanupPreflight.validate(ids: [id], in: scan, acknowledgedIncomplete: [id: review], regenerableIDs: [id], home: fixture.root.path)
+    }
+
+    func testRegenerableCacheRejectsOpenFiles() async throws {
+        let fixture = try PreflightFixture()
+        try fixture.write(".cache/uv/item", bytes: [1])
+        let scan = try await fixture.scan()
+        let id = try fixture.nodeID(".cache/uv", in: scan)
+        let handle = try FileHandle(forReadingFrom: fixture.root.appendingPathComponent(".cache/uv/item"))
+        defer { try? handle.close() }
+        do {
+            try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id], home: fixture.root.path)
+            XCTFail("Open cache files must be kept")
+        } catch let error as NSError { XCTAssertEqual(error.domain, "CleanupActiveUse") }
+    }
+
+    func testInstalledAppDependencyCannotBeStagedAsStandaloneCleanup() async throws {
+        let fixture = try PreflightFixture()
+        try fixture.write("Tool.app/Contents/Resources/node_modules/runtime.js", bytes: [1])
+        let scan = try await fixture.scan()
+        let id = try fixture.nodeID("Tool.app/Contents/Resources/node_modules", in: scan)
+        do {
+            try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id], home: fixture.root.path)
+            XCTFail("Installed application components must stay protected")
+        } catch let DiskAnalysisError.unsafePath(_, reason) { XCTAssertTrue(reason.contains("installed app component")) }
+    }
+
     func testAllowsVerifiedFileAndFolderWhenUnrelatedEntriesWereSkipped() async throws {
         let fixture = try PreflightFixture()
         try fixture.write("folder/item.txt", bytes: [1])

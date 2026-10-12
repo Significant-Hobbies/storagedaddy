@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Recoverability guidance, never proof that a folder is unused or safe to delete.
@@ -40,6 +41,9 @@ public enum CleanupGuidance {
     /// Batch suggestions deliberately exclude broad stores, local repositories,
     /// environments and name-only build matches. Existing preflight still applies.
     public static func isSuggestedCache(category: DeveloperCategory, path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
+        if category == .modelCaches {
+            return normalized(path) == normalized(home) + "/.cache/huggingface/hub"
+        }
         guard category == .packageCaches else { return false }
         let url = URL(fileURLWithPath: path)
         let parent = url.deletingLastPathComponent().standardizedFileURL.path
@@ -49,5 +53,72 @@ public enum CleanupGuidance {
         let tool = url.lastPathComponent.lowercased()
         return (roots + aliases).contains(parent)
             && ["npm", "pnpm", "yarn", "pip", "uv", "go-build", "cocoapods", "composer"].contains(tool)
+    }
+
+    /// Installed runtimes are not project dependencies or disposable build outputs.
+    public static func isInstalledRuntime(path: String) -> Bool {
+        let path = normalized(path)
+        let parts = path.lowercased().split(separator: "/").map(String.init)
+        return parts.contains { $0.hasSuffix(".app") || $0.hasSuffix(".framework") || $0.hasSuffix(".xpc") }
+            || path.hasPrefix("/usr/") || path.hasPrefix("/opt/") || path.hasPrefix("/System/")
+            || path.hasPrefix("/Library/")
+            || path.hasSuffix("/lib/node_modules")
+            || path.contains("/node-tools/") || path.contains("/node-runtime/")
+    }
+
+    /// These folders can change normally between scan and review. Their root
+    /// identity, exclusions, unreadable contents and current use are still checked.
+    public static func isRegenerableFolder(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
+        guard !isInstalledRuntime(path: path) else { return false }
+        if isSuggestedCache(category: .packageCaches, path: path, home: home)
+            || isSuggestedCache(category: .modelCaches, path: path, home: home) { return true }
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let name = url.lastPathComponent
+        let normalizedPath = normalized(path)
+        let normalizedHome = normalized(home)
+        if name == "__pycache__" { return true }
+        if name == "DerivedData", normalizedPath.hasPrefix(normalizedHome + "/Library/Developer/") { return true }
+        let manifests: [String]
+        switch name {
+        case "node_modules", ".next", ".nuxt": manifests = ["package.json"]
+        case ".build": manifests = ["Package.swift"]
+        case "target": manifests = ["Cargo.toml"]
+        case "build", "dist": manifests = ["package.json", "Package.swift", "Cargo.toml", "CMakeLists.txt", "pyproject.toml"]
+        default: return false
+        }
+        return manifests.contains { name in
+            var info = stat()
+            let manifest = url.deletingLastPathComponent().appendingPathComponent(name)
+            return lstat(manifest.path, &info) == 0 && info.st_mode & S_IFMT == S_IFREG
+        }
+    }
+
+    static func normalized(_ path: String) -> String {
+        let value = URL(fileURLWithPath: path).standardizedFileURL.path
+        return value.hasPrefix("/System/Volumes/Data/") ? String(value.dropFirst("/System/Volumes/Data".count)) : value
+    }
+
+    public static func quickCleanupIDs(in scan: ScanResult, findings: [DeveloperFinding], home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> [Int] {
+        let eligible = findings.filter { [.packageCaches, .modelCaches, .nodeModules, .buildOutputs].contains($0.category) }
+        let possible = eligible.flatMap { finding -> [Int] in
+            guard scan.nodes.indices.contains(finding.id) else { return [] }
+            // Keep Hugging Face's tokens outside the downloadable hub cache.
+            let hub = finding.category == .modelCaches ? scan.nodes[finding.id].children.filter {
+                scan.nodes.indices.contains($0) && scan.nodes[$0].name == "hub"
+            } : []
+            return [finding.id] + hub
+        }
+        let candidates = Set(possible.filter {
+            scan.nodes[$0].parent != nil && scan.nodes[$0].isDirectory
+                && isRegenerableFolder(path: scan.url(for: $0).path, home: home)
+        })
+        return candidates.filter { id in
+            var parent = scan.nodes[id].parent
+            while let next = parent, scan.nodes.indices.contains(next) {
+                if candidates.contains(next) { return false }
+                parent = scan.nodes[next].parent
+            }
+            return true
+        }.sorted { scan.nodes[$0].allocatedBytes > scan.nodes[$1].allocatedBytes }
     }
 }

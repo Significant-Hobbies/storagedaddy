@@ -1,7 +1,46 @@
+import Foundation
 import XCTest
 @testable import DiskCore
 
 final class CleanupGuidanceTests: XCTestCase {
+    func testQuickCleanupIncludesRecentRebuildableFoldersAndKeepsAppComponents() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cleanup-guidance-\(UUID().uuidString)")
+        for path in ["project/package.json", "project/node_modules/module.js", ".cache/uv/cache", ".cache/huggingface/hub/weights", "Tool.app/Contents/Resources/package.json", "Tool.app/Contents/Resources/node_modules/module.js"] {
+            let url = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data([1]).write(to: url)
+        }
+        let scan = try await DiskScanner.scan(root: root)
+        let directories: [(String, DeveloperCategory)] = [("project/node_modules", .nodeModules), (".cache/uv", .packageCaches), (".cache/huggingface", .modelCaches), ("Tool.app/Contents/Resources/node_modules", .nodeModules)]
+        let findings = try directories.map { relative, category in
+            let path = root.appendingPathComponent(relative).resolvingSymlinksInPath().path
+            let node = try XCTUnwrap(scan.nodes.first { scan.url(for: $0.id).path == path })
+            return DeveloperFinding(nodeID: node.id, category: category, allocatedBytes: node.allocatedBytes,
+                projectID: nil, tool: "test", evidence: "fixture", consequence: "rebuild", confidence: "fixture", lastModified: Date())
+        }
+        let ids = CleanupGuidance.quickCleanupIDs(in: scan, findings: findings, home: root.path)
+        let names = Set(ids.map { scan.nodes[$0].name })
+        XCTAssertEqual(names, ["node_modules", "uv", "hub"])
+        XCTAssertEqual(ids.filter { scan.nodes[$0].name == "node_modules" }.count, 1)
+    }
+
+    func testRegenerableRulesSeparateDownloadedCachesFromInstalledRuntimes() {
+        let home = "/Users/test"
+        for path in [home + "/.cache/uv", home + "/.cache/huggingface/hub", "/System/Volumes/Data" + home + "/Library/Caches/pnpm", home + "/Library/Developer/XcodeBuildMCP/workspaces/test/DerivedData"] {
+            XCTAssertTrue(CleanupGuidance.isRegenerableFolder(path: path, home: home), path)
+        }
+        for path in [home + "/.cache/huggingface", home + "/.cache/huggingface/token", "/Applications/OpenClaw.app/Contents/Resources/node_modules", home + "/Library/Application Support/Buzz/node-tools/lib/node_modules", "/usr/local/lib/node_modules"] {
+            XCTAssertFalse(CleanupGuidance.isRegenerableFolder(path: path, home: home), path)
+        }
+    }
+
+    func testOpenFileProbeRecognizesFirmlinkAliasesAndFolderBoundaries() {
+        let output = "p123\0cPython\0n/System/Volumes/Data/Users/test/.cache/uv/archive-v0/module.so\0\n"
+        XCTAssertEqual(CleanupActiveUse.user(of: "/Users/test/.cache/uv", in: output), "Python (PID 123)")
+        XCTAssertNil(CleanupActiveUse.user(of: "/Users/test/.cache/uv-other", in: output))
+        XCTAssertNil(CleanupActiveUse.user(of: "/Users/other/.cache/uv", in: output))
+    }
+
     func testChromeCacheGuidanceOnlyAppliesToChromeCache() {
         XCTAssertNotNil(CleanupGuidance.chromeCacheNote(path: "/Users/test/Library/Caches/Google/Chrome", home: "/Users/test"))
         XCTAssertNotNil(CleanupGuidance.chromeCacheNote(path: "/Users/test/Library/Caches/Google/Chrome/Default/Cache", home: "/Users/test"))

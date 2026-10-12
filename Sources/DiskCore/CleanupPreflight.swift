@@ -30,7 +30,8 @@ public enum CleanupPreflightError: Error, LocalizedError, Sendable {
 }
 
 public enum CleanupPreflight {
-    public static func validate(ids: [Int], in scan: ScanResult, acknowledgedIncomplete: [Int: CleanupIncompleteReview] = [:], excludedFolders: [String] = []) async throws {
+    public static func validate(ids: [Int], in scan: ScanResult, acknowledgedIncomplete: [Int: CleanupIncompleteReview] = [:], excludedFolders: [String] = [],
+                                regenerableIDs: Set<Int> = [], home: String = FileManager.default.homeDirectoryForCurrentUser.path) async throws {
         try Task.checkCancellation()
         guard !ids.isEmpty else { return }
 
@@ -71,9 +72,15 @@ public enum CleanupPreflight {
             throw CleanupPreflightError.excludedFolder(candidate.url.path)
         }
 
+        let regenerable = Set(candidateURLs.filter {
+            regenerableIDs.contains($0.node.id) && $0.node.isDirectory
+                && CleanupGuidance.isRegenerableFolder(path: $0.url.path, home: home)
+        }.map { $0.node.id })
+
         // Reject protected paths and stale identities before traversing candidates.
         for candidate in candidates {
-            try CleanupSafety.validate(url: scan.url(for: candidate.id), expected: candidate, root: rootURL)
+            try CleanupSafety.validate(url: scan.url(for: candidate.id), expected: candidate, root: rootURL,
+                                       allowingRegenerableChanges: regenerable.contains(candidate.id), home: home)
         }
 
         for candidate in candidateURLs where candidate.node.isDirectory {
@@ -84,9 +91,11 @@ public enum CleanupPreflight {
             for node in result.nodes where node.isDirectory && node.name == "com.google.Chrome.code_sign_clone" {
                 try ChromeSigningClones.validateForCleanup(at: result.url(for: node.id))
             }
-            let before = try records(in: scan, rootID: candidate.node.id)
-            let after = try records(in: result, rootID: 0)
-            try compare(before: before, after: after)
+            if !regenerable.contains(candidate.node.id) {
+                let before = try records(in: scan, rootID: candidate.node.id)
+                let after = try records(in: result, rootID: 0)
+                try compare(before: before, after: after)
+            }
             if result.skipped > 0, ChromeSigningClones.location(path: candidate.url.path) == .copy {
                 throw NSError(domain: "ChromeSigningCopies", code: 1, userInfo: [NSLocalizedDescriptionKey:
                     "The signing copy could not be checked completely. Keep it and rescan after resolving unreadable or excluded contents."])
@@ -112,6 +121,12 @@ public enum CleanupPreflight {
             }
         }
 
+        if !regenerable.isEmpty {
+            let urls = candidateURLs.filter { regenerable.contains($0.node.id) }.map(\.url)
+            let probe = Task.detached(priority: .utility) { try CleanupActiveUse.validate(urls: urls) }
+            try await probe.value
+        }
+
         // Run the final identity/path checks after all subtree comparisons. This
         // detects stale scan identities. Path-based moves still have a small
         // validation-to-use window and are not an atomic filesystem transaction.
@@ -120,7 +135,8 @@ public enum CleanupPreflight {
             try CleanupSafety.validate(
                 url: scan.url(for: candidate.id),
                 expected: candidate,
-                root: rootURL
+                root: rootURL,
+                allowingRegenerableChanges: regenerable.contains(candidate.id), home: home
             )
         }
     }
