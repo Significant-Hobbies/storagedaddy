@@ -3,8 +3,21 @@ import Combine
 import SwiftUI
 import AppKit
 import DiskCore
+import SaaSMakerUI
 
 @main
+enum StorageDaddyMain {
+    @MainActor
+    static func main() {
+        if CommandLine.arguments.contains("--check-ui-resources") {
+            SMFonts.register()
+            print("StorageDaddy UI resources loaded")
+            return
+        }
+        DiskBuddyApp.main()
+    }
+}
+
 struct DiskBuddyApp: App {
     @NSApplicationDelegateAdaptor(StorageDaddyAppDelegate.self) private var appDelegate
     @StateObject private var model = ExplorerModel()
