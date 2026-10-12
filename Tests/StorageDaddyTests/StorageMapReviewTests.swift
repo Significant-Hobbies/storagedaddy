@@ -22,9 +22,12 @@ struct StorageMapReviewTests {
     }
     @Test func projectionAndFilterKeepScopeAndUnknownCapacityHonest() {
         let m = ExplorerModel(); m.scan = fixture(); m.mapIndex = StorageMapIndex(scan: m.scan!)
-        #expect(m.projectedFreeUpperBound == nil)
+        #expect(m.stagedExclusiveBytes == nil)
         m.volumeFree = 100; m.volumeCapacity = 1_000_000_000; m.staged = [3]
-        #expect(m.projectedFreeUpperBound == 120_000_100)
+        #expect(m.stagedExclusiveBytes == nil, "Legacy allocation sums cannot predict recovered space")
+        var measured = fixture(); measured.fileAllocationDetails = []
+        m.scan = measured; m.allocationIndex = StorageAllocationIndex(scan: measured)
+        #expect(m.stagedExclusiveBytes == 120_000_000)
         #expect(m.hasAncestor(4, in: m.staged))
         #expect(!m.hasAncestor(6, in: m.staged))
         let before = Set(m.mapItems.map(\.id)); m.search = "report"
@@ -34,7 +37,7 @@ struct StorageMapReviewTests {
         #expect(m.mapWeight(m.scan!.nodes[1]) == 3)
         #expect(m.mapWeight(m.scan!.nodes[9]) == 0)
         m.volumeCapacity = 1_000
-        #expect(m.projectedFreeUpperBound == 1_000)
+        #expect(m.stagedExclusiveBytes == 120_000_000, "Changing drive capacity must not clamp file measurements")
     }
     @Test func ageRefreshPublishesOnlyCurrentScopeAndMeasure() async throws {
         let m = ExplorerModel(); m.scan = fixture(); m.mode = .age; m.search = "report"

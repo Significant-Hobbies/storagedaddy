@@ -46,14 +46,15 @@ private struct Scanner {
     private let promptAvoidance: FolderExclusions
     private let parallelism: Int
     private let cancellation: ScanCancellation
-    private var linkedAllocations: [(id: Int, bytes: Int64)] = []
+    private var sharedAllocations: [(id: Int, bytes: Int64, identity: AllocationIdentity)] = []
+    private var fileAllocationDetails: [FileAllocationDetail] = []
     private let progress: (@Sendable (ScanProgress) -> Void)?
     private var nodes: [DiskNode] = []
     private var errors: [String] = []
     private var skipped = 0
     private var incompleteEvidence: [ScanIncompleteEvidence] = []
     private var incompleteEvidenceTruncated = false
-    private var allocatedInodes: Set<FileIdentity> = []
+    private var allocatedIdentities: Set<AllocationIdentity> = []
     private var rootDevice: UInt64 = 0
     private var backendCounters = DiskScannerBackendCounters()
     private var lastProgress: ContinuousClock.Instant?
@@ -94,7 +95,7 @@ private struct Scanner {
         let rootInfo = try lstat(at: rootPath)
         rootDevice = UInt64(rootInfo.st_dev)
         let rootName = root.lastPathComponent.isEmpty ? rootPath : root.lastPathComponent
-        let rootID = appendNode(parent: nil, metadata: metadata(from: rootInfo, name: rootName))
+        let rootID = appendNode(parent: nil, metadata: metadata(from: rootInfo, name: rootName, path: rootPath))
         reportProgress(path: rootPath)
         if isDirectory(rootInfo), !isSymlink(rootInfo) {
             try traverse(from: rootID, path: rootPath)
@@ -105,7 +106,7 @@ private struct Scanner {
         reportProgress(path: rootPath, force: true)
         try cancellation.check()
         let elapsed = Date().timeIntervalSince(started)
-        let result = ScanResult(
+        var result = ScanResult(
             rootPath: rootPath,
             nodes: nodes,
             started: started,
@@ -116,6 +117,7 @@ private struct Scanner {
             incompleteEvidence: incompleteEvidence,
             incompleteEvidenceTruncated: incompleteEvidenceTruncated
         )
+        result.fileAllocationDetails = fileAllocationDetails
         DiskScannerDiagnostics.shared.record(backendCounters)
         return result
     }
@@ -245,14 +247,17 @@ private struct Scanner {
                 nodes[id].children[index] = Int(mapping[nodes[id].children[index]])
             }
         }
-        allocatedInodes.removeAll(keepingCapacity: true)
-        for index in linkedAllocations.indices { linkedAllocations[index].id = Int(mapping[linkedAllocations[index].id]) }
-        linkedAllocations.sort { $0.id < $1.id }
-        for link in linkedAllocations {
-            let identity = FileIdentity(device: nodes[link.id].device, inode: nodes[link.id].inode)
-            nodes[link.id].allocatedBytes = allocatedInodes.insert(identity).inserted ? link.bytes : 0
+        allocatedIdentities.removeAll(keepingCapacity: true)
+        for index in sharedAllocations.indices { sharedAllocations[index].id = Int(mapping[sharedAllocations[index].id]) }
+        sharedAllocations.sort { $0.id < $1.id }
+        for allocation in sharedAllocations {
+            nodes[allocation.id].allocatedBytes = allocatedIdentities.insert(allocation.identity).inserted ? allocation.bytes : 0
         }
-        linkedAllocations.removeAll(keepingCapacity: false)
+        sharedAllocations.removeAll(keepingCapacity: false)
+        for index in fileAllocationDetails.indices {
+            fileAllocationDetails[index].nodeID = Int(mapping[fileAllocationDetails[index].nodeID])
+        }
+        fileAllocationDetails.sort { $0.nodeID < $1.nodeID }
     }
 
     private mutating func refreshFinalLiveLocations() {
@@ -269,21 +274,25 @@ private struct Scanner {
     }
 
     private mutating func appendNode(parent: Int?, metadata: EntryMetadata, liveOwner: Int? = nil) -> Int {
-        let identity = FileIdentity(device: metadata.device, inode: metadata.inode)
+        let identity = metadata.allocationIdentity
         let allocatedBytes: Int64
-        if metadata.isDirectory || metadata.isSymlink || identity.inode == 0 {
+        if metadata.isDirectory || metadata.isSymlink || metadata.inode == 0 {
             allocatedBytes = 0
-        } else if metadata.linkCount == 1 {
-            allocatedBytes = metadata.allocatedBytes
-        } else if allocatedInodes.insert(identity).inserted {
-            allocatedBytes = metadata.allocatedBytes
+        } else if let identity {
+            allocatedBytes = allocatedIdentities.insert(identity).inserted ? metadata.allocatedBytes : 0
         } else {
-            allocatedBytes = 0
+            allocatedBytes = metadata.allocatedBytes
         }
 
         let id = nodes.count
-        if backend == .parallel, !metadata.isDirectory, !metadata.isSymlink, metadata.inode != 0, metadata.linkCount != 1 {
-            linkedAllocations.append((id, metadata.allocatedBytes))
+        if !metadata.isDirectory, !metadata.isSymlink, metadata.allocatedBytes > 0,
+           metadata.privateBytes != metadata.allocatedBytes || metadata.sharesStorage || metadata.linkCount != 1 {
+            fileAllocationDetails.append(FileAllocationDetail(nodeID: id, reportedBytes: metadata.allocatedBytes,
+                privateBytes: metadata.privateBytes.map { min(metadata.allocatedBytes, $0) }, sharesStorage: metadata.sharesStorage || metadata.linkCount != 1,
+                linkCount: metadata.linkCount))
+        }
+        if backend == .parallel, !metadata.isDirectory, !metadata.isSymlink, metadata.inode != 0, let identity {
+            sharedAllocations.append((id, metadata.allocatedBytes, identity))
         }
         nodes.append(
             DiskNode(
@@ -545,7 +554,7 @@ private final class DirectoryReader: @unchecked Sendable {
         backendCounters.foundationDirectories += 1
         return try FileManager.default.contentsOfDirectory(atPath: path).map { name in
             let childPath = (path as NSString).appendingPathComponent(name)
-            return metadata(from: try lstat(at: childPath), name: name)
+            return metadata(from: try lstat(at: childPath), name: name, path: childPath)
         }
     }
 
@@ -572,12 +581,13 @@ private final class DirectoryReader: @unchecked Sendable {
             | UInt32(ATTR_CMN_FILEID)
         attributes.dirattr = UInt32(ATTR_DIR_MOUNTSTATUS)
         attributes.fileattr = UInt32(ATTR_FILE_LINKCOUNT) | UInt32(ATTR_FILE_DATALENGTH) | UInt32(ATTR_FILE_DATAALLOCSIZE)
+        attributes.forkattr = UInt32(ATTR_CMNEXT_PRIVATESIZE) | UInt32(ATTR_CMNEXT_CLONEID) | UInt32(ATTR_CMNEXT_EXT_FLAGS)
 
         var entries: [EntryMetadata] = []
         while true {
             try cancellation.check()
             let count: Int32 = buffer.withUnsafeMutableBytes { bytes in
-                getattrlistbulk(descriptor, &attributes, bytes.baseAddress, bytes.count, 0)
+                getattrlistbulk(descriptor, &attributes, bytes.baseAddress, bytes.count, UInt64(FSOPT_ATTR_CMN_EXTENDED))
             }
             if count < 0 {
                 let code = errno
@@ -674,6 +684,21 @@ private final class DirectoryReader: @unchecked Sendable {
             }
             if has(returned.fileattr, ATTR_FILE_DATAALLOCSIZE) {
                 allocatedBytes = max(0, Int64(try read(off_t.self, from: bytes, at: cursor, through: recordEnd)))
+                cursor += MemoryLayout<off_t>.size
+            }
+            var cloneID: UInt64 = 0
+            var extendedFlags: UInt64 = 0
+            var privateBytes: Int64?
+            if has(returned.forkattr, ATTR_CMNEXT_PRIVATESIZE) {
+                privateBytes = max(0, Int64(try read(off_t.self, from: bytes, at: cursor, through: recordEnd)))
+                cursor += MemoryLayout<off_t>.size
+            }
+            if has(returned.forkattr, ATTR_CMNEXT_CLONEID) {
+                cloneID = try read(UInt64.self, from: bytes, at: cursor, through: recordEnd)
+                cursor += MemoryLayout<UInt64>.size
+            }
+            if has(returned.forkattr, ATTR_CMNEXT_EXT_FLAGS) {
+                extendedFlags = try read(UInt64.self, from: bytes, at: cursor, through: recordEnd)
             }
             if !directory, !symlink,
                (!has(returned.fileattr, ATTR_FILE_DATALENGTH) || !has(returned.fileattr, ATTR_FILE_DATAALLOCSIZE)) {
@@ -691,7 +716,10 @@ private final class DirectoryReader: @unchecked Sendable {
                     device: device,
                     inode: inode,
                     linkCount: linkCount,
-                    isMountPoint: mountPoint
+                    isMountPoint: mountPoint,
+                    fullCloneID: extendedFlags & sharesAllBlocks != 0 ? cloneID : 0,
+                    privateBytes: privateBytes,
+                    sharesStorage: extendedFlags & 1 != 0 || privateBytes.map { $0 < allocatedBytes } == true
                 )
             )
             offset = recordEnd
@@ -715,12 +743,27 @@ private struct EntryMetadata: Sendable {
     let inode: UInt64
     let linkCount: UInt32
     let isMountPoint: Bool
+    let fullCloneID: UInt64
+    let privateBytes: Int64?
+    let sharesStorage: Bool
+
+    var allocationIdentity: AllocationIdentity? {
+        // Pure clones share a data-stream ID, not an inode. Keep partial clones
+        // at their reported allocation: their overlapping extents are unknown.
+        if fullCloneID != 0 {
+            return .clone(device: device, id: fullCloneID, logicalBytes: logicalBytes, allocatedBytes: allocatedBytes)
+        }
+        return linkCount != 1 ? .inode(device: device, id: inode) : nil
+    }
 }
 
-private struct FileIdentity: Hashable {
-    let device: UInt64
-    let inode: UInt64
+private enum AllocationIdentity: Hashable {
+    case inode(device: UInt64, id: UInt64)
+    case clone(device: UInt64, id: UInt64, logicalBytes: Int64, allocatedBytes: Int64)
 }
+
+// EF_SHARES_ALL_BLOCKS from sys/vnode.h, absent from some public SDKs.
+private let sharesAllBlocks: UInt64 = 0x40
 
 private enum BulkFallback: Error {
     case unavailable
@@ -775,21 +818,71 @@ final class DiskScannerDiagnosticsStore: @unchecked Sendable {
     }
 }
 
-private func metadata(from info: stat, name: String) -> EntryMetadata {
+private func metadata(from info: stat, name: String, path: String) -> EntryMetadata {
     let directory = isDirectory(info)
     let symlink = isSymlink(info)
+    let details = directory || symlink ? nil : allocationDetails(at: path, matching: info)
+    let bytes = directory || symlink ? 0 : allocatedSize(for: info)
     return EntryMetadata(
         name: name,
         isDirectory: directory,
         isSymlink: symlink,
         logicalBytes: directory || symlink ? 0 : max(0, Int64(info.st_size)),
-        allocatedBytes: directory || symlink ? 0 : allocatedSize(for: info),
+        allocatedBytes: bytes,
         modified: modificationDate(for: info),
         device: UInt64(info.st_dev),
         inode: UInt64(info.st_ino),
         linkCount: UInt32(info.st_nlink),
-        isMountPoint: false
+        isMountPoint: false,
+        fullCloneID: details?.cloneID ?? 0,
+        privateBytes: details?.privateBytes,
+        sharesStorage: details?.mayShare == true || details?.privateBytes.map { $0 < bytes } == true
     )
+}
+
+private struct AllocationDetails {
+    let cloneID: UInt64
+    let privateBytes: Int64?
+    let mayShare: Bool
+}
+
+private func allocationDetails(at path: String, matching info: stat) -> AllocationDetails? {
+    var attributes = attrlist()
+    attributes.bitmapcount = UInt16(ATTR_BIT_MAP_COUNT)
+    attributes.commonattr = UInt32(ATTR_CMN_RETURNED_ATTRS) | UInt32(ATTR_CMN_DEVID) | UInt32(ATTR_CMN_FILEID)
+    attributes.forkattr = UInt32(ATTR_CMNEXT_PRIVATESIZE) | UInt32(ATTR_CMNEXT_CLONEID) | UInt32(ATTR_CMNEXT_EXT_FLAGS)
+    var buffer = [UInt8](repeating: 0, count: 128)
+    return buffer.withUnsafeMutableBytes { bytes in
+        guard getattrlist(path, &attributes, bytes.baseAddress, bytes.count,
+                          UInt32(FSOPT_ATTR_CMN_EXTENDED | FSOPT_NOFOLLOW)) == 0 else { return nil }
+        let raw = UnsafeRawBufferPointer(bytes)
+        guard let length = try? read(UInt32.self, from: raw, at: 0, through: raw.count),
+              Int(length) <= raw.count,
+              let returned = try? read(attribute_set_t.self, from: raw, at: 4, through: Int(length)),
+              has(returned.commonattr, ATTR_CMN_DEVID), has(returned.commonattr, ATTR_CMN_FILEID) else { return nil }
+        var cursor = 4 + MemoryLayout<attribute_set_t>.size
+        guard let device = try? read(dev_t.self, from: raw, at: cursor, through: Int(length)),
+              let inode = try? read(UInt64.self, from: raw, at: cursor + MemoryLayout<dev_t>.size, through: Int(length)),
+              device == info.st_dev, inode == info.st_ino else { return nil }
+        cursor += MemoryLayout<dev_t>.size + MemoryLayout<UInt64>.size
+        var privateBytes: Int64?
+        var cloneID: UInt64 = 0
+        var flags: UInt64 = 0
+        if has(returned.forkattr, ATTR_CMNEXT_PRIVATESIZE) {
+            guard let value = try? read(off_t.self, from: raw, at: cursor, through: Int(length)) else { return nil }
+            privateBytes = max(0, Int64(value)); cursor += MemoryLayout<off_t>.size
+        }
+        if has(returned.forkattr, ATTR_CMNEXT_CLONEID) {
+            guard let value = try? read(UInt64.self, from: raw, at: cursor, through: Int(length)) else { return nil }
+            cloneID = value; cursor += MemoryLayout<UInt64>.size
+        }
+        if has(returned.forkattr, ATTR_CMNEXT_EXT_FLAGS) {
+            guard let value = try? read(UInt64.self, from: raw, at: cursor, through: Int(length)) else { return nil }
+            flags = value
+        }
+        return AllocationDetails(cloneID: flags & sharesAllBlocks != 0 ? cloneID : 0,
+                                 privateBytes: privateBytes, mayShare: flags & 1 != 0)
+    }
 }
 
 private func read<T>(_ type: T.Type, from bytes: UnsafeRawBufferPointer, at offset: Int, through end: Int) throws -> T {

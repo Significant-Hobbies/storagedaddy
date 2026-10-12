@@ -13,8 +13,15 @@ struct LiveScanView: View {
                 Text("Results grow as folders are explored. Final totals and developer insights appear when the scan finishes.").foregroundStyle(Tints.secondaryText)
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(DiskFormat.bytes(progress.allocatedBytes)).font(.system(size: 48, weight: .semibold, design: .rounded)).monospacedDigit().foregroundStyle(Tints.mint)
-                        Text("on disk found so far").foregroundStyle(Tints.secondaryText)
+                        Text(DiskFormat.bytes(m.liveStorageCapacity?.used ?? progress.allocatedBytes)).font(.system(size: 48, weight: .semibold, design: .rounded)).monospacedDigit().foregroundStyle(Tints.mint)
+                        if let capacity = m.liveStorageCapacity {
+                            Text("used of \(DiskFormat.bytes(capacity.total)) startup storage · macOS measurement at scan start").foregroundStyle(Tints.secondaryText)
+                            Text("Folder allocations are partial; shared storage is reconciled as files are discovered.")
+                                .font(.caption).foregroundStyle(Tints.secondaryText)
+                                .help("\(DiskFormat.bytes(progress.allocatedBytes)) currently attributed to scanned files. This is not physical disk usage.")
+                        } else {
+                            Text("file allocations found so far").foregroundStyle(Tints.secondaryText)
+                        }
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 6) {
@@ -27,8 +34,10 @@ struct LiveScanView: View {
                         if let rss = m.scanPeakRSS { Text("\(DiskFormat.bytes(Int64(clamping: rss))) sampled peak RSS").font(.caption).foregroundStyle(Tints.secondaryText) }
                     }
                 }
+                Text(ScanStorageAccounting.fileAllocationExplanation)
+                    .font(.callout).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
                 VStack(alignment: .leading, spacing: 16) {
-                    HStack { Text("Largest locations so far").font(.title2.weight(.semibold)); Spacer(); Text("PARTIAL TOTALS").font(.caption).foregroundStyle(Tints.secondaryText) }
+                    HStack { Text("Largest locations so far").font(.title2.weight(.semibold)); Spacer(); Text("FILE ALLOCATIONS · PARTIAL").font(.caption).foregroundStyle(Tints.secondaryText) }
                     if progress.locations.isEmpty {
                         Text("Reading the first folders…").foregroundStyle(Tints.secondaryText)
                     }

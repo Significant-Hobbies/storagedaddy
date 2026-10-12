@@ -14,6 +14,8 @@ public struct DiskNode: Codable, Sendable, Identifiable {
     public var isScanIncomplete: Bool? = nil
     public var name: String
     public var logicalBytes: Int64
+    /// Allocation attributed to this entry within the scan. Hard links and
+    /// identified full APFS clones share one owner; partial sharing is unknown.
     public var allocatedBytes: Int64
     public var modified: Date
     public var device: UInt64
@@ -38,6 +40,9 @@ public struct ScanResult: Codable, Sendable {
     /// Optional to preserve decoding of snapshots written before this field existed.
     public var incompleteEvidence: [ScanIncompleteEvidence]?
     public var incompleteEvidenceTruncated: Bool?
+    /// Sparse allocation exceptions keep the compact DiskNode layout unchanged.
+    /// nil means sharing/private-byte metadata was not recorded by this scan.
+    public var fileAllocationDetails: [FileAllocationDetail]? = nil
     public init(rootPath: String, nodes: [DiskNode], started: Date = Date(), elapsed: Double = 0, processDiskReadBytes: UInt64? = nil, errors: [String] = [], skipped: Int = 0, incompleteEvidence: [ScanIncompleteEvidence]? = nil, incompleteEvidenceTruncated: Bool? = nil) {
         self.rootPath = rootPath; self.nodes = nodes; self.started = started; self.elapsed = elapsed; self.errors = errors; self.skipped = skipped; self.incompleteEvidence = incompleteEvidence; self.incompleteEvidenceTruncated = incompleteEvidenceTruncated
         self.processDiskReadBytes = processDiskReadBytes

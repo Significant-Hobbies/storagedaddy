@@ -191,7 +191,8 @@ struct ExplorerView: View {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("current scan").accessibilityLabel("CURRENT SCAN").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
                     Text(StorageLabels.name(root)).font(.callout).lineLimit(1).help(scan.rootPath)
-                    Text("\(DiskFormat.bytes(root.allocatedBytes)) on disk").font(.callout).monospacedDigit()
+                    Text(m.scanStorageAccounting.map { "\(DiskFormat.bytes($0.capacity.used)) used of \(DiskFormat.bytes($0.capacity.total))" }
+                        ?? "\(DiskFormat.bytes(root.allocatedBytes)) attributed allocation").font(.callout).monospacedDigit()
                     if scan.skipped > 0 {
                         Button("\(scan.skipped.formatted()) skipped · Details") {
                             m.message = [m.scanStorageAccounting?.measuredBreakdown, m.scanStorageAccounting?.explanation, scan.coverageExplanation]
@@ -383,17 +384,18 @@ struct StorageExplorePanel: View {
     @State private var explainingSizes = false
     var body: some View {
         GeometryReader { geometry in
-            let compact = geometry.size.width < 660 || geometry.size.height < 650
-            if compact {
+            let compact = geometry.size.width < 760 || geometry.size.height < 650
+            let signingContext = m.scan.map { ChromeSigningClones.location(path: $0.url(for: m.focus).path) != nil } ?? false
+            if compact || signingContext {
                 ScrollView {
-                    panel(compact: true)
+                    panel(compact: compact, scrolling: true)
                 }
             } else {
-                panel(compact: false)
+                panel(compact: false, scrolling: false)
             }
         }
     }
-    private func panel(compact: Bool) -> some View {
+    private func panel(compact: Bool, scrolling: Bool) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             let headerLayout = compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout())
             headerLayout {
@@ -462,18 +464,25 @@ struct StorageExplorePanel: View {
             }
             if let scan = m.scan, scan.nodes.indices.contains(m.focus) {
                 controlsLayout {
-                    Text(m.focus == 0 && m.allocated ? m.scanStorageAccounting?.summary ?? "\(StorageLabels.size(scan.nodes[m.focus], allocated: m.allocated)) in this folder" : "\(StorageLabels.size(scan.nodes[m.focus], allocated: m.allocated)) in this folder").fontWeight(.medium)
+                    Text(m.focus == 0 && m.allocated ? m.scanStorageAccounting?.summary ?? m.folderSizeDescription(scan.nodes[m.focus]) : m.folderSizeDescription(scan.nodes[m.focus])).fontWeight(.medium)
                         .help(m.scanStorageAccounting.map { $0.explanation + "\n\nCapacity measured after this scan; rescan to update." } ?? "Totals include only files reached by this scan.")
                     if !compact { Spacer() }
                     Text("Select to inspect · Option-click or M to mark · Double-click to open")
                         .foregroundStyle(Tints.secondaryText)
                 }.font(.caption).fixedSize(horizontal: false, vertical: true)
             }
+            if m.allocated {
+                Text(ScanStorageAccounting.fileAllocationExplanation)
+                    .font(.caption).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
+            }
+            if let scan = m.scan, ChromeSigningClones.location(path: scan.url(for: m.focus).path) != nil {
+                ChromeSigningCopiesView(nodeID: m.focus)
+            }
             Divider().overlay(Tints.secondaryText.opacity(0.18))
-            StorageFreeSpaceView()
+            StorageFreeSpaceView().fixedSize(horizontal: false, vertical: true).layoutPriority(1)
             if m.mapItems.isEmpty || ([.folders, .top, .age, .types].contains(m.mode) && m.visible.isEmpty) { StorageEmptyView("No matching items", systemImage: "folder", description: Text("Try another filter or open a different folder.")) }
-            else if m.mode == .folders { folderList.frame(height: compact ? 400 : nil) }
-            else { DiskMapView(compact: compact).frame(minHeight: compact && [.top, .age, .types].contains(m.mode) ? 400 : 0) }
+            else if m.mode == .folders { folderList.frame(height: scrolling ? 400 : nil) }
+            else { DiskMapView(compact: scrolling).frame(minHeight: scrolling && [.top, .age, .types].contains(m.mode) ? 400 : 0) }
         }.padding(compact ? 16 : 26)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -484,7 +493,7 @@ struct StorageExplorePanel: View {
                     Image(systemName: n.isDirectory ? "folder.fill" : "doc.fill").font(.title3).foregroundStyle(Tints.forNode(n)).frame(width: 26)
                     VStack(alignment: .leading, spacing: 4) { Text(StorageLabels.name(n)).font(.system(size: 15, weight: .medium)); Text(n.isDirectory ? "\(n.children.count) items" : n.modified == .distantPast || !n.modified.timeIntervalSince1970.isFinite ? "Unknown" : n.modified.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(Tints.secondaryText) }
                     Spacer()
-                    Text(StorageLabels.size(n, allocated: m.allocated)).monospacedDigit().foregroundStyle(Tints.secondaryText)
+                    Text(m.itemSizeDescription(n)).monospacedDigit().foregroundStyle(Tints.secondaryText)
                     if n.isDirectory { Image(systemName: "chevron.right").font(.caption).foregroundStyle(Tints.secondaryText.opacity(0.7)) }
                 }.padding(.vertical, 8).contentShape(Rectangle())
             }.buttonStyle(.plain).simultaneousGesture(TapGesture(count: 2).onEnded { m.open(n) })
@@ -498,10 +507,11 @@ struct StorageFreeSpaceView: View {
     @EnvironmentObject var m: ExplorerModel
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("Free now: \(m.volumeFree.map(DiskFormat.bytes) ?? "Unavailable") → Up to \(m.projectedFreeUpperBound.map(DiskFormat.bytes) ?? "Unavailable") after emptying Trash")
+            Text("Free now: \(m.volumeFree.map(DiskFormat.bytes) ?? "Unavailable")" +
+                 (m.staged.isEmpty ? "" : " · \(m.stagedExclusiveBytes.map(DiskFormat.bytes) ?? "Unknown") exclusive allocation selected"))
                 .font(.caption).monospacedDigit().foregroundStyle(Tints.mint)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Staging changes nothing on disk. Shared APFS blocks and snapshots can reduce the space recovered.")
+            Text("Staging changes nothing on disk. Exclusive bytes are a conservative estimate; additional shared-block recovery is unknown. Trash must be emptied before space can be reclaimed.")
                 .font(.caption2).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -564,9 +574,10 @@ struct InspectorView: View {
                     Image(systemName: n.isDirectory ? "folder.fill" : "doc.fill").font(.system(size: 44)).foregroundStyle(Tints.forNode(n))
                     Text(StorageLabels.name(n)).font(.title2.weight(.semibold)).textSelection(.enabled)
                     Text(StorageLabels.location(scan.url(for: n.id).path)).font(.caption).foregroundStyle(Tints.secondaryText).help(scan.url(for: n.id).path).textSelection(.enabled)
-                    Text(StorageLabels.size(n, allocated: m.allocated, compact: true)).font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit().help(StorageLabels.size(n, allocated: m.allocated))
+                    Text(m.allocated && n.allocatedBytes == 0 && (m.allocationSummary(n)?.sharedFiles ?? 0) > 0 ? "Shared storage" : StorageLabels.size(n, allocated: m.allocated, compact: true)).font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit().help(StorageLabels.size(n, allocated: m.allocated))
                     Divider().overlay(Tints.secondaryText.opacity(0.18))
-                    metric("On disk", StorageLabels.size(n, allocated: true)); metric("Logical", StorageLabels.size(n, allocated: false)); metric("Modified", n.modified == .distantPast || !n.modified.timeIntervalSince1970.isFinite ? "Unknown" : n.modified.formatted(date: .abbreviated, time: .omitted)); metric("Contents", n.isContentsUnreadable == true ? "Not enumerated" : "\(n.children.count) immediate items\(n.isScanIncomplete == true ? " · incomplete" : "")")
+                    metric("Attributed allocation", StorageLabels.size(n, allocated: true)); metric("Logical", StorageLabels.size(n, allocated: false)); metric("Modified", n.modified == .distantPast || !n.modified.timeIntervalSince1970.isFinite ? "Unknown" : n.modified.formatted(date: .abbreviated, time: .omitted)); metric("Contents", n.isContentsUnreadable == true ? "Not enumerated" : "\(n.children.count) immediate items\(n.isScanIncomplete == true ? " · incomplete" : "")")
+                    StorageAllocationDetailsView(node: n)
                     metric("Kind", m.storageKind(n).rawValue)
                     metric("File entries", m.fileEntries(n).formatted())
                     if n.isDirectory, n.children.contains(where: { scan.nodes[$0].name == ".git" }) {
@@ -588,14 +599,21 @@ struct InspectorView: View {
                             .help("Copy a ready-to-paste prompt that asks an AI assistant to explain this folder. Nothing is uploaded.")
                     }
                     if n.isDirectory { Button("open folder", systemImage: "folder") { m.open(n) }.accessibilityLabel("Open Folder") }
-                    CleanupFlag(category: m.cleanupCategory(n.id))
+                    if ChromeSigningClones.location(path: scan.url(for: n.id).path) != nil {
+                        Label("Signing copy · Quit Chrome first", systemImage: "square.on.square").font(.caption).foregroundStyle(Tints.yellow)
+                    } else { CleanupFlag(category: m.cleanupCategory(n.id)) }
                     if let assessment = FolderArchetypes.assess(scan, folderID: n.id, category: m.cleanupCategory(n.id)) {
                         Text(assessment.explanation).font(.caption).foregroundStyle(Tints.secondaryText).textSelection(.enabled)
                     }
                     if let note = CleanupGuidance.chromeCacheNote(path: scan.url(for: n.id).path) {
                         Text(note).font(.caption).foregroundStyle(Tints.yellow)
                     }
-                    Button(m.staged.contains(n.id) ? "Staged for Cleanup" : "Add to Cleanup", systemImage: "tray.and.arrow.down") { m.stage(n.id) }.buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.staged.contains(n.id) || m.busy || m.monitoring || n.parent == nil)
+                    if ChromeSigningClones.location(path: scan.url(for: n.id).path) == .store {
+                        Button("Review signing copies", systemImage: "tray.and.arrow.down") { m.stageChromeSigningCopies(n.id) }
+                            .buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy || m.monitoring)
+                    } else {
+                        Button(m.staged.contains(n.id) ? "Staged for Cleanup" : "Add to Cleanup", systemImage: "tray.and.arrow.down") { m.stage(n.id) }.buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.staged.contains(n.id) || m.busy || m.monitoring || n.parent == nil)
+                    }
                     if scan.skipped > 0 {
                         Text("Some locations were skipped. Add to Cleanup checks this item separately and asks you to review any contents it cannot verify.")
                             .font(.caption).foregroundStyle(Tints.yellow)

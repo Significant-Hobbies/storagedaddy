@@ -1,5 +1,7 @@
 @testable import DiskCore
 import Foundation
+import AppKit
+import SwiftUI
 import Testing
 @testable import StorageDaddy
 
@@ -73,6 +75,8 @@ private func accountingCapacity() -> StartupCapacity {
     #expect(value.outsideBreakdown == 0)
     #expect(value.explanation.contains("cannot be reconciled"))
     #expect(!value.summary.contains("used outside this breakdown"))
+    #expect(value.summary.hasPrefix("\(DiskFormat.bytes(value.capacity.used)) used of \(DiskFormat.bytes(value.capacity.total)) startup storage"))
+    #expect(value.summary == "\(DiskFormat.bytes(value.capacity.used)) used of \(DiskFormat.bytes(value.capacity.total)) startup storage · \(DiskFormat.bytes(value.capacity.available)) available")
 }
 
 @Test func scanCoverageDoesNotPresentBoundedEvidenceAsCompleteCountsOrSizes() {
@@ -87,4 +91,42 @@ private func accountingCapacity() -> StartupCapacity {
     #expect(scan.coverageExplanation.contains("unreadable directory: 2 entries"))
     #expect(scan.coverageExplanation.contains("does not list every skipped entry"))
     #expect(scan.coverageExplanation.contains("not a file count or a measurement of missing bytes"))
+}
+
+@Test(.enabled(if: ProcessInfo.processInfo.environment["STORAGEDADDY_LIVE_SCAN_EVIDENCE"] == "1"))
+@MainActor func liveScanAccountingNativeFixtures() async throws {
+    let model = ExplorerModel()
+    model.liveStorageCapacity = StartupCapacity(total: 1_000_000_000_000, available: 58_000_000_000)
+    let progress = ScanProgress(entries: 13_769_069, path: "/System/Volumes/Data", allocatedBytes: 1_230_000_000_000,
+        files: 13_000_000, skipped: 6_193, elapsed: 145, locations: [
+            ScanLiveLocation(id: 1, name: "private", allocatedBytes: 700_000_000_000),
+            ScanLiveLocation(id: 2, name: "Users", allocatedBytes: 480_000_000_000),
+            ScanLiveLocation(id: 3, name: "Applications", allocatedBytes: 50_000_000_000),
+        ])
+    let output = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().appendingPathComponent(".fleet-local/live-scan-capacity")
+    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+    let scan = ScanResult(rootPath: "/synthetic/com.google.Chrome.code_sign_clone", nodes: [
+        DiskNode(id: 0, parent: nil, name: "com.google.Chrome.code_sign_clone", isDirectory: true,
+            allocatedBytes: 474_630_000_000, children: [1]),
+        DiskNode(id: 1, parent: 0, name: "code_sign_clone.example", isDirectory: true,
+            allocatedBytes: 474_630_000_000),
+    ])
+    model.scan = scan; model.volumeFree = 58_000_000_000; model.volumeCapacity = 1_000_000_000_000
+    model.liveProgress = progress; model.progress = "Synthetic display fixture · No filesystem scan"
+    model.refreshFocus()
+    for (state, width) in ["live", "folder"].flatMap({ state in [880, 1200, 1440].map { (state, $0) } }) {
+        model.busy = state == "live"
+        let host = NSHostingView(rootView: ExplorerView(runsLaunchActions: false).environmentObject(model)
+            .preferredColorScheme(.dark).frame(width: CGFloat(width), height: 900))
+        host.frame = NSRect(x: 0, y: 0, width: width, height: 900)
+        let window = NSWindow(contentRect: host.frame, styleMask: [], backing: .buffered, defer: false)
+        window.contentView = host
+        try await Task.sleep(for: .milliseconds(200))
+        host.layoutSubtreeIfNeeded(); window.displayIfNeeded()
+        let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        try #require(bitmap.representation(using: .png, properties: [:]))
+            .write(to: output.appendingPathComponent("\(state)-\(width).png"))
+    }
 }
