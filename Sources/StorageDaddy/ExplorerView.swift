@@ -45,8 +45,8 @@ struct ExplorerView: View {
                                 .help(m.staged.isEmpty ? "Refresh this location" : "Finish or remove your remaining cleanup selections before rescanning.")
                         }.padding(12).overlay(Rectangle().stroke(Tints.mint.opacity(0.25)))
                     }
-                    if !m.busy, m.showWelcome || (!accessIntroductionSeen && m.scan == nil && m.workspace == .explore) { accessIntroduction }
-                    else if m.busy, let live = m.liveProgress { LiveScanView(progress: live) }
+                    if !m.busy, m.workspace == .explore, m.showWelcome || (!accessIntroductionSeen && m.scan == nil) { accessIntroduction }
+                    else if m.isScanning, m.workspace == .explore, m.storageSection == .explore, let live = m.liveProgress { LiveScanView(progress: live) }
                     else if m.scan == nil, m.workspace.requiresScan || m.workspace == .explore { emptyState }
                     else { content }
                     Divider().overlay(Tints.secondaryText.opacity(0.18))
@@ -80,7 +80,7 @@ struct ExplorerView: View {
             }.background(Color.black)
         }
         .font(.custom(DaddyTheme.palette.sansFont, size: 13))
-        .smTheme(DaddyTheme.palette)
+        .storageTheme(DaddyTheme.palette)
         .buttonStyle(StorageButtonStyle())
         .toolbar(.hidden, for: .windowToolbar)
         .sheet(isPresented: $choosingDisk) { DiskPickerView(isPresented: $choosingDisk).environmentObject(m).frame(width: 620, height: 560) }
@@ -100,12 +100,12 @@ struct ExplorerView: View {
         .sheet(isPresented: Binding(get: { m.message != nil }, set: { if !$0 { m.message = nil } })) { StorageMessageSheet(message: m.message ?? "") }
         .sheet(isPresented: $m.showCleanup) { CleanupView().environmentObject(m).frame(width: 640, height: 490) }
         .onChange(of: m.storageInspectorRequest) { _, _ in inspector = true }
-        .onChange(of: m.busy) { _, busy in if busy { accessIntroductionSeen = true } }
+        .onChange(of: m.busy) { _, busy in if busy && !StorageStartupCheck.enabled { accessIntroductionSeen = true } }
         .onAppear {
             guard runsLaunchActions else { return }
             NSApplication.shared.setActivationPolicy(.regular)
             StorageDaddyAppDelegate.applyIcon()
-            NSApplication.shared.activate(ignoringOtherApps: true)
+            if !StorageStartupCheck.enabled { NSApplication.shared.activate(ignoringOtherApps: true) }
             // Scripted-verification flags. A destination workspace outlives
             // the scan, which otherwise lands on Explore when it finishes.
             var destination: Workspace?
@@ -116,10 +116,10 @@ struct ExplorerView: View {
                 destination = workspace
             }
             if let index = CommandLine.arguments.firstIndex(of: "--scan"), CommandLine.arguments.indices.contains(index + 1), m.scan == nil {
-                accessIntroductionSeen = true
+                if !StorageStartupCheck.enabled { accessIntroductionSeen = true }
                 m.start(URL(fileURLWithPath: CommandLine.arguments[index + 1]), destination: destination)
             } else if let destination {
-                accessIntroductionSeen = true
+                if !StorageStartupCheck.enabled { accessIntroductionSeen = true }
                 m.workspace = destination
             }
             if let index = CommandLine.arguments.firstIndex(of: "--mode"),
@@ -173,15 +173,17 @@ struct ExplorerView: View {
                 Button(action: m.chooseFolder) { Label("scan folder…", systemImage: "folder.badge.plus").frame(maxWidth: .infinity).frame(height: 28) }.buttonStyle(StorageButtonStyle()).disabled(m.busy).accessibilityLabel("Scan Folder…")
             }
             VStack(alignment: .leading, spacing: 5) {
-                navigationHeading("STORAGE")
+                navigationItem(.dashboard)
+                navigationItem(.cleanup)
                 navigationItem(.explore)
+                navigationHeading("SCAN RESULTS")
+                navigationItem(.developer)
                 navigationItem(.findFiles)
                 navigationItem(.snapshots)
                 navigationItem(.duplicates)
                 navigationItem(.projects)
                 navigationItem(.appData)
                 navigationHeading("TOOLS").padding(.top, 9)
-                navigationItem(.dashboard)
                 navigationItem(.applications)
                 navigationItem(.aiSessions)
                 navigationItem(.macControls)
@@ -221,9 +223,13 @@ struct ExplorerView: View {
     }
     private func navigationItem(_ item: Workspace) -> some View {
         let needsScan = m.scan == nil && item.requiresScan
+        let destination = m.workspace == .explore && m.storageSection == .cleanup ? Workspace.cleanup
+            : m.workspace == .explore && m.storageSection == .developer ? .developer : m.workspace
         return Button {
             m.showWelcome = false
-            if item == .explore { m.openStorage(m.storageSection) }
+            if item == .explore { m.openStorage(.explore) }
+            else if item == .cleanup { m.openStorage(.cleanup) }
+            else if item == .developer { m.openStorage(.developer) }
             else { m.workspace = item }
         } label: {
             HStack {
@@ -232,15 +238,15 @@ struct ExplorerView: View {
                 Spacer()
                 if item == .cleanup, !m.staged.isEmpty { Text("\(m.staged.count)").monospacedDigit() }
             }
-            .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 32, alignment: .leading).contentShape(Rectangle())
+            .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 38, alignment: .leading).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(m.workspace == item && !needsScan ? Tints.mint.opacity(0.11) : .clear, in: RoundedRectangle(cornerRadius: 7))
-        .disabled(needsScan)
+        .background(destination == item ? Tints.mint.opacity(0.11) : .clear, in: RoundedRectangle(cornerRadius: 7))
+        .foregroundStyle(needsScan ? Tints.secondaryText : Color.white)
         .help(item == .snapshots ? "Browse snapshots saved from your scan results."
               : needsScan ? "Scan a disk or folder to see these results." : item.title)
         .accessibilityIdentifier("workspace-\(item.rawValue)")
-        .accessibilityAddTraits(m.workspace == item && !needsScan ? .isSelected : [])
+        .accessibilityAddTraits(destination == item ? .isSelected : [])
     }
     private var emptyState: some View {
         ScanWelcomeView(
@@ -385,18 +391,13 @@ struct StorageExplorePanel: View {
     var body: some View {
         GeometryReader { geometry in
             let compact = geometry.size.width < 760 || geometry.size.height < 650
-            let signingContext = m.scan.map { ChromeSigningClones.location(path: $0.url(for: m.focus).path) != nil } ?? false
-            if compact || signingContext {
-                ScrollView {
-                    panel(compact: compact, scrolling: true)
-                }
-            } else {
-                panel(compact: false, scrolling: false)
+            ScrollView {
+                panel(compact: compact, scrolling: true)
             }
         }
     }
     private func panel(compact: Bool, scrolling: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: compact ? 12 : 16) {
             let headerLayout = compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout())
             headerLayout {
               HStack {
@@ -467,13 +468,16 @@ struct StorageExplorePanel: View {
                     Text(m.focus == 0 && m.allocated ? m.scanStorageAccounting?.summary ?? m.folderSizeDescription(scan.nodes[m.focus]) : m.folderSizeDescription(scan.nodes[m.focus])).fontWeight(.medium)
                         .help(m.scanStorageAccounting.map { $0.explanation + "\n\nCapacity measured after this scan; rescan to update." } ?? "Totals include only files reached by this scan.")
                     if !compact { Spacer() }
-                    Text("Select to inspect · Option-click or M to mark · Double-click to open")
-                        .foregroundStyle(Tints.secondaryText)
+                    if !compact {
+                        Text("Select to inspect · Option-click or M to mark · Double-click to open")
+                            .foregroundStyle(Tints.secondaryText)
+                    }
                 }.font(.caption).fixedSize(horizontal: false, vertical: true)
             }
             if m.allocated {
-                Text(ScanStorageAccounting.fileAllocationExplanation)
+                Text("Shared files and snapshots can make file totals differ from disk usage.")
                     .font(.caption).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
+                    .help(ScanStorageAccounting.fileAllocationExplanation)
             }
             if let scan = m.scan, ChromeSigningClones.location(path: scan.url(for: m.focus).path) != nil {
                 ChromeSigningCopiesView(nodeID: m.focus)
@@ -482,7 +486,7 @@ struct StorageExplorePanel: View {
             StorageFreeSpaceView().fixedSize(horizontal: false, vertical: true).layoutPriority(1)
             if m.mapItems.isEmpty || ([.folders, .top, .age, .types].contains(m.mode) && m.visible.isEmpty) { StorageEmptyView("No matching items", systemImage: "folder", description: Text("Try another filter or open a different folder.")) }
             else if m.mode == .folders { folderList.frame(height: scrolling ? 400 : nil) }
-            else { DiskMapView(compact: scrolling).frame(minHeight: scrolling && [.top, .age, .types].contains(m.mode) ? 400 : 0) }
+            else { DiskMapView(compact: scrolling, chartHeight: compact ? 260 : 380).frame(minHeight: scrolling && [.top, .age, .types].contains(m.mode) ? 400 : 0) }
         }.padding(compact ? 16 : 26)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -511,8 +515,11 @@ struct StorageFreeSpaceView: View {
                  (m.staged.isEmpty ? "" : " · \(m.stagedExclusiveBytes.map(DiskFormat.bytes) ?? "Unknown") exclusive allocation selected"))
                 .font(.caption).monospacedDigit().foregroundStyle(Tints.mint)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Staging changes nothing on disk. Exclusive bytes are a conservative estimate; additional shared-block recovery is unknown. Trash must be emptied before space can be reclaimed.")
-                .font(.caption2).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
+            if !m.staged.isEmpty {
+                Text("Review selections before moving them to Trash. Empty Trash to reclaim space.")
+                    .font(.caption2).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
+                    .help("Exclusive bytes are a conservative estimate; additional shared-block recovery is unknown.")
+            }
         }
     }
 }
@@ -538,6 +545,10 @@ enum Tints {
         case .agents: Color(red: 0.45, green: 0.72, blue: 0.87)
         case .generic: Color(white: 0.56)
         }
+    }
+
+    static func forMapNode(_ node: DiskNode, kind: StorageKind) -> Color {
+        kind == .generic ? forLocation(node.name) : forKind(kind)
     }
 
     static func forLocation(_ name: String) -> Color {

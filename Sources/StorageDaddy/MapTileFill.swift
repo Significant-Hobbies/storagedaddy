@@ -29,7 +29,7 @@ enum MapTileFill {
             scale = low
         }
         // Opaque tiles prevent nested colors from accumulating over parent fills.
-        // Intensity still makes children darker and filtered tiles quieter.
+        // Intensity controls shade while preserving hue; filtered tiles are quieter.
         return NSColor(srgbRed: red * scale * depthScale, green: green * scale * depthScale, blue: blue * scale * depthScale, alpha: 1)
     }
 }

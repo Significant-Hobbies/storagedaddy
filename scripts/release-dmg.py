@@ -48,7 +48,8 @@ def main():
     api_auth = [args.notary_api_key, args.notary_key_id, args.notary_issuer_id]
     if (args.notary_profile and any(api_auth)) or (any(api_auth) and not all(api_auth)):
         parser.error("Pass a Keychain profile or the complete API key, key ID, and issuer ID")
-    run("python3", ROOT / "scripts" / "package-app.py", "--check")
+    binary = swiftpm_resources.build_app(ROOT)
+    run("python3", ROOT / "scripts" / "package-app.py", binary, "--check")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     stage = output / "image-contents"
@@ -56,7 +57,6 @@ def main():
     for name in ["MacOS", "Helpers", "Resources"]:
         (app / "Contents" / name).mkdir(parents=True, exist_ok=True)
     # Assemble only known public inputs, never the artifacts directory or logs.
-    binary = ROOT / ".build/release/StorageDaddy"
     swiftpm_resources.embed_ui_resources(binary, app)
     mac_tools_notices = "\n\n".join((ROOT / "Vendor/RemoveMacAI" / name).read_text() for name in ["LICENSE", "THIRD-PARTY-NOTICES.md", "UPSTREAM.md"])
     (app / "Contents/Resources" / "RemoveMacAI-THIRD_PARTY_NOTICES.txt").write_text(mac_tools_notices)
@@ -92,6 +92,7 @@ def main():
     for target in [app / "Contents/Helpers/memory-pack", app / "Contents/Helpers/storage-search", app]:
         run("codesign", "--force", "--sign", args.identity, "--timestamp", "--options", "runtime", target)
     run("codesign", "--verify", "--deep", "--strict", app)
+    swiftpm_resources.check_ui_resources(binary, app)
     (stage / "Applications").symlink_to("/Applications")
     shutil.copyfile(ROOT / "DISTRIBUTION.md", stage / "Start Here.txt")
     version = info["CFBundleShortVersionString"]
