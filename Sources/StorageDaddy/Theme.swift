@@ -31,6 +31,17 @@ private struct Panel: ViewModifier {
 }
 
 extension View {
+    /// Apply the shared palette without its fatal SwiftPM resource accessor.
+    func storageTheme(_ palette: SMPalette) -> some View {
+        _ = StorageUIResources.loaded
+        return environment(\.smPalette, palette)
+            .tint(palette.brand)
+            .foregroundStyle(palette.foreground)
+            .font(.custom(palette.sansFont, size: 16, relativeTo: .body))
+            .background(palette.background.ignoresSafeArea())
+            .preferredColorScheme(palette.isDark ? .dark : .light)
+    }
+
     /// Keep the caller's spacing and its single scroll surface.
     func storagePanel() -> some View { modifier(Panel()) }
 }

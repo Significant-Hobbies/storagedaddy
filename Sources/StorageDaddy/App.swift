@@ -10,7 +10,10 @@ enum StorageDaddyMain {
     @MainActor
     static func main() {
         if CommandLine.arguments.contains("--check-ui-resources") {
-            SMFonts.register()
+            guard StorageUIResources.loaded else {
+                FileHandle.standardError.write(Data("StorageDaddy UI resources missing or invalid\n".utf8))
+                exit(EXIT_FAILURE)
+            }
             print("StorageDaddy UI resources loaded")
             return
         }
@@ -25,8 +28,9 @@ struct DiskBuddyApp: App {
     @StateObject private var login = DaddyLaunchAtLogin()
     var body: some Scene {
         Window("storagedaddy", id: "main") { ExplorerView().environmentObject(model).frame(minWidth: 880, minHeight: 600).onAppear {
-            updates.start(model: model)
+            if !StorageStartupCheck.enabled { updates.start(model: model) }
             reviewActiveWorkBeforeQuit()
+            StorageStartupCheck.windowAppeared(model: model)
         } }
             .defaultSize(width: 1320, height: 850)
             .windowStyle(.hiddenTitleBar)
@@ -92,6 +96,7 @@ private struct StorageMenu: View {
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.applyIcon()
+        guard !StorageStartupCheck.enabled else { return }
         health = NativeAppHealth(publicKey: UserDefaults.standard.string(forKey: NativeAppHealth.preferenceKey))
         health?.setActive(NSApplication.shared.isActive)
     }

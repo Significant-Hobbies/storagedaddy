@@ -80,7 +80,7 @@ struct ExplorerView: View {
             }.background(Color.black)
         }
         .font(.custom(DaddyTheme.palette.sansFont, size: 13))
-        .smTheme(DaddyTheme.palette)
+        .storageTheme(DaddyTheme.palette)
         .buttonStyle(StorageButtonStyle())
         .toolbar(.hidden, for: .windowToolbar)
         .sheet(isPresented: $choosingDisk) { DiskPickerView(isPresented: $choosingDisk).environmentObject(m).frame(width: 620, height: 560) }
@@ -100,12 +100,12 @@ struct ExplorerView: View {
         .sheet(isPresented: Binding(get: { m.message != nil }, set: { if !$0 { m.message = nil } })) { StorageMessageSheet(message: m.message ?? "") }
         .sheet(isPresented: $m.showCleanup) { CleanupView().environmentObject(m).frame(width: 640, height: 490) }
         .onChange(of: m.storageInspectorRequest) { _, _ in inspector = true }
-        .onChange(of: m.busy) { _, busy in if busy { accessIntroductionSeen = true } }
+        .onChange(of: m.busy) { _, busy in if busy && !StorageStartupCheck.enabled { accessIntroductionSeen = true } }
         .onAppear {
             guard runsLaunchActions else { return }
             NSApplication.shared.setActivationPolicy(.regular)
             StorageDaddyAppDelegate.applyIcon()
-            NSApplication.shared.activate(ignoringOtherApps: true)
+            if !StorageStartupCheck.enabled { NSApplication.shared.activate(ignoringOtherApps: true) }
             // Scripted-verification flags. A destination workspace outlives
             // the scan, which otherwise lands on Explore when it finishes.
             var destination: Workspace?
@@ -116,10 +116,10 @@ struct ExplorerView: View {
                 destination = workspace
             }
             if let index = CommandLine.arguments.firstIndex(of: "--scan"), CommandLine.arguments.indices.contains(index + 1), m.scan == nil {
-                accessIntroductionSeen = true
+                if !StorageStartupCheck.enabled { accessIntroductionSeen = true }
                 m.start(URL(fileURLWithPath: CommandLine.arguments[index + 1]), destination: destination)
             } else if let destination {
-                accessIntroductionSeen = true
+                if !StorageStartupCheck.enabled { accessIntroductionSeen = true }
                 m.workspace = destination
             }
             if let index = CommandLine.arguments.firstIndex(of: "--mode"),
