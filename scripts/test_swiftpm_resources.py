@@ -51,6 +51,51 @@ class SwiftPMResourcesTests(unittest.TestCase):
                 swiftpm_resources.embed_ui_resources(binary, Path(folder) / "StorageDaddy.app")
             self.assertFalse((Path(folder) / "StorageDaddy.app").exists())
 
+    def test_window_probes_cover_dashboard_and_real_synthetic_scan(self):
+        with tempfile.TemporaryDirectory() as folder:
+            binary = Path(folder) / "products/StorageDaddy"
+            bundle = binary.parent / swiftpm_resources.UI_BUNDLE
+            bundle.mkdir(parents=True)
+            commands = []
+            def check(command, **kwargs):
+                self.assertFalse(bundle.exists())
+                commands.append(command)
+                if "--scan" in command:
+                    scan_root = Path(command[-1])
+                    self.assertTrue((scan_root / "project/package.json").is_file())
+                    self.assertTrue((scan_root / "project/node_modules/fixture.js").is_file())
+                marker = "StorageDaddy UI resources loaded" if "--check-ui-resources" in command else "StorageDaddy app startup verified"
+                return subprocess.CompletedProcess(command, 0, stdout=marker + "\n", stderr="")
+            with redirect_stdout(io.StringIO()), patch("subprocess.run", side_effect=check):
+                swiftpm_resources.check_ui_resources(binary, Path(folder) / "StorageDaddy.app")
+            self.assertEqual([command[1] for command in commands],
+                             ["--check-ui-resources", "--check-app-startup", "--check-app-startup"])
+            self.assertTrue(bundle.is_dir())
+
+    def test_zero_exit_without_probe_acknowledgement_blocks_package(self):
+        with tempfile.TemporaryDirectory() as folder:
+            binary = Path(folder) / "products/StorageDaddy"
+            bundle = binary.parent / swiftpm_resources.UI_BUNDLE
+            bundle.mkdir(parents=True)
+            with patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="", stderr="")), \
+                 self.assertRaisesRegex(RuntimeError, "did not complete"):
+                swiftpm_resources.check_ui_resources(binary, Path(folder) / "StorageDaddy.app")
+            self.assertTrue(bundle.is_dir())
+
+    def test_window_crash_and_timeout_restore_build_resources(self):
+        for error in [subprocess.CalledProcessError(5, ["fixture"]),
+                      subprocess.TimeoutExpired(["fixture"], 30)]:
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as folder:
+                binary = Path(folder) / "products/StorageDaddy"
+                bundle = binary.parent / swiftpm_resources.UI_BUNDLE
+                bundle.mkdir(parents=True)
+                (bundle / "font.ttf").write_bytes(b"fixture font")
+                font_probe = subprocess.CompletedProcess([], 0, stdout="StorageDaddy UI resources loaded\n", stderr="")
+                with redirect_stdout(io.StringIO()), patch("subprocess.run", side_effect=[font_probe, error]), \
+                     self.assertRaises(type(error)):
+                    swiftpm_resources.check_ui_resources(binary, Path(folder) / "StorageDaddy.app")
+                self.assertEqual((bundle / "font.ttf").read_bytes(), b"fixture font")
+
     def test_bundle_is_copied_beside_existing_resources_and_refreshed(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -117,6 +162,7 @@ class SwiftPMResourcesTests(unittest.TestCase):
                     # Simulate hdiutil's output for checksum validation; execute no external tools.
                     if command[0] == "hdiutil" and command[1] == "create":
                         Path(command[-1]).write_bytes(b"fixture disk image")
+                    return subprocess.CompletedProcess(command, 0, stdout="StorageDaddy UI resources loaded\nStorageDaddy app startup verified\n", stderr="")
                 with redirect_stdout(io.StringIO()), patch("sys.argv", arguments), patch.object(swiftpm_resources, "build_app", return_value=binary), \
                      patch.object(sparkle_support, "configuration", return_value={"SUFeedURL": "https://example.com/appcast.xml"}), \
                      patch.object(sparkle_support, "embed"), patch.object(sparkle_support, "sign"), \
