@@ -66,8 +66,14 @@ public enum CleanupGuidance {
             || path.contains("/node-tools/") || path.contains("/node-runtime/")
     }
 
-    /// These folders can change normally between scan and review. Their root
-    /// identity, exclusions, unreadable contents and current use are still checked.
+    /// Project dependencies move as one folder; package contents need no audit.
+    public static func isProjectDependencies(path: String) -> Bool {
+        URL(fileURLWithPath: path).lastPathComponent == "node_modules"
+            && isRegenerableFolder(path: path)
+    }
+
+    /// These folders can change normally between scan and review. Project
+    /// dependencies use folder-level checks; other candidates retain deeper checks.
     public static func isRegenerableFolder(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
         guard !isInstalledRuntime(path: path) else { return false }
         if isSuggestedCache(category: .packageCaches, path: path, home: home)

@@ -358,6 +358,10 @@ struct DeveloperView: View {
                         Text(DiskFormat.bytes(group.rootAllocatedBytes[id] ?? scan.nodes[id].allocatedBytes)).monospacedDigit()
                         Button("inspect") { m.openStorage(.explore); m.open(scan.nodes[id]) }.accessibilityLabel("Inspect")
                         Button { m.reveal(id) } label: { Image(systemName: "arrow.up.forward.square") }.help("Reveal in Finder").accessibilityLabel("Reveal \(scan.nodes[id].name) in Finder")
+                        if category == .nodeModules {
+                            Button(m.staged.contains(id) ? "Added" : "Add to Cleanup") { m.stage(id) }
+                                .disabled(m.busy || m.monitoring || m.staged.contains(id))
+                        }
                     }.padding(.vertical, 10).contextMenu { StorageItemMenu(node: scan.nodes[id]) }
                     Divider().overlay(Tints.mint.opacity(0.15))
                 }

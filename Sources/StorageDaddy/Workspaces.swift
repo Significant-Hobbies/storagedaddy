@@ -293,7 +293,7 @@ struct CleanupView: View {
         ScrollView {
         VStack(alignment: .leading, spacing: 16) {
             HStack { SMSectionHeader("Quick Cleanup", size: 28).accessibilityLabel("Quick Cleanup"); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") } }
-            Text(m.staged.isEmpty ? "Review rebuildable items below, or add a folder from Storage. Nothing is removed until you confirm." : "Review the list before moving it to Trash. Items added with an incomplete check are marked below. We check paths and known contents again after confirmation.").foregroundStyle(Tints.secondaryText)
+            Text(m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders, then move them to Trash. You can restore them until Trash is emptied.").foregroundStyle(Tints.secondaryText)
             if !m.showCleanup && m.staged.isEmpty { TrashInventoryView() }
             if let scan = m.scan, !m.easyCleanupIDs.isEmpty {
                 AutoCleanerCard(scan: scan)
@@ -350,13 +350,15 @@ struct CleanupView: View {
                             if ChromeSigningClones.location(path: scan.url(for: id).path) != nil {
                                 Text(ChromeSigningClones.cleanupExplanation).font(.caption).foregroundStyle(Tints.yellow)
                             }
-                            StorageAllocationDetailsView(node: scan.nodes[id])
+                            if !CleanupGuidance.isProjectDependencies(path: scan.url(for: id).path) {
+                                StorageAllocationDetailsView(node: scan.nodes[id])
+                            }
                             if let review = m.incompleteCleanup[id] {
                                 Label("Added anyway · \(review.skipped) \(review.skipped == 1 ? "item" : "items") not checked", systemImage: "exclamationmark.triangle")
                                     .font(.caption).foregroundStyle(Tints.coral)
                                 Button("review warning") { m.reviewIncompleteCleanup(id) }.accessibilityLabel("Review warning").font(.caption).disabled(m.busy)
                             }
-                            if scan.nodes[id].isDirectory {
+                            if scan.nodes[id].isDirectory && !CleanupGuidance.isProjectDependencies(path: scan.url(for: id).path) {
                                 FolderSymlinksView(scan: scan, folderID: id, cleanupReview: true)
                                     .id("\(scan.started.timeIntervalSince1970):\(scan.rootPath):\(id)")
                                     .frame(maxWidth: 540, alignment: .leading)
@@ -397,7 +399,7 @@ private struct AutoCleanerCard: View {
             }
             Text("Caches, project dependencies and build outputs. Apps may need to download or rebuild them afterward. Nothing moves automatically.")
                 .font(.caption).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
-            Button("Review \(m.easyCleanupIDs.count) items (\(DiskFormat.bytes(m.easyCleanupBytes)))…", action: m.stageEasyCleanup)
+            Button("Review \(m.easyCleanupIDs.count) \(m.easyCleanupIDs.count == 1 ? "item" : "items") (\(DiskFormat.bytes(m.easyCleanupBytes)))…", action: m.stageEasyCleanup)
                 .buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy || m.monitoring)
             ForEach(suggestions, id: \.self) { id in
                 let category = m.cleanupCategory(id) ?? .packageCaches
@@ -427,7 +429,7 @@ private struct AutoCleanerCard: View {
         }.padding(16).storagePanel()
     }
     private var summary: some View {
-        Text("\(m.easyCleanupIDs.count) folders · \(DiskFormat.bytes(m.easyCleanupBytes))")
+        Text("\(m.easyCleanupIDs.count) \(m.easyCleanupIDs.count == 1 ? "folder" : "folders") · \(DiskFormat.bytes(m.easyCleanupBytes))")
             .font(.caption).foregroundStyle(Tints.secondaryText)
     }
 }

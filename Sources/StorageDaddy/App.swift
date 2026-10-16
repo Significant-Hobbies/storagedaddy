@@ -1107,12 +1107,6 @@ struct FileTypeStats: Sendable {
         guard let scan, !busy, !monitoring else { return }
         let ids = easyCleanupIDs
         guard !ids.isEmpty else { return }
-        let alert = NSAlert()
-        alert.messageText = "Stage \(ids.count) regenerable items for review?"
-        alert.informativeText = "Review caches, project dependencies and generated builds. Tools will need to download or rebuild them afterward; keep anything you need offline. Normal cache writes do not block review. Installed app components and currently open files are kept. Unreadable or excluded contents require an additional warning review. Nothing moves until Move to Trash."
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Stage for Review")
-        guard alert.runModal() == .alertSecondButtonReturn else { return }
         let version = scanVersion
         lastTrashedURLs = []
         quickCleanupFailures = [:]
@@ -1237,7 +1231,9 @@ struct FileTypeStats: Sendable {
         let libraryRoot = appDataLibraryRoot
         let alert = NSAlert()
         alert.messageText = "Move \(ids.count) \(ids.count == 1 ? "item" : "items") to Trash?"
-        alert.informativeText = "Entire folders and their contents are included. Developer categories are descriptions, not recommendations to delete. Active environments, models and container volumes may be needed by your tools. We will check for changes again after you confirm."
+        alert.informativeText = regenerable.count == ids.count
+            ? "These folders and their contents will move to Trash. Stop builds or installs using them first. Dependencies and caches may need to download or rebuild next time. You can restore them from Trash until it is emptied."
+            : "These items and their contents will move to Trash. Keep anything your tools still need. You can restore them from Trash until it is emptied."
         if !acknowledgements.isEmpty {
             let names = acknowledgements.keys.sorted().map { StorageLabels.name(scan.nodes[$0]) }.joined(separator: ", ")
             alert.informativeText += "\n\nAdded with an incomplete-check override: \(names). Their unreadable or excluded contents WILL also move to Trash. Those contents have not been verified."

@@ -4,6 +4,46 @@ import XCTest
 @testable import DiskCore
 
 final class CleanupPreflightTests: XCTestCase {
+    func testProjectDependenciesUseFolderReviewDespitePackageChangesAndOpenFiles() async throws {
+        let fixture = try PreflightFixture()
+        try fixture.write("project/package.json", bytes: Array("{}".utf8))
+        try fixture.write("project/node_modules/pkg/index.js", bytes: [1])
+        let scan = try await fixture.scan()
+        let id = try fixture.nodeID("project/node_modules", in: scan)
+        try fixture.write("project/node_modules/pkg/index.js", bytes: [2, 3])
+        // Package fixtures with sensitive-looking names do not need per-file review.
+        try fixture.write("project/node_modules/pkg/certificate.pem", bytes: [4])
+        let handle = try FileHandle(forReadingFrom: fixture.root.appendingPathComponent("project/node_modules/pkg/index.js"))
+        defer { try? handle.close() }
+        try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scan.url(for: id).path), "Review must not move the folder")
+
+        do {
+            try await CleanupPreflight.validate(ids: [id], in: scan, excludedFolders: [scan.url(for: id).appendingPathComponent("pkg").path], regenerableIDs: [id])
+            XCTFail("Explicit exclusions still apply to dependency folders")
+        } catch let CleanupPreflightError.excludedFolder(path) { XCTAssertEqual(path, scan.url(for: id).path) }
+
+        try FileManager.default.moveItem(at: scan.url(for: id), to: fixture.root.appendingPathComponent("held-dependencies"))
+        try fixture.write("project/node_modules/replacement.js", bytes: [5])
+        do {
+            try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id])
+            XCTFail("A replacement root must still be rejected")
+        } catch let DiskAnalysisError.fileMutated(path) { XCTAssertEqual(path, scan.url(for: id).path) }
+    }
+
+    func testNodeModulesWithoutProjectManifestKeepsExactChecks() async throws {
+        let fixture = try PreflightFixture()
+        try fixture.write("unknown/node_modules/original.js", bytes: [1])
+        let scan = try await fixture.scan()
+        let id = try fixture.nodeID("unknown/node_modules", in: scan)
+        try fixture.write("unknown/node_modules/original.js", bytes: [2, 3])
+        XCTAssertFalse(CleanupGuidance.isProjectDependencies(path: scan.url(for: id).path))
+        do {
+            try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id])
+            XCTFail("A folder name alone must not enable simplified cleanup")
+        } catch is CleanupPreflightError { }
+    }
+
     func testRegenerableCacheAcceptsNormalWritesWithoutWeakeningExactReview() async throws {
         let fixture = try PreflightFixture()
         try fixture.write(".cache/uv/archive-v0/pkg/__pycache__/one.pyc", bytes: [1])
