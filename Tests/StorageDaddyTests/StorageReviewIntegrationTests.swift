@@ -6,6 +6,37 @@ import Testing
 
 @MainActor @Suite(.serialized)
 struct StorageReviewIntegrationTests {
+    @Test func dependencyBatchOpensReviewWithoutConfirmationOrMovingFiles() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("storage-smooth-cleanup-\(UUID().uuidString)")
+        let dependencies = root.appendingPathComponent("website/node_modules")
+        try FileManager.default.createDirectory(at: dependencies, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: root.appendingPathComponent("website/package.json"))
+        try Data(repeating: 42, count: 4096).write(to: dependencies.appendingPathComponent("index.js"))
+        let scan = try await DiskScanner.scan(root: root)
+        let id = try #require(scan.nodes.first { $0.name == "node_modules" }?.id)
+        let model = ExplorerModel(); model.scan = scan
+        model.developerGroups = DeveloperInsights.analyze(scan)
+        model.developerReport = DeveloperReport.build(scan: scan, groups: model.developerGroups)
+        model.quickCleanupCandidateIDs = [id]
+        for width in [640, 880, 1200] {
+            try capture(AnyView(CleanupView().environmentObject(model).storageTheme(DaddyTheme.palette)), name: "cleanup-pick-\(width)", width: width)
+        }
+        model.stageEasyCleanup()
+        for _ in 0..<200 {
+            if !model.busy { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!model.busy)
+        #expect(model.staged == [id])
+        #expect(model.storageSection == .cleanup)
+        #expect(model.message == nil)
+        #expect(model.quickCleanupFailures.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: dependencies.appendingPathComponent("index.js").path))
+        for width in [640, 880, 1200] {
+            try capture(AnyView(CleanupView().environmentObject(model).storageTheme(DaddyTheme.palette)), name: "cleanup-review-\(width)", width: width)
+        }
+    }
+
     private func volume() -> MountedVolumeInfo {
         MountedVolumeInfo(name: "Fixture Data", mountPoint: "/System/Volumes/Data", fsType: "apfs", bsdName: "disk99s5",
             totalCapacity: 500_000_000_000, availableCapacity: 100_000_000_000, importantAvailableCapacity: 130_000_000_000,

@@ -76,6 +76,9 @@ public enum CleanupPreflight {
             regenerableIDs.contains($0.node.id) && $0.node.isDirectory
                 && CleanupGuidance.isRegenerableFolder(path: $0.url.path, home: home)
         }.map { $0.node.id })
+        let dependencies = Set(candidateURLs.filter {
+            regenerable.contains($0.node.id) && CleanupGuidance.isProjectDependencies(path: $0.url.path)
+        }.map { $0.node.id })
 
         // Reject protected paths and stale identities before traversing candidates.
         for candidate in candidates {
@@ -83,7 +86,9 @@ public enum CleanupPreflight {
                                        allowingRegenerableChanges: regenerable.contains(candidate.id), home: home)
         }
 
-        for candidate in candidateURLs where candidate.node.isDirectory {
+        // Reinstallable project dependencies are reviewed as a whole folder.
+        // Keep root identity/path checks without walking every package again.
+        for candidate in candidateURLs where candidate.node.isDirectory && !dependencies.contains(candidate.node.id) {
             try Task.checkCancellation()
 
             let result = try await DiskScanner.scan(root: candidate.url)
@@ -121,8 +126,9 @@ public enum CleanupPreflight {
             }
         }
 
-        if !regenerable.isEmpty {
-            let urls = candidateURLs.filter { regenerable.contains($0.node.id) }.map(\.url)
+        let checkedForUse = regenerable.subtracting(dependencies)
+        if !checkedForUse.isEmpty {
+            let urls = candidateURLs.filter { checkedForUse.contains($0.node.id) }.map(\.url)
             let probe = Task.detached(priority: .utility) { try CleanupActiveUse.validate(urls: urls) }
             try await probe.value
         }

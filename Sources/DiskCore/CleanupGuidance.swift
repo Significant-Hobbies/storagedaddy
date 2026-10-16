@@ -64,13 +64,34 @@ public enum CleanupGuidance {
             || path.hasPrefix("/Library/")
             || path.hasSuffix("/lib/node_modules")
             || path.contains("/node-tools/") || path.contains("/node-runtime/")
+            || path.contains("/corepack/v1/")
+            || ["/.vscode/extensions/", "/.cursor/extensions/", "/.devin/extensions/", "/.lmstudio/extensions/",
+                "/.volta/tools/image/", "/.nvm/versions/node/", "/.bun/install/global/", "/.config/opencode/"].contains(where: path.contains)
     }
 
-    /// These folders can change normally between scan and review. Their root
-    /// identity, exclusions, unreadable contents and current use are still checked.
+    /// Project dependencies move as one folder; package contents need no audit.
+    public static func isProjectDependencies(path: String) -> Bool {
+        URL(fileURLWithPath: path).lastPathComponent == "node_modules"
+            && isRegenerableFolder(path: path)
+    }
+
+    /// Only Node dependency trees and bounded download caches may bypass Trash.
+    /// Installed runtimes, manifests and other data keep their recovery path.
+    public static func canDeletePermanently(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
+        guard !isInstalledRuntime(path: path) else { return false }
+        if isProjectDependencies(path: path) { return true }
+        let normalizedPath = normalized(path)
+        if normalizedPath == normalized(home) + "/.npm/_cacache" { return true }
+        return ["npm", "pnpm", "yarn"].contains(URL(fileURLWithPath: path).lastPathComponent.lowercased())
+            && isSuggestedCache(category: .packageCaches, path: path, home: home)
+    }
+
+    /// These folders can change normally between scan and review. Project
+    /// dependencies use folder-level checks; other candidates retain deeper checks.
     public static func isRegenerableFolder(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
         guard !isInstalledRuntime(path: path) else { return false }
-        if isSuggestedCache(category: .packageCaches, path: path, home: home)
+        if normalized(path) == normalized(home) + "/.npm/_cacache"
+            || isSuggestedCache(category: .packageCaches, path: path, home: home)
             || isSuggestedCache(category: .modelCaches, path: path, home: home) { return true }
         let url = URL(fileURLWithPath: path).standardizedFileURL
         let name = url.lastPathComponent

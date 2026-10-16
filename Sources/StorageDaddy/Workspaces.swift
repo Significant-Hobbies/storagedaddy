@@ -293,14 +293,14 @@ struct CleanupView: View {
         ScrollView {
         VStack(alignment: .leading, spacing: 16) {
             HStack { SMSectionHeader("Quick Cleanup", size: 28).accessibilityLabel("Quick Cleanup"); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") } }
-            Text(m.staged.isEmpty ? "Review rebuildable items below, or add a folder from Storage. Nothing is removed until you confirm." : "Review the list before moving it to Trash. Items added with an incomplete check are marked below. We check paths and known contents again after confirmation.").foregroundStyle(Tints.secondaryText)
+            Text(m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders and choose how to clean up. Items with issues are kept.").foregroundStyle(Tints.secondaryText)
             if !m.showCleanup && m.staged.isEmpty { TrashInventoryView() }
             if let scan = m.scan, !m.easyCleanupIDs.isEmpty {
                 AutoCleanerCard(scan: scan)
             }
             if let scan = m.scan, !m.quickCleanupFailures.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Kept out of this review").font(.headline)
+                    Text("Kept or skipped").font(.headline)
                     ForEach(m.quickCleanupFailures.keys.sorted(), id: \.self) { id in
                         if scan.nodes.indices.contains(id), let reason = m.quickCleanupFailures[id] {
                             HStack(alignment: .top) {
@@ -315,6 +315,13 @@ struct CleanupView: View {
                     }
                 }.padding(16).storagePanel()
             }
+            if m.staged.isEmpty, m.lastPermanentlyDeletedCount > 0 {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("\(m.lastPermanentlyDeletedCount) permanently deleted", systemImage: "checkmark.circle.fill").font(.title2).foregroundStyle(Tints.mint)
+                    Text("These folders bypassed Trash. Refresh to see current storage totals.").foregroundStyle(Tints.secondaryText)
+                    Button("refresh scan results", action: m.rescan).accessibilityLabel("Refresh scan results").buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy)
+                }.padding(16).storagePanel()
+            }
             if m.staged.isEmpty, !m.lastTrashedURLs.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Moved to Trash", systemImage: "checkmark.circle.fill").font(.title2).foregroundStyle(Tints.mint)
@@ -325,12 +332,12 @@ struct CleanupView: View {
                     }
                 }.padding(.vertical, 24)
                 Spacer()
-            } else if m.staged.isEmpty {
+            } else if m.staged.isEmpty && m.lastPermanentlyDeletedCount == 0 {
                 if m.easyCleanupIDs.isEmpty {
                     StorageEmptyView("No rebuildable items found in this scan", systemImage: "tray", description: Text("Scan another folder, or add an item from Storage for individual review."))
                 }
             }
-            else if let scan = m.scan {
+            else if !m.staged.isEmpty, let scan = m.scan {
                 LazyVStack(alignment: .leading, spacing: 16) {
                 ForEach(m.staged.sorted(), id: \.self) { id in
                     HStack(alignment: .top) {
@@ -344,19 +351,24 @@ struct CleanupView: View {
                                 Label("Rebuildable · Downloads or rebuilds may be needed", systemImage: "arrow.clockwise").font(.caption).foregroundStyle(Tints.mint)
                             } else { CleanupFlag(category: m.cleanupCategory(id)) }
                             Text(StorageLabels.location(scan.url(for: id).path)).help(scan.url(for: id).path).font(.caption).foregroundStyle(Tints.secondaryText).lineLimit(1).truncationMode(.middle)
+                            if m.permanentCleanupIDs.contains(id) {
+                                Label("Permanently delete · Bypasses Trash", systemImage: "trash.slash").font(.caption).foregroundStyle(Tints.coral)
+                            }
                             if let note = CleanupGuidance.chromeCacheNote(path: scan.url(for: id).path) {
                                 Text(note).font(.caption).foregroundStyle(Tints.yellow)
                             }
                             if ChromeSigningClones.location(path: scan.url(for: id).path) != nil {
                                 Text(ChromeSigningClones.cleanupExplanation).font(.caption).foregroundStyle(Tints.yellow)
                             }
-                            StorageAllocationDetailsView(node: scan.nodes[id])
+                            if !CleanupGuidance.isProjectDependencies(path: scan.url(for: id).path) {
+                                StorageAllocationDetailsView(node: scan.nodes[id])
+                            }
                             if let review = m.incompleteCleanup[id] {
                                 Label("Added anyway · \(review.skipped) \(review.skipped == 1 ? "item" : "items") not checked", systemImage: "exclamationmark.triangle")
                                     .font(.caption).foregroundStyle(Tints.coral)
                                 Button("review warning") { m.reviewIncompleteCleanup(id) }.accessibilityLabel("Review warning").font(.caption).disabled(m.busy)
                             }
-                            if scan.nodes[id].isDirectory {
+                            if scan.nodes[id].isDirectory && !CleanupGuidance.isProjectDependencies(path: scan.url(for: id).path) {
                                 FolderSymlinksView(scan: scan, folderID: id, cleanupReview: true)
                                     .id("\(scan.started.timeIntervalSince1970):\(scan.rootPath):\(id)")
                                     .frame(maxWidth: 540, alignment: .leading)
@@ -370,8 +382,18 @@ struct CleanupView: View {
                     Divider()
                 }
                 }
-                HStack { Text("\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") · \(m.stagedExclusiveBytes.map(DiskFormat.bytes) ?? "Unknown") exclusive allocation").fontWeight(.medium); Spacer(); Button("move to trash…", action: m.trashStaged).accessibilityLabel("Move to Trash…").buttonStyle(StorageButtonStyle(prominent: true)).tint(Tints.coral).disabled(m.busy || m.monitoring) }
-                Text("Trash still uses disk space until it is emptied.").font(.caption).foregroundStyle(Tints.secondaryText)
+                if m.staged.contains(where: { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory && m.incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) }) {
+                    Toggle("Delete Node dependencies and package caches permanently", isOn: $m.deleteNodeCachesPermanently).disabled(m.busy)
+                    Text("Bypasses Trash. Local changes in these folders cannot be restored.").font(.caption).foregroundStyle(Tints.secondaryText)
+                }
+                HStack(alignment: .top) {
+                    Text("\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") · \(m.stagedExclusiveBytes.map(DiskFormat.bytes) ?? "Unknown") exclusive allocation").fontWeight(.medium)
+                    Spacer()
+                    Button(m.permanentCleanupIDs.isEmpty ? "move to trash…" : "clean up…", action: m.trashStaged)
+                        .accessibilityLabel(m.permanentCleanupIDs.isEmpty ? "Move to Trash…" : "Clean Up…")
+                        .buttonStyle(StorageButtonStyle(prominent: true)).tint(Tints.coral).disabled(m.busy || m.monitoring)
+                }
+                Text(m.permanentCleanupIDs.isEmpty ? "Trash still uses disk space until it is emptied." : "\(m.permanentCleanupIDs.count) to delete permanently · \(m.staged.count - m.permanentCleanupIDs.count) to Trash after confirmation.").font(.caption).foregroundStyle(Tints.secondaryText)
                 if m.monitoring { Text("Stop monitoring before cleanup.").font(.caption).foregroundStyle(Tints.secondaryText) }
             }
         }.padding(24)
@@ -397,7 +419,7 @@ private struct AutoCleanerCard: View {
             }
             Text("Caches, project dependencies and build outputs. Apps may need to download or rebuild them afterward. Nothing moves automatically.")
                 .font(.caption).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
-            Button("Review \(m.easyCleanupIDs.count) items (\(DiskFormat.bytes(m.easyCleanupBytes)))…", action: m.stageEasyCleanup)
+            Button("Review \(m.easyCleanupIDs.count) \(m.easyCleanupIDs.count == 1 ? "item" : "items") (\(DiskFormat.bytes(m.easyCleanupBytes)))…", action: m.stageEasyCleanup)
                 .buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy || m.monitoring)
             ForEach(suggestions, id: \.self) { id in
                 let category = m.cleanupCategory(id) ?? .packageCaches
@@ -427,7 +449,7 @@ private struct AutoCleanerCard: View {
         }.padding(16).storagePanel()
     }
     private var summary: some View {
-        Text("\(m.easyCleanupIDs.count) folders · \(DiskFormat.bytes(m.easyCleanupBytes))")
+        Text("\(m.easyCleanupIDs.count) \(m.easyCleanupIDs.count == 1 ? "folder" : "folders") · \(DiskFormat.bytes(m.easyCleanupBytes))")
             .font(.caption).foregroundStyle(Tints.secondaryText)
     }
 }

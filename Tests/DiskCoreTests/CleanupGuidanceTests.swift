@@ -3,6 +3,38 @@ import XCTest
 @testable import DiskCore
 
 final class CleanupGuidanceTests: XCTestCase {
+    func testPermanentDeletionIsLimitedToNodeCachesAndProjectDependencies() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("permanent-guidance-\(UUID())")
+        let project = home.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try Data([1]).write(to: project.appendingPathComponent("package.json"))
+        XCTAssertTrue(CleanupGuidance.canDeletePermanently(path: project.appendingPathComponent("node_modules").path, home: home.path))
+        for relative in [".npm/_cacache", ".cache/npm", "Library/Caches/pnpm", "Library/Caches/yarn"] {
+            XCTAssertTrue(CleanupGuidance.canDeletePermanently(path: home.appendingPathComponent(relative).path, home: home.path), relative)
+        }
+        for relative in [".npm", ".npmrc", ".cache/uv", ".cache/huggingface/hub", "checkpoints", "project/dist", "other/node_modules", ".cache/node/corepack/v1/pnpm/10/node_modules", "Tool.app/Contents/node_modules"] {
+            XCTAssertFalse(CleanupGuidance.canDeletePermanently(path: home.appendingPathComponent(relative).path, home: home.path), relative)
+        }
+    }
+
+    func testCorepackPackageManagerPayloadIsNeverSuggestedAsBuildOutput() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("cleanup-corepack-\(UUID())")
+        let relative = ".cache/node/corepack/v1/pnpm/10.33.2"
+        let manager = home.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: manager.appendingPathComponent("dist"), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: manager.appendingPathComponent("package.json"))
+        try Data([1]).write(to: manager.appendingPathComponent("dist/pnpm.cjs"))
+        let scan = try await DiskScanner.scan(root: home)
+        let node = try XCTUnwrap(scan.nodes.first { $0.name == "dist" })
+        let path = scan.url(for: node.id).path
+        XCTAssertTrue(CleanupGuidance.isInstalledRuntime(path: path))
+        XCTAssertTrue(CleanupGuidance.isInstalledRuntime(path: "/System/Volumes/Data" + path))
+        XCTAssertFalse(CleanupGuidance.isRegenerableFolder(path: path, home: home.path))
+        let finding = DeveloperFinding(nodeID: node.id, category: .buildOutputs, allocatedBytes: node.allocatedBytes,
+            projectID: nil, tool: "pnpm", evidence: "dist directory", consequence: "rebuild", confidence: "fixture", lastModified: Date())
+        XCTAssertTrue(CleanupGuidance.quickCleanupIDs(in: scan, findings: [finding], home: home.path).isEmpty)
+    }
+
     func testQuickCleanupIncludesRecentRebuildableFoldersAndKeepsAppComponents() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cleanup-guidance-\(UUID().uuidString)")
         for path in ["project/package.json", "project/node_modules/module.js", ".cache/uv/cache", ".cache/huggingface/hub/weights", "Tool.app/Contents/Resources/package.json", "Tool.app/Contents/Resources/node_modules/module.js"] {
