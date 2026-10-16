@@ -64,6 +64,7 @@ public enum CleanupGuidance {
             || path.hasPrefix("/Library/")
             || path.hasSuffix("/lib/node_modules")
             || path.contains("/node-tools/") || path.contains("/node-runtime/")
+            || path.contains("/corepack/v1/")
             || ["/.vscode/extensions/", "/.cursor/extensions/", "/.devin/extensions/", "/.lmstudio/extensions/",
                 "/.volta/tools/image/", "/.nvm/versions/node/", "/.bun/install/global/", "/.config/opencode/"].contains(where: path.contains)
     }
