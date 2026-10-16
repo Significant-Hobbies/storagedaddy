@@ -3,6 +3,20 @@ import XCTest
 @testable import DiskCore
 
 final class CleanupGuidanceTests: XCTestCase {
+    func testPermanentDeletionIsLimitedToNodeCachesAndProjectDependencies() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("permanent-guidance-\(UUID())")
+        let project = home.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try Data([1]).write(to: project.appendingPathComponent("package.json"))
+        XCTAssertTrue(CleanupGuidance.canDeletePermanently(path: project.appendingPathComponent("node_modules").path, home: home.path))
+        for relative in [".npm/_cacache", ".cache/npm", "Library/Caches/pnpm", "Library/Caches/yarn"] {
+            XCTAssertTrue(CleanupGuidance.canDeletePermanently(path: home.appendingPathComponent(relative).path, home: home.path), relative)
+        }
+        for relative in [".npm", ".npmrc", ".cache/uv", ".cache/huggingface/hub", "checkpoints", "project/dist", "other/node_modules", ".cache/node/corepack/v1/pnpm/10/node_modules", "Tool.app/Contents/node_modules"] {
+            XCTAssertFalse(CleanupGuidance.canDeletePermanently(path: home.appendingPathComponent(relative).path, home: home.path), relative)
+        }
+    }
+
     func testCorepackPackageManagerPayloadIsNeverSuggestedAsBuildOutput() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("cleanup-corepack-\(UUID())")
         let relative = ".cache/node/corepack/v1/pnpm/10.33.2"

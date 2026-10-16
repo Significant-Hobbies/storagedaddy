@@ -75,11 +75,23 @@ public enum CleanupGuidance {
             && isRegenerableFolder(path: path)
     }
 
+    /// Only Node dependency trees and bounded download caches may bypass Trash.
+    /// Installed runtimes, manifests and other data keep their recovery path.
+    public static func canDeletePermanently(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
+        guard !isInstalledRuntime(path: path) else { return false }
+        if isProjectDependencies(path: path) { return true }
+        let normalizedPath = normalized(path)
+        if normalizedPath == normalized(home) + "/.npm/_cacache" { return true }
+        return ["npm", "pnpm", "yarn"].contains(URL(fileURLWithPath: path).lastPathComponent.lowercased())
+            && isSuggestedCache(category: .packageCaches, path: path, home: home)
+    }
+
     /// These folders can change normally between scan and review. Project
     /// dependencies use folder-level checks; other candidates retain deeper checks.
     public static func isRegenerableFolder(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
         guard !isInstalledRuntime(path: path) else { return false }
-        if isSuggestedCache(category: .packageCaches, path: path, home: home)
+        if normalized(path) == normalized(home) + "/.npm/_cacache"
+            || isSuggestedCache(category: .packageCaches, path: path, home: home)
             || isSuggestedCache(category: .modelCaches, path: path, home: home) { return true }
         let url = URL(fileURLWithPath: path).standardizedFileURL
         let name = url.lastPathComponent

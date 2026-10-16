@@ -4,7 +4,7 @@
 
 A free, open-source Mac footprint manager for developers. Understand what
 projects, applications and AI tools leave behind; find large, stale or
-replaceable material; and review every cleanup before moving anything to Trash.
+replaceable material; and review every cleanup before removing anything.
 
 [Download the Mac app](https://storage.daddyrad.com/download) ·
 [Website](https://storage.daddyrad.com/) ·
@@ -25,8 +25,11 @@ sizes and timing are not a whole-disk benchmark.
 - Developer Insights for caches, builds, packages, node_modules, Git data and
   recognized AI storage. Scan time, entries per second and sampled memory
   make the cost of scanning visible.
-- Reviewed cleanup: stage candidates, inspect warnings, then confirm a move
-  to Trash. Scanning never deletes files, and the app never empties Trash.
+- Reviewed cleanup: stage candidates, then confirm. Node dependencies and
+  bounded npm/pnpm/yarn caches can bypass Trash; the review shows which folders
+  will be permanently deleted and lets you choose Trash instead. Other items
+  keep the Trash recovery path. Items with issues are skipped so cleanup can
+  continue. Scanning never deletes files, and the app never empties Trash.
 - Installed applications with icons, sizes, last-used metadata, categories
   and reviewed removal of eligible apps.
 - AI Sessions for standard Claude and Codex transcript locations, independent

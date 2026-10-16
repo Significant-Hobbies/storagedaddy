@@ -310,7 +310,7 @@ struct FileTypeStats: Sendable {
     @Published var showWelcome = false
     @Published var lastTrashedURLs: [URL] = []
     @Published private(set) var filenameSearchIdentity = UUID()
-    @Published var scan: ScanResult? { didSet { allocationIndex = nil; filenameSearchIdentity = UUID(); invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview(); quickCleanupFailures = [:]; quickCleanupCandidateIDs = [] } }
+    @Published var scan: ScanResult? { didSet { allocationIndex = nil; filenameSearchIdentity = UUID(); invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview(); quickCleanupFailures = [:]; quickCleanupCandidateIDs = []; lastPermanentlyDeletedCount = 0 } }
     @Published var allocationIndex: StorageAllocationIndex?
     @Published var scanStorageAccounting: ScanStorageAccounting?
     @Published private(set) var promptAvoidanceFolders: [String] = []
@@ -342,6 +342,8 @@ struct FileTypeStats: Sendable {
     @Published var folderExplanation: FolderExplanationState?
     @Published var message: String?
     @Published var staged: Set<Int> = []
+    @Published var deleteNodeCachesPermanently = true
+    @Published var lastPermanentlyDeletedCount = 0
     @Published var quickCleanupFailures: [Int: String] = [:]
     @Published var quickCleanupCandidateIDs: [Int] = []
     @Published private(set) var incompleteCleanup: [Int: CleanupIncompleteReview] = [:]
@@ -1087,10 +1089,10 @@ struct FileTypeStats: Sendable {
 
     /// The "easy cleanup" set: bounded package caches plus stale builds and
     /// dependency trees that met the AutoCleaner staleness thresholds.
-    /// Staging is the only side effect — Trash still requires the review
-    /// list's own confirmation.
+    /// Staging is the only side effect; cleanup requires the review
+    /// list's final confirmation.
     var easyCleanupIDs: [Int] {
-        quickCleanupCandidateIDs.filter { !hasAncestor($0, in: staged) }
+        quickCleanupCandidateIDs.filter { quickCleanupFailures[$0] == nil && !hasAncestor($0, in: staged) }
     }
 
     private func regenerableCleanupIDs(_ ids: [Int], in scan: ScanResult) -> Set<Int> {
@@ -1109,7 +1111,8 @@ struct FileTypeStats: Sendable {
         guard !ids.isEmpty else { return }
         let version = scanVersion
         lastTrashedURLs = []
-        quickCleanupFailures = [:]
+        lastPermanentlyDeletedCount = 0
+        for id in ids { quickCleanupFailures.removeValue(forKey: id) }
         busy = true
         task = Task {
             defer { busy = false }
@@ -1149,7 +1152,7 @@ struct FileTypeStats: Sendable {
     var autoCleanerSuggestions: [AutoCleanerSuggestion] {
         guard let scan else { return [] }
         return AutoCleaner.suggestions(scan: scan, findings: developerReport?.findings ?? [])
-            .filter { !staged.contains($0.id) }
+            .filter { !staged.contains($0.id) && quickCleanupFailures[$0.id] == nil }
     }
 
     func unstage(_ id: Int) {
@@ -1188,34 +1191,49 @@ struct FileTypeStats: Sendable {
         return alert.runModal() == .alertSecondButtonReturn
     }
 
+    var permanentCleanupIDs: Set<Int> {
+        guard let scan, deleteNodeCachesPermanently else { return [] }
+        return Set(staged.filter { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory
+            && incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) })
+    }
+
     func trashStaged() {
         guard let scan, !busy, macTools?.isBusy != true, !monitoring, !staged.isEmpty else { return }
         let ids = staged.sorted()
         let regenerable = regenerableCleanupIDs(ids, in: scan)
+        let permanent = permanentCleanupIDs
         let acknowledgements = incompleteCleanup.filter { staged.contains($0.key) }
         let alert = NSAlert()
         alert.messageText = "Move \(ids.count) \(ids.count == 1 ? "item" : "items") to Trash?"
         alert.informativeText = regenerable.count == ids.count
             ? "These folders and their contents will move to Trash. Stop builds or installs using them first. Dependencies and caches may need to download or rebuild next time. You can restore them from Trash until it is emptied."
             : "These items and their contents will move to Trash. Keep anything your tools still need. You can restore them from Trash until it is emptied."
+        if !permanent.isEmpty {
+            alert.messageText = "Clean up \(ids.count) \(ids.count == 1 ? "item" : "items")?"
+            alert.informativeText = "\(permanent.count) Node dependency or package cache \(permanent.count == 1 ? "folder will" : "folders will") be permanently deleted, bypassing Trash. Local changes inside these folders will be lost. Reinstalling may need a download. This cannot be undone."
+            if permanent.count < ids.count { alert.informativeText += "\n\nThe other \(ids.count - permanent.count) items will move to Trash, where you can restore them until it is emptied." }
+            alert.informativeText += "\n\nStop builds or installs using these folders first. Items that fail checks will be kept."
+        }
         if !acknowledgements.isEmpty {
             let names = acknowledgements.keys.sorted().map { StorageLabels.name(scan.nodes[$0]) }.joined(separator: ", ")
             alert.informativeText += "\n\nAdded with an incomplete-check override: \(names). Their unreadable or excluded contents WILL also move to Trash. Those contents have not been verified."
         }
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: permanent.isEmpty ? "Move to Trash" : "Clean Up")
         guard alert.runModal() == .alertSecondButtonReturn else { return }
-        performReviewedCleanup(ids)
+        performReviewedCleanup(ids, permanentlyDeleting: permanent)
     }
 
-    /// Called only for the list approved by the final Trash confirmation.
+    /// Called only for the list and destinations approved by the final confirmation.
     /// A file-specific failure keeps that item and never aborts unrelated items.
-    func performReviewedCleanup(_ ids: [Int], moveToTrash: @escaping (URL) throws -> URL? = { url in
+    func performReviewedCleanup(_ ids: [Int], permanentlyDeleting permanent: Set<Int> = [],
+                                deletePermanently: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) },
+                                moveToTrash: @escaping (URL) throws -> URL? = { url in
         var trashedURL: NSURL?
         try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
         return trashedURL as URL?
     }) {
-        guard let scan, !busy, !monitoring, Set(ids) == staged, !ids.isEmpty else { return }
+        guard let scan, !busy, !monitoring, Set(ids) == staged, permanent.isSubset(of: staged), !ids.isEmpty else { return }
         let version = scanVersion
         let regenerable = regenerableCleanupIDs(ids, in: scan)
         let acknowledgements = incompleteCleanup
@@ -1225,11 +1243,15 @@ struct FileTypeStats: Sendable {
         let appDataPaths = stagedAppData
         let libraryRoot = appDataLibraryRoot
         busy = true
-        quickCleanupFailures = [:]
+        for id in ids { quickCleanupFailures.removeValue(forKey: id) }
         lastTrashedURLs = []
+        lastPermanentlyDeletedCount = 0
         task = Task {
             defer { busy = false }
-            var moved = 0, skipped = 0
+            var moved = 0, deleted = 0, skipped = 0
+            func resultText() -> String {
+                deleted == 0 ? "\(moved) moved to Trash" : "\(deleted) permanently deleted · \(moved) moved to Trash"
+            }
             var remaining = Set(ids)
             var appDataReference: AppLeftoverReviewResult?
             var appDataFailure: Error?
@@ -1238,7 +1260,7 @@ struct FileTypeStats: Sendable {
                     try Task.checkCancellation()
                     guard scanVersion == version, staged == remaining else { throw CancellationError() }
                     guard scan.nodes.indices.contains(id) else { throw CleanupPreflightError.invalidNodeID(id) }
-                    progress = "Cleaning \(moved + skipped + 1) of \(ids.count) · \(StorageLabels.name(scan.nodes[id]))"
+                    progress = "Cleaning \(moved + deleted + skipped + 1) of \(ids.count) · \(StorageLabels.name(scan.nodes[id]))"
                     // Overlapping selections cannot turn a kept child into a removed parent.
                     let others = Set(ids).subtracting([id])
                     guard !hasAncestor(id, in: others), !others.contains(where: { hasAncestor($0, in: [id]) }) else {
@@ -1281,13 +1303,33 @@ struct FileTypeStats: Sendable {
                     }
                     try CleanupSafety.validate(url: url, expected: scan.nodes[id], root: URL(fileURLWithPath: scan.rootPath),
                                                allowingRegenerableChanges: regenerable.contains(id))
-                    if let trashedURL = try moveToTrash(url) { lastTrashedURLs.append(trashedURL) }
+                    if permanent.contains(id) {
+                        guard scan.nodes[id].isDirectory, acknowledgements[id] == nil,
+                              CleanupGuidance.canDeletePermanently(path: url.path) else {
+                            throw NSError(domain: "Cleanup", code: 1, userInfo: [NSLocalizedDescriptionKey: "Permanent deletion is limited to verified Node dependencies and package caches. Item kept."])
+                        }
+                        // Removing a large dependency tree must not freeze the window.
+                        // Finish the current folder before honoring cancellation between items.
+                        try await Task.detached(priority: .utility) {
+                            try CleanupSafety.validate(url: url, expected: scan.nodes[id], root: URL(fileURLWithPath: scan.rootPath),
+                                                       allowingRegenerableChanges: regenerable.contains(id))
+                            guard CleanupGuidance.canDeletePermanently(path: url.path) else {
+                                throw CocoaError(.fileWriteNoPermission)
+                            }
+                            try deletePermanently(url)
+                        }.value
+                        deleted += 1
+                        lastPermanentlyDeletedCount = deleted
+                    } else {
+                        if let trashedURL = try moveToTrash(url) { lastTrashedURLs.append(trashedURL) }
+                        moved += 1
+                    }
                     if !cleanupRefreshPaths.contains(scan.rootPath) { cleanupRefreshPaths.append(scan.rootPath) }
-                    unstage(id); remaining.remove(id); moved += 1
+                    unstage(id); remaining.remove(id)
                     quickCleanupCandidateIDs.removeAll { $0 == id }
                 } catch is CancellationError {
-                    if moved > 0 { requestAISessionsRefresh() }
-                    progress = "Cleanup cancelled · \(moved) moved to Trash · \(skipped) skipped · \(remaining.count) not processed"
+                    if moved + deleted > 0 { requestAISessionsRefresh() }
+                    progress = "Cleanup cancelled · \(resultText()) · \(skipped) skipped · \(remaining.count) not processed"
                     return
                 } catch {
                     quickCleanupFailures[id] = error.localizedDescription
@@ -1295,10 +1337,10 @@ struct FileTypeStats: Sendable {
                     quickCleanupCandidateIDs.removeAll { $0 == id }
                 }
             }
-            if moved > 0 { requestAISessionsRefresh() }
+            if moved + deleted > 0 { requestAISessionsRefresh() }
             showCleanup = false
             openStorage(.cleanup)
-            progress = "Cleanup complete · \(moved) moved to Trash · \(skipped) skipped · Rescan to refresh totals"
+            progress = "Cleanup complete · \(resultText()) · \(skipped) skipped · Rescan to refresh totals"
         }
     }
     var snapshotAlreadySaved: Bool {
