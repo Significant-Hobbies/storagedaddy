@@ -64,6 +64,8 @@ public enum CleanupGuidance {
             || path.hasPrefix("/Library/")
             || path.hasSuffix("/lib/node_modules")
             || path.contains("/node-tools/") || path.contains("/node-runtime/")
+            || ["/.vscode/extensions/", "/.cursor/extensions/", "/.devin/extensions/", "/.lmstudio/extensions/",
+                "/.volta/tools/image/", "/.nvm/versions/node/", "/.bun/install/global/", "/.config/opencode/"].contains(where: path.contains)
     }
 
     /// Project dependencies move as one folder; package contents need no audit.

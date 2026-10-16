@@ -300,7 +300,7 @@ struct CleanupView: View {
             }
             if let scan = m.scan, !m.quickCleanupFailures.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Kept out of this review").font(.headline)
+                    Text("Kept or skipped").font(.headline)
                     ForEach(m.quickCleanupFailures.keys.sorted(), id: \.self) { id in
                         if scan.nodes.indices.contains(id), let reason = m.quickCleanupFailures[id] {
                             HStack(alignment: .top) {

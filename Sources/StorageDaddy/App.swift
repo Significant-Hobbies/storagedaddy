@@ -1114,7 +1114,6 @@ struct FileTypeStats: Sendable {
         task = Task {
             defer { busy = false }
             var added = 0
-            var pending: [(Int, CleanupIncompleteReview)] = []
             for id in ids {
                 do {
                     try Task.checkCancellation()
@@ -1122,13 +1121,8 @@ struct FileTypeStats: Sendable {
                     let path = scan.url(for: id).path
                     if staged.contains(where: { let parent = scan.url(for: $0).path; return path == parent || path.hasPrefix(parent + "/") }) { continue }
                     progress = "Checking \(StorageLabels.name(scan.nodes[id]))…"
-                    do {
-                        try await CleanupPreflight.validate(ids: [id], in: scan, excludedFolders: excludedFolders,
-                                                            regenerableIDs: regenerableCleanupIDs([id], in: scan))
-                    } catch let CleanupPreflightError.incompleteRescan(_, review) where review.canAcknowledge {
-                        pending.append((id, review))
-                        continue
-                    }
+                    try await CleanupPreflight.validate(ids: [id], in: scan, excludedFolders: excludedFolders,
+                                                        regenerableIDs: regenerableCleanupIDs([id], in: scan))
                     try Task.checkCancellation()
                     guard scanVersion == version else { return }
                     for other in Array(staged) where scan.url(for: other).path.hasPrefix(path + "/") { unstage(other) }
@@ -1139,26 +1133,6 @@ struct FileTypeStats: Sendable {
                     return
                 } catch {
                     quickCleanupFailures[id] = error.localizedDescription
-                }
-            }
-            if !pending.isEmpty {
-                let combined = CleanupIncompleteReview(skipped: pending.reduce(0) { $0 + $1.1.skipped }, details: pending.flatMap { id, review in
-                    [StorageLabels.location(scan.url(for: id).path)] + review.details
-                })
-                let include = showIncompleteReview(combined, name: "\(pending.count) rebuildable folders", allowsOverride: true)
-                for (id, review) in pending {
-                    guard include else {
-                        quickCleanupFailures[id] = "Kept because \(review.skipped) excluded or unreadable items were not approved."
-                        continue
-                    }
-                    do {
-                        try Task.checkCancellation()
-                        guard scanVersion == version else { return }
-                        try await CleanupPreflight.validate(ids: [id], in: scan, acknowledgedIncomplete: [id: review], excludedFolders: excludedFolders,
-                                                            regenerableIDs: regenerableCleanupIDs([id], in: scan))
-                        staged.insert(id); incompleteCleanup[id] = review; added += 1
-                    } catch is CancellationError { return }
-                    catch { quickCleanupFailures[id] = error.localizedDescription }
                 }
             }
             progress = "\(added) staged for review · \(quickCleanupFailures.count) kept · Nothing moved"
@@ -1218,17 +1192,7 @@ struct FileTypeStats: Sendable {
         guard let scan, !busy, macTools?.isBusy != true, !monitoring, !staged.isEmpty else { return }
         let ids = staged.sorted()
         let regenerable = regenerableCleanupIDs(ids, in: scan)
-        let version = scanVersion
         let acknowledgements = incompleteCleanup.filter { staged.contains($0.key) }
-        let duplicateSelections = duplicateSurvivorSelections.values.filter { selection in
-            selection.members.contains { hasAncestor($0, in: staged) }
-        }
-        do { try DuplicateSurvivorProtection.validateCoverage(scan: scan, selections: duplicateSelections, staged: staged) }
-        catch { message = error.localizedDescription; return }
-        let projectOwners = stagedProjectOwners.filter { staged.contains($0.key) }
-        let recoveryPlans = projectRecoveryPlans
-        let appDataPaths = stagedAppData.filter { staged.contains($0.key) }
-        let libraryRoot = appDataLibraryRoot
         let alert = NSAlert()
         alert.messageText = "Move \(ids.count) \(ids.count == 1 ? "item" : "items") to Trash?"
         alert.informativeText = regenerable.count == ids.count
@@ -1241,64 +1205,100 @@ struct FileTypeStats: Sendable {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Move to Trash")
         guard alert.runModal() == .alertSecondButtonReturn else { return }
-        busy = true; progress = "Checking cleanup candidates…"
+        performReviewedCleanup(ids)
+    }
+
+    /// Called only for the list approved by the final Trash confirmation.
+    /// A file-specific failure keeps that item and never aborts unrelated items.
+    func performReviewedCleanup(_ ids: [Int], moveToTrash: @escaping (URL) throws -> URL? = { url in
+        var trashedURL: NSURL?
+        try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
+        return trashedURL as URL?
+    }) {
+        guard let scan, !busy, !monitoring, Set(ids) == staged, !ids.isEmpty else { return }
+        let version = scanVersion
+        let regenerable = regenerableCleanupIDs(ids, in: scan)
+        let acknowledgements = incompleteCleanup
+        let duplicateSelections = Array(duplicateSurvivorSelections.values)
+        let projectOwners = stagedProjectOwners
+        let recoveryPlans = projectRecoveryPlans
+        let appDataPaths = stagedAppData
+        let libraryRoot = appDataLibraryRoot
+        busy = true
+        quickCleanupFailures = [:]
+        lastTrashedURLs = []
         task = Task {
             defer { busy = false }
-            do {
-                // Confirmation can remain open indefinitely. Rescan afterward,
-                // using exactly the candidates that the user approved.
-                try DuplicateSurvivorProtection.validateSurvivors(scan: scan, selections: duplicateSelections, staged: Set(ids))
-                try await ProjectProposalValidation.validate(scan: scan, artifactOwners: projectOwners,
-                    recoveryPlans: recoveryPlans, excludedFolders: excludedFolders)
-                if !appDataPaths.isEmpty {
-                    guard let libraryRoot else { throw NSError(domain: "AppDataReview", code: 1, userInfo: [NSLocalizedDescriptionKey: "App reference changed. Refresh App Data."]) }
-                    let home = FileManager.default.homeDirectoryForCurrentUser
-                    let referenceCheck = Task.detached(priority: .utility) {
-                        let reference = try AppReferenceDiscovery.collect(roots: AppReferenceDiscovery.standardRoots(home: home))
-                        return try AppLeftoverReview.analyze(scan: scan, inventory: reference, libraryRoot: libraryRoot,
-                            cancellationCheck: { try Task.checkCancellation() })
-                    }
-                    let fresh = try await withTaskCancellationHandler { try await referenceCheck.value } onCancel: { referenceCheck.cancel() }
-                    guard fresh.absenceEvidenceAvailable, appDataPaths.allSatisfy({ id, path in
-                        fresh.candidates.contains { $0.id == id && $0.path == path }
-                    }) else { throw NSError(domain: "AppDataReview", code: 1, userInfo: [NSLocalizedDescriptionKey: "App reference changed or is incomplete. Refresh App Data and review again."]) }
-                }
-                try await CleanupPreflight.validate(ids: ids, in: scan, acknowledgedIncomplete: acknowledgements, excludedFolders: excludedFolders,
-                                                    regenerableIDs: regenerable)
-                try Task.checkCancellation()
-                guard scanVersion == version, staged == Set(ids) else {
-                    throw NSError(domain: "Cleanup", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selection changed. Review it again."])
-                }
-                var moved = 0
-                lastTrashedURLs = []
+            var moved = 0, skipped = 0
+            var remaining = Set(ids)
+            var appDataReference: AppLeftoverReviewResult?
+            var appDataFailure: Error?
+            for id in ids {
                 do {
-                    for id in ids {
-                        try Task.checkCancellation()
-                        let url = scan.url(for: id)
-                        if FolderExclusions(paths: excludedFolders).blocksCleanup(url) {
-                            throw CleanupPreflightError.excludedFolder(url.path)
-                        }
-                        try CleanupSafety.validate(url: url, expected: scan.nodes[id], root: URL(fileURLWithPath: scan.rootPath),
-                                                   allowingRegenerableChanges: regenerable.contains(id))
-                        var trashedURL: NSURL?
-                        try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
-                        if !cleanupRefreshPaths.contains(scan.rootPath) { cleanupRefreshPaths.append(scan.rootPath) }
-                        if let trashedURL { lastTrashedURLs.append(trashedURL as URL) }
-                        unstage(id); moved += 1
+                    try Task.checkCancellation()
+                    guard scanVersion == version, staged == remaining else { throw CancellationError() }
+                    guard scan.nodes.indices.contains(id) else { throw CleanupPreflightError.invalidNodeID(id) }
+                    progress = "Cleaning \(moved + skipped + 1) of \(ids.count) · \(StorageLabels.name(scan.nodes[id]))"
+                    // Overlapping selections cannot turn a kept child into a removed parent.
+                    let others = Set(ids).subtracting([id])
+                    guard !hasAncestor(id, in: others), !others.contains(where: { hasAncestor($0, in: [id]) }) else {
+                        throw CleanupPreflightError.overlappingNodes(id, id)
                     }
-                } catch {
+                    let duplicates = duplicateSelections.filter { selection in
+                        selection.members.contains { hasAncestor($0, in: [id]) }
+                    }
+                    try DuplicateSurvivorProtection.validateSurvivors(scan: scan, selections: duplicates, staged: Set(ids))
+                    try await ProjectProposalValidation.validate(scan: scan, artifactOwners: projectOwners.filter { $0.key == id },
+                        recoveryPlans: recoveryPlans, excludedFolders: excludedFolders)
+                    if let path = appDataPaths[id] {
+                        if appDataReference == nil && appDataFailure == nil {
+                            do {
+                                guard let libraryRoot else { throw NSError(domain: "AppDataReview", code: 1, userInfo: [NSLocalizedDescriptionKey: "App reference changed. Refresh App Data."]) }
+                                let home = FileManager.default.homeDirectoryForCurrentUser
+                                let referenceCheck = Task.detached(priority: .utility) {
+                                    let reference = try AppReferenceDiscovery.collect(roots: AppReferenceDiscovery.standardRoots(home: home))
+                                    return try AppLeftoverReview.analyze(scan: scan, inventory: reference, libraryRoot: libraryRoot,
+                                        cancellationCheck: { try Task.checkCancellation() })
+                                }
+                                appDataReference = try await withTaskCancellationHandler { try await referenceCheck.value } onCancel: { referenceCheck.cancel() }
+                            } catch is CancellationError { throw CancellationError() }
+                            catch { appDataFailure = error }
+                        }
+                        if let appDataFailure { throw appDataFailure }
+                        guard let fresh = appDataReference, fresh.absenceEvidenceAvailable,
+                              fresh.candidates.contains(where: { $0.id == id && $0.path == path }) else {
+                            throw NSError(domain: "AppDataReview", code: 1, userInfo: [NSLocalizedDescriptionKey: "App reference changed or is incomplete. Refresh App Data and review again."])
+                        }
+                    }
+                    try await CleanupPreflight.validate(ids: [id], in: scan, acknowledgedIncomplete: acknowledgements,
+                        excludedFolders: excludedFolders, regenerableIDs: regenerable)
+                    try Task.checkCancellation()
+                    guard scanVersion == version, staged == remaining else { throw CancellationError() }
+                    try DuplicateSurvivorProtection.validateSurvivors(scan: scan, selections: duplicates, staged: Set(ids))
+                    let url = scan.url(for: id)
+                    if FolderExclusions(paths: excludedFolders).blocksCleanup(url) {
+                        throw CleanupPreflightError.excludedFolder(url.path)
+                    }
+                    try CleanupSafety.validate(url: url, expected: scan.nodes[id], root: URL(fileURLWithPath: scan.rootPath),
+                                               allowingRegenerableChanges: regenerable.contains(id))
+                    if let trashedURL = try moveToTrash(url) { lastTrashedURLs.append(trashedURL) }
+                    if !cleanupRefreshPaths.contains(scan.rootPath) { cleanupRefreshPaths.append(scan.rootPath) }
+                    unstage(id); remaining.remove(id); moved += 1
+                    quickCleanupCandidateIDs.removeAll { $0 == id }
+                } catch is CancellationError {
                     if moved > 0 { requestAISessionsRefresh() }
-                    message = "Stopped after moving \(moved) items to Trash. \(error.localizedDescription)"
-                    progress = "Cleanup stopped · Rescan to refresh totals"
+                    progress = "Cleanup cancelled · \(moved) moved to Trash · \(skipped) skipped · \(remaining.count) not processed"
                     return
+                } catch {
+                    quickCleanupFailures[id] = error.localizedDescription
+                    unstage(id); remaining.remove(id); skipped += 1
+                    quickCleanupCandidateIDs.removeAll { $0 == id }
                 }
-                requestAISessionsRefresh()
-                showCleanup = false
-                openStorage(.cleanup)
-                progress = "Cleanup complete · Rescan to refresh totals"
-            } catch {
-                message = "Nothing moved: \(error.localizedDescription)"; progress = "Cleanup stopped"
             }
+            if moved > 0 { requestAISessionsRefresh() }
+            showCleanup = false
+            openStorage(.cleanup)
+            progress = "Cleanup complete · \(moved) moved to Trash · \(skipped) skipped · Rescan to refresh totals"
         }
     }
     var snapshotAlreadySaved: Bool {
