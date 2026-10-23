@@ -264,14 +264,14 @@ struct ScanScheduleSettingsView: View {
                         .buttonStyle(StorageButtonStyle(prominent: true))
                     if schedule.approvedPath != nil { Button("Forget Folder", action: schedule.forgetFolder) }
                 }
-                Toggle("Enable recurring full scans", isOn: Binding(get: { schedule.enabled }, set: schedule.setEnabled))
+                Toggle("Enable recurring full scans", isOn: Binding(get: { schedule.enabled }, set: { schedule.setEnabled($0) }))
                     .disabled(schedule.approvedPath == nil)
-                Picker("Scan frequency", selection: Binding(get: { schedule.interval }, set: schedule.setInterval)) {
+                Picker("Scan frequency", selection: Binding(get: { schedule.interval }, set: { schedule.setInterval($0) })) {
                     ForEach(ScanScheduleInterval.allCases) { Text($0.title).tag($0) }
                 }.frame(maxWidth: 320)
-                Toggle("Only scan when this Mac is idle", isOn: Binding(get: { schedule.requireIdle }, set: schedule.setRequireIdle))
+                Toggle("Only scan when this Mac is idle", isOn: Binding(get: { schedule.requireIdle }, set: { schedule.setRequireIdle($0) }))
                 if schedule.requireIdle {
-                    Stepper("Idle for \(schedule.idleMinutes) minutes", value: Binding(get: { schedule.idleMinutes }, set: schedule.setIdleMinutes), in: 1...120)
+                    Stepper("Idle for \(schedule.idleMinutes) minutes", value: Binding(get: { schedule.idleMinutes }, set: { schedule.setIdleMinutes($0) }), in: 1...120)
                 }
                 if let date = schedule.nextRun { LabeledContent("Next scan", value: date.formatted(date: .abbreviated, time: .shortened)) }
                 if let date = schedule.lastRun { LabeledContent("Last scheduled scan", value: date.formatted(date: .abbreviated, time: .shortened)) }

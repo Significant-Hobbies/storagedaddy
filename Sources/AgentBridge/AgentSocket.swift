@@ -26,7 +26,7 @@ public final class AgentSocketServer: @unchecked Sendable {
         guard fd >= 0 else { throw AgentSecurity.failure("Cannot create the local agent listener.") }
         var success = false
         defer { if !success { close(fd) } }
-        fcntl(fd, F_SETFD, FD_CLOEXEC)
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
         var address = try AgentSocketClient.address(path)
         let bound = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
@@ -124,7 +124,7 @@ public enum AgentSocketClient {
     }
 
     static func protect(_ fd: Int32) {
-        fcntl(fd, F_SETFD, FD_CLOEXEC)
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
         var yes: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, socklen_t(MemoryLayout.size(ofValue: yes)))
         var timeout = timeval(tv_sec: 10, tv_usec: 0)

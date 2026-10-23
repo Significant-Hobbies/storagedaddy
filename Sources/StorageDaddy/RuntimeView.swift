@@ -685,7 +685,7 @@ struct DriveMonitoringView: View {
                 if model.monitoringRequireIdle {
                     Stepper("Idle for \(model.monitoringIdleMinutes) minutes", value: $model.monitoringIdleMinutes, in: 1...120)
                 }
-                Toggle("Notify me when available space drops", isOn: Binding(get: { model.alertsEnabled }, set: model.requestAlerts))
+                Toggle("Notify me when available space drops", isOn: Binding(get: { model.alertsEnabled }, set: { model.requestAlerts($0) }))
                     .disabled(!model.monitoringEnabled)
                 HStack {
                     Text("Alert after a drop of")

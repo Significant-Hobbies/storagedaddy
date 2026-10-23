@@ -229,7 +229,7 @@ public actor EasyMoveStore {
                 record.phase = .restored; record.message = "Original retained. Review any unfinished staging copies in move history."; try save(record); return record
             }
         }
-        guard let destinationState else {
+        guard destinationState != nil else {
             // Interrupted cross-volume copy leaves the original untouched.
             if sourceState == nil, let backup = try Self.optionalIdentity(sourceParent, record.sourceBackup.lastPathComponent) {
                 guard backup.sameObject(plan.manifest[""]!.identity) else { throw EasyMoveError.changed(record.sourceBackup.path) }

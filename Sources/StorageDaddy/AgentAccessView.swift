@@ -17,7 +17,7 @@ struct AgentAccessView: View {
                     DoodleArt(topic: .agents).frame(width: 80, height: 80)
                 }
                 VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Allow local AI agents", isOn: Binding(get: { agents.enabled }, set: agents.setEnabled))
+                    Toggle("Allow local AI agents", isOn: Binding(get: { agents.enabled }, set: { agents.setEnabled($0) }))
                         .tint(Tints.mint).font(.headline)
                     Text(agents.listening ? "Listening locally for Codex OAuth and the private stdio bridge." : "Off. Nothing listens until you turn this on.")
                         .foregroundStyle(Tints.secondaryText)
