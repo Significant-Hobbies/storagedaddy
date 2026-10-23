@@ -25,5 +25,10 @@
   "devDependencies": {
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@saas-maker/templates@0.1.13": "patches/saas-maker-templates-footer-retry-0.1.13.patch"
+    }
   }
 }
