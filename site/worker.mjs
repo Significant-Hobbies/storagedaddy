@@ -29,6 +29,20 @@ export default {
     if (legacyPath) return Response.redirect(canonicalOrigin + (url.pathname.slice(base.length) || '/') + url.search, 308);
     if (url.hostname === legacyOrigin) return Response.redirect(canonicalOrigin + url.pathname + url.search, 308);
     if (url.hostname === 'significanthobbies.com') return new Response('Not found', { status: 404 });
+    if (url.pathname === '/release.json') {
+      const metadata = {
+        name: 'storagedaddy', version: release.version, build: release.build,
+        ready: release.ready, notarized: release.notarized,
+        filename: release.filename, bytes: release.bytes, sha256: release.sha256,
+        sourceSha: release.sourceSha,
+        sourceUrl: `https://github.com/Significant-Hobbies/storagedaddy/tree/${release.sourceSha}`,
+        downloadUrl: canonicalOrigin + '/download',
+        updateFeed: canonicalOrigin + '/updates/appcast.xml',
+      };
+      return secure(new Response(request.method === 'HEAD' ? null : JSON.stringify(metadata), {
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=300' },
+      }));
+    }
     const isDownload = url.pathname === '/download' || url.pathname === release.path.slice(base.length);
     const assetURL = new URL(request.url);
     assetURL.pathname = isDownload ? release.path : base + (url.pathname === '/api/ai' ? '/api/ai.json' : url.pathname);

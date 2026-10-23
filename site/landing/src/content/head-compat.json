@@ -12,6 +12,14 @@
     {
       "text": "Read the code, report an issue, or contribute on GitHub.",
       "href": "https://github.com/sarthakagrawal927/storagedaddy"
+    },
+    {
+      "text": "Inspect the source-backed decision example.",
+      "href": "/developer-storage-proof.json"
+    },
+    {
+      "text": "Check the current release metadata.",
+      "href": "/release.json"
     }
   ]
 }
