@@ -31,6 +31,7 @@ struct DiskBuddyApp: App {
             if !StorageStartupCheck.enabled { updates.start(model: model) }
             reviewActiveWorkBeforeQuit()
             StorageStartupCheck.windowAppeared(model: model)
+            if !StorageStartupCheck.enabled { model.scanSchedule.start() }
         } }
             .defaultSize(width: 1320, height: 850)
             .windowStyle(.hiddenTitleBar)
@@ -46,6 +47,12 @@ struct DiskBuddyApp: App {
                     Button("Find Files") { model.showWelcome = false; model.workspace = .findFiles }.keyboardShortcut("f").disabled(model.scan == nil || model.busy)
                     Button("Rescan") { model.rescan() }.keyboardShortcut("r").disabled(model.scan == nil || model.busy)
                     Button("Cancel Scan") { model.cancel() }.keyboardShortcut(".").disabled(!model.busy)
+                    Button("System Widget", action: model.runtime.showWidget).keyboardShortcut("w", modifiers: [.command, .shift])
+                    Button("Processes") { model.workspace = .processes }.keyboardShortcut("5")
+                    Button("Drive Monitoring") { model.workspace = .driveMonitoring }.keyboardShortcut("6")
+                    Button("Developer Artifacts") { model.openStorage(.developer) }.keyboardShortcut("4")
+                    Button("Easy Move History…", action: model.moves.showHistory)
+                    Button("Agent Access") { model.workspace = .agents }
                 }
             }
         MenuBarExtra {
@@ -70,6 +77,7 @@ private struct StorageMenu: View {
         Divider()
         DaddyMenuOpenButton(appName: "StorageDaddy")
         if model.isScanning { Button("Cancel Scan") { model.cancel() } }
+        Button("System Widget", action: model.runtime.showWidget)
         SettingsLink()
         Button("Check for Updates…", action: updates.check).disabled(!updates.canCheck || !updates.isIdle)
         Divider()
@@ -97,6 +105,9 @@ private struct StorageMenu: View {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.applyIcon()
         guard !StorageStartupCheck.enabled else { return }
+        if UserDefaults.standard.bool(forKey: "startMinimized") {
+            DispatchQueue.main.async { NSApplication.shared.windows.filter { $0.identifier?.rawValue == "main" || $0.title == "storagedaddy" }.forEach { $0.orderOut(nil) } }
+        }
         health = NativeAppHealth(publicKey: UserDefaults.standard.string(forKey: NativeAppHealth.preferenceKey))
         health?.setActive(NSApplication.shared.isActive)
     }
@@ -131,11 +142,13 @@ private struct StorageMenu: View {
 }
 
 enum Workspace: String, CaseIterable, Identifiable {
+    case processes = "Processes", driveMonitoring = "Drive Monitoring"
+    case agents = "Agent Access"
     case macControls = "Mac Controls", findFiles = "Find Files", aiSessions = "AI Sessions", developer = "Developer Insights", explore = "Explore", applications = "Applications", snapshots = "Snapshots", duplicates = "Duplicates", projects = "Projects", appData = "App Data", cleanup = "Cleanup", acknowledgments = "Acknowledgments", dashboard = "Dashboard"
     var id: String { rawValue }
     var title: String { switch self { case .explore: "Storage"; case .cleanup: "Quick Cleanup"; case .snapshots: "History"; default: rawValue } }
     var requiresScan: Bool { [.findFiles, .developer, .cleanup, .duplicates, .projects, .appData].contains(self) }
-    var icon: String { switch self { case .macControls: "slider.horizontal.3"; case .findFiles: "magnifyingglass"; case .aiSessions: "bubble.left.and.text.bubble.right.fill"; case .developer: "terminal"; case .explore: "internaldrive.fill"; case .applications: "app.badge"; case .snapshots: "clock.arrow.circlepath"; case .duplicates: "doc.on.doc"; case .projects: "folder.badge.gearshape"; case .appData: "questionmark.folder"; case .cleanup: "trash"; case .acknowledgments: "heart.text.square"; case .dashboard: "speedometer" } }
+    var icon: String { switch self { case .agents: "person.crop.circle.badge.checkmark"; case .processes: "cpu"; case .driveMonitoring: "waveform.path"; case .macControls: "slider.horizontal.3"; case .findFiles: "magnifyingglass"; case .aiSessions: "bubble.left.and.text.bubble.right.fill"; case .developer: "terminal"; case .explore: "internaldrive.fill"; case .applications: "app.badge"; case .snapshots: "clock.arrow.circlepath"; case .duplicates: "doc.on.doc"; case .projects: "folder.badge.gearshape"; case .appData: "questionmark.folder"; case .cleanup: "trash"; case .acknowledgments: "heart.text.square"; case .dashboard: "speedometer" } }
 }
 
 enum StorageSection: String, CaseIterable, Identifiable {
@@ -299,7 +312,7 @@ struct FileTypeStats: Sendable {
         didSet { UserDefaults.standard.set(cleanupRefreshPaths, forKey: "cleanupRefreshPaths") }
     }
     func rescanAfterCleanup() {
-        guard !busy, staged.isEmpty, let path = cleanupRefreshPaths.first else { return }
+        guard !busy, !moves.busy, staged.isEmpty, let path = cleanupRefreshPaths.first else { return }
         guard FileManager.default.isReadableFile(atPath: path) else {
             message = "The previous scan location is unavailable. Reconnect the disk or use Scan Folder to grant access again."
             return
@@ -338,9 +351,21 @@ struct FileTypeStats: Sendable {
     @Published var liveStorageCapacity: StartupCapacity?
     @Published var busy = false
     @Published private(set) var lastScanSummary = "No scan yet"
-    @Published var progress = "Choose what to scan to begin"
+    @Published var progress = "Choose what to scan to begin" { didSet { runtime.scanStatus = progress } }
     @Published var folderExplanation: FolderExplanationState?
     @Published var message: String?
+    @Published var cacheCommandNotice: String?
+    let runtime = RuntimeModel()
+    lazy var moves: EasyMoveModel = {
+        let model = EasyMoveModel()
+        model.operationAllowed = { [weak self] in
+            guard let self else { return false }
+            return !busy && !snapshotBusy && !showCleanup && staged.isEmpty && macTools?.isBusy != true && !conversationArchive.busy
+        }
+        return model
+    }()
+    lazy var agentAccess = AgentAccessModel(explorer: self)
+    lazy var scanSchedule = ScanScheduleModel(explorer: self)
     @Published var staged: Set<Int> = []
     @Published var deleteNodeCachesPermanently = true
     @Published var lastPermanentlyDeletedCount = 0
@@ -348,7 +373,7 @@ struct FileTypeStats: Sendable {
     @Published var quickCleanupCandidateIDs: [Int] = []
     @Published private(set) var incompleteCleanup: [Int: CleanupIncompleteReview] = [:]
     @Published var showCleanup = false
-    // No background monitoring in the current product flow.
+    // Capacity polling does not mutate scans or block reviewed cleanup.
     let monitoring = false
     @Published var savedSnapshots: [SavedScanSnapshot] = []
     @Published var snapshotHistoryLoading = false
@@ -356,12 +381,13 @@ struct FileTypeStats: Sendable {
     @Published var snapshotNotice: String?
     @Published var lastSavedSnapshotStarted: Date?
     private var snapshotHistoryGeneration = UUID()
-    private var snapshotDirectory: URL {
+    var snapshotDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("StorageDaddy/Scan History", isDirectory: true)
     }
     @Published var duplicateGroups: [DuplicateGroup] = []
     @Published var duplicatesLoading = false
+    @Published var duplicateLog: [String] = []
     @Published var duplicatesError: String?
     @Published var duplicatesSearched = false
     private var duplicateTask: Task<Void, Never>?
@@ -430,6 +456,7 @@ struct FileTypeStats: Sendable {
         return session
     }
     var activeWorkDescription: String? {
+        if moves.busy { return "A reviewed move or restore is still running." }
         if macTools?.isBusy == true { return "A Mac Controls operation is still running." }
         if isScanning { return "A storage scan is still running." }
         if busy || snapshotBusy { return "A storage operation is still running." }
@@ -439,6 +466,8 @@ struct FileTypeStats: Sendable {
     private var focusTask: Task<Void, Never>?
     private var focusVersion = UUID()
     private var task: Task<Void, Never>?
+    var cacheCommandTask: Task<Void, Never>?
+    var savedScanTask: Task<Void, Never>?
     private var projectDependenciesTask: Task<Void, Never>?
     private var scopedURL: URL?
     var node: DiskNode? { guard let scan, let id = selected, scan.nodes.indices.contains(id) else { return nil }; return scan.nodes[id] }
@@ -546,7 +575,7 @@ struct FileTypeStats: Sendable {
     }
     func invalidateDuplicateReview() {
         duplicateTask?.cancel(); duplicateVersion = UUID()
-        duplicateGroups = []; duplicatesLoading = false; duplicatesError = nil; duplicatesSearched = false
+        duplicateGroups = []; duplicateLog = []; duplicatesLoading = false; duplicatesError = nil; duplicatesSearched = false
     }
     func invalidateProjectReview() {
         projectReviewTask?.cancel(); projectReviewVersion = UUID()
@@ -584,7 +613,7 @@ struct FileTypeStats: Sendable {
         }
     }
     func recordProjectRecoveryPlan(_ id: Int, plan: String?) {
-        guard !busy, projectReviewStatus == .ready,
+        guard !busy, !moves.busy, projectReviewStatus == .ready,
               projectReviewRecords.contains(where: { $0.artifacts.contains(where: { $0.id == id }) }) else { return }
         let trimmed = plan?.trimmingCharacters(in: .whitespacesAndNewlines)
         projectRecoveryPlans[id] = trimmed?.isEmpty == false ? trimmed : nil
@@ -596,7 +625,7 @@ struct FileTypeStats: Sendable {
         projectReviewStatus = .idle("Review canceled. Refresh project evidence to continue.")
     }
     func stageProjectArtifacts(_ ids: [Int]) {
-        guard !busy, projectReviewStatus == .ready,
+        guard !busy, !moves.busy, projectReviewStatus == .ready,
               !ids.isEmpty, Set(ProjectPurgeReview.stageableSelection(Set(ids), in: projectReviewRecords)) == Set(ids) else { return }
         for record in projectReviewRecords {
             for id in ids where record.stageableArtifactIDs.contains(id) { stagedProjectOwners[id] = record.id }
@@ -646,7 +675,7 @@ struct FileTypeStats: Sendable {
         appDataReviewError = "Review canceled. Refresh the app reference to continue."
     }
     func stageAppData(_ record: AppLeftoverRecord) {
-        guard let scan, !busy, !appDataReviewLoading,
+        guard let scan, !busy, !moves.busy, !appDataReviewLoading,
               appDataReview?.absenceEvidenceAvailable == true,
               appDataReview?.candidates.contains(where: { $0.id == record.id && $0.path == record.path }) == true,
               scan.nodes.indices.contains(record.id), scan.url(for: record.id).path == record.path else { return }
@@ -654,12 +683,26 @@ struct FileTypeStats: Sendable {
         stage(record.id)
     }
     func findDuplicates() {
-        guard let scan, !busy, !duplicatesLoading else { return }
+        guard let scan, !busy, !moves.busy, !duplicatesLoading else { return }
         invalidateDuplicateReview()
         let version = duplicateVersion
         duplicatesLoading = true
         duplicateTask = Task {
-            let worker = Task.detached(priority: .utility) { try await DuplicateFinder.find(in: scan) }
+            let defaults = UserDefaults.standard
+            let options = DuplicateSearchOptions(coveragePercent: defaults.object(forKey: "duplicateCoveragePercent") as? Int ?? 100,
+                hashConcurrency: defaults.object(forKey: "duplicateHashConcurrency") as? Int ?? 4,
+                useHashCache: defaults.object(forKey: "duplicateHashCache") as? Bool ?? true)
+            let verbose = defaults.bool(forKey: "duplicateVerboseLog")
+            let worker = Task.detached(priority: .utility) { [self] in
+                try await DuplicateFinder.find(in: scan, options: options) { [self] line in
+                    guard verbose else { return }
+                    Task { @MainActor [self] in
+                        guard self.duplicateVersion == version else { return }
+                        self.duplicateLog.append(line)
+                        self.duplicateLog = Array(self.duplicateLog.suffix(100))
+                    }
+                }
+            }
             do {
                 let groups = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
                 guard !Task.isCancelled, duplicateVersion == version else { return }
@@ -674,7 +717,7 @@ struct FileTypeStats: Sendable {
     /// The preflight is asynchronous; serial staging avoids dropping every item
     /// after the first one at the existing busy guard. Nothing moves to Trash here.
     func stageDuplicateCopies(_ ids: [Int]) {
-        guard let scan, !busy, !duplicatesLoading, !ids.isEmpty else { return }
+        guard let scan, !busy, !moves.busy, !duplicatesLoading, !ids.isEmpty else { return }
         let removals = Set(ids)
         let groups = duplicateGroups.filter { !removals.isDisjoint(with: $0.nodeIDs) }
         guard removals.isSubset(of: Set(groups.flatMap(\.nodeIDs))) else { return }
@@ -695,7 +738,7 @@ struct FileTypeStats: Sendable {
         stageReviewBatch(ids)
     }
     func stageReviewBatch(_ ids: [Int]) {
-        guard !busy, let scan, ids.allSatisfy({ scan.nodes.indices.contains($0) && scan.nodes[$0].parent != nil }) else { return }
+        guard !busy, !moves.busy, let scan, ids.allSatisfy({ scan.nodes.indices.contains($0) && scan.nodes[$0].parent != nil }) else { return }
         reviewBatchTask?.cancel()
         let version = scanVersion
         reviewBatchTask = Task {
@@ -731,8 +774,11 @@ struct FileTypeStats: Sendable {
         }
     }
     func rescan() { if let scan { start(URL(fileURLWithPath: scan.rootPath), allowProtectedFolder: lastScanAllowedProtectedFolder) } }
-    func start(_ url: URL, destination: Workspace? = nil, allowProtectedFolder: Bool = false, notifyOnCompletion: Bool = true) {
-        guard !busy, macTools?.isBusy != true else { return }
+    func start(_ url: URL, destination: Workspace? = nil, allowProtectedFolder: Bool = false, notifyOnCompletion: Bool = true, background: Bool = false) {
+        guard !busy, !moves.busy, moves.plan == nil, !snapshotBusy, macTools?.isBusy != true else { return }
+        if background && scanScheduleBlockReason != nil { return }
+        let priorFocusPath = background ? scan.flatMap { $0.nodes.indices.contains(focus) ? $0.url(for: focus).path : nil } : nil
+        let priorSelectionPath = background ? selected.flatMap { id in scan.flatMap { $0.nodes.indices.contains(id) ? $0.url(for: id).path : nil } } : nil
         lastScanAllowedProtectedFolder = allowProtectedFolder
         let protectedFolders = allowProtectedFolder ? [] : AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
         promptAvoidanceFolders = protectedFolders
@@ -740,12 +786,14 @@ struct FileTypeStats: Sendable {
         projectDependenciesTask = nil
         projectDependencies = nil
         projectDependenciesBusy = false
-        showWelcome = false
-        if let destination { workspace = destination }
-        else { openStorage(.explore) }
+        if !background {
+            showWelcome = false
+            if let destination { workspace = destination }
+            else { openStorage(.explore) }
+        }
         let initialWorkspace = workspace
         let initialStorageSection = storageSection
-        lastTrashedURLs = []
+        if !background { lastTrashedURLs = [] }
         task?.cancel(); scanVersion = UUID(); staged = []; incompleteCleanup = [:]; busy = true; message = nil
         scopedURL?.stopAccessingSecurityScopedResource(); scopedURL = url; _ = url.startAccessingSecurityScopedResource()
         liveProgress = nil
@@ -783,7 +831,7 @@ struct FileTypeStats: Sendable {
                     guard scanVersion == version else { return }
                     liveStorageCapacity = capacity
                 }
-                let result = try await DiskScanner.scan(root: url, excludedFolders: excludedFolders,
+                let result = try await DiskScanner.scan(root: url, parallelism: max(0, min(64, UserDefaults.standard.integer(forKey: "scanWorkerCount"))), excludedFolders: excludedFolders,
                     promptAvoidanceFolders: protectedFolders, progress: { [weak self] p in
                     Task { @MainActor [weak self] in guard let self, self.scanVersion == version, self.busy else { return }; self.liveProgress = p; self.progress = "\(p.entries.formatted()) entries · \(StorageLabels.location(p.path))" }
                 })
@@ -845,11 +893,17 @@ struct FileTypeStats: Sendable {
                 didPublish = true
                 if result.nodes.count > 1 || result.skipped == 0 { cleanupRefreshPaths.removeAll { $0 == result.rootPath } }
                 self.scan = result; exclusionResultsStale = false; quickWinNodes = summary.0; appNodes = summary.1; fileCount = summary.2; focus = 0; selected = nil
+                if let path = priorFocusPath, path != result.rootPath {
+                    focus = result.nodes.first { $0.name == URL(fileURLWithPath: path).lastPathComponent && result.url(for: $0.id).path == path }?.id ?? 0
+                }
+                if let path = priorSelectionPath {
+                    selected = result.nodes.first { $0.name == URL(fileURLWithPath: path).lastPathComponent && result.url(for: $0.id).path == path }?.id
+                }
                 scanStorageAccounting = summary.11
                 allocationIndex = summary.12
                 quickCleanupCandidateIDs = summary.13
                 // Show results unless the owner navigated elsewhere during the scan.
-                if workspace == initialWorkspace && storageSection == initialStorageSection {
+                if !background && workspace == initialWorkspace && storageSection == initialStorageSection {
                     if let destination {
                         if destination == .explore { openStorage(.explore) }
                         else { workspace = destination }
@@ -868,9 +922,10 @@ struct FileTypeStats: Sendable {
                     if protectedFolders.isEmpty { discoverProjectDependencies(promptAvoidanceFolders: []) }
                 }
             } catch is CancellationError { if scanVersion == version { progress = scan == nil ? "Scan cancelled · Choose a disk or folder to try again" : "Scan cancelled · Showing previous results"; lastScanSummary = "Last scan cancelled" } }
-            catch { if scanVersion == version { message = error.localizedDescription; progress = scan == nil ? "Scan failed · Choose another disk or folder" : "Scan failed · Showing previous results"; lastScanSummary = "Last scan needs attention" } }
+            catch { if scanVersion == version { if !background { message = error.localizedDescription }; progress = "Scan failed · " + error.localizedDescription; lastScanSummary = "Last scan needs attention" } }
             guard scanVersion == version else { return }
             liveProgress = nil; busy = false
+            if didPublish, !StorageStartupCheck.enabled, UserDefaults.standard.object(forKey: "automaticallySaveScans") as? Bool ?? true { saveSnapshot() }
         }
     }
     private func discoverProjectDependencies(promptAvoidanceFolders: [String]) {
@@ -904,6 +959,8 @@ struct FileTypeStats: Sendable {
         if let rss = ProcessMemory.residentBytes() { scanPeakRSS = max(scanPeakRSS ?? 0, rss) }
     }
     func cancel() {
+        cacheCommandTask?.cancel()
+        savedScanTask?.cancel()
         task?.cancel()
         if activeScanVersion != nil {
             // A filesystem access request can wait inside macOS. Detach its UI
@@ -988,7 +1045,7 @@ struct FileTypeStats: Sendable {
         return nil
     }
     func stage(_ id: Int) {
-        guard let scan, !busy, macTools?.isBusy != true, !monitoring, scan.nodes.indices.contains(id) else { return }
+        guard let scan, !busy, !moves.busy, macTools?.isBusy != true, !monitoring, scan.nodes.indices.contains(id) else { return }
         if let provider = sessionProvider(for: id) {
             let alert = NSAlert()
             alert.messageText = "Keep the conversation before cleaning up?"
@@ -1046,7 +1103,7 @@ struct FileTypeStats: Sendable {
         }
     }
     func stageChromeSigningCopies(_ storeID: Int) {
-        guard let scan, !busy, !monitoring, macTools?.isBusy != true, scan.nodes.indices.contains(storeID),
+        guard let scan, !busy, !moves.busy, !monitoring, macTools?.isBusy != true, scan.nodes.indices.contains(storeID),
               ChromeSigningClones.location(path: scan.url(for: storeID).path) == .store else { return }
         let ids = ChromeSigningClones.copyIDs(in: scan, storeID: storeID)
         let version = scanVersion
@@ -1106,7 +1163,7 @@ struct FileTypeStats: Sendable {
     }
 
     func stageEasyCleanup() {
-        guard let scan, !busy, !monitoring else { return }
+        guard let scan, !busy, !moves.busy, !monitoring else { return }
         let ids = easyCleanupIDs
         guard !ids.isEmpty else { return }
         let version = scanVersion
@@ -1198,7 +1255,8 @@ struct FileTypeStats: Sendable {
     }
 
     func trashStaged() {
-        guard let scan, !busy, macTools?.isBusy != true, !monitoring, !staged.isEmpty else { return }
+        guard agentAccess.validateStagedPermissions() else { return }
+        guard let scan, !busy, !moves.busy, macTools?.isBusy != true, !monitoring, !staged.isEmpty else { return }
         let ids = staged.sorted()
         let regenerable = regenerableCleanupIDs(ids, in: scan)
         let permanent = permanentCleanupIDs
@@ -1233,7 +1291,8 @@ struct FileTypeStats: Sendable {
         try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
         return trashedURL as URL?
     }) {
-        guard let scan, !busy, !monitoring, Set(ids) == staged, permanent.isSubset(of: staged), !ids.isEmpty else { return }
+        guard agentAccess.validateStagedPermissions() else { return }
+        guard let scan, !busy, !moves.busy, !monitoring, Set(ids) == staged, permanent.isSubset(of: staged), !ids.isEmpty else { return }
         let version = scanVersion
         let regenerable = regenerableCleanupIDs(ids, in: scan)
         let acknowledgements = incompleteCleanup
@@ -1296,6 +1355,7 @@ struct FileTypeStats: Sendable {
                         excludedFolders: excludedFolders, regenerableIDs: regenerable)
                     try Task.checkCancellation()
                     guard scanVersion == version, staged == remaining else { throw CancellationError() }
+                    guard agentAccess.validateStagedPermissions() else { throw CancellationError() }
                     try DuplicateSurvivorProtection.validateSurvivors(scan: scan, selections: duplicates, staged: Set(ids))
                     let url = scan.url(for: id)
                     if FolderExclusions(paths: excludedFolders).blocksCleanup(url) {
@@ -1349,7 +1409,7 @@ struct FileTypeStats: Sendable {
     }
 
     func saveSnapshot() {
-        guard let scan, !busy, !snapshotBusy, !snapshotAlreadySaved else { return }
+        guard let scan, !busy, !moves.busy, !snapshotBusy, !snapshotAlreadySaved else { return }
         let directory = snapshotDirectory
         snapshotBusy = true
         snapshotNotice = nil
@@ -1357,14 +1417,16 @@ struct FileTypeStats: Sendable {
             defer { snapshotBusy = false }
             do {
                 let saved = try await Task.detached(priority: .utility) {
-                    try SnapshotHistoryStore.save(scan: scan, directory: directory)
+                    try SnapshotHistoryStore.save(scan: scan, directory: directory, includeFileIndex: true)
                 }.value
                 lastSavedSnapshotStarted = saved.scan.started
                 // Saving a completed scan never changes the selected workspace.
-                snapshotNotice = "Snapshot saved to History"
+                snapshotNotice = saved.archivalWarning.map { "Snapshot saved to History. " + $0 } ?? "Snapshot saved to History"
                 await refreshSnapshotHistory()
+                await applySnapshotRetention()
             } catch {
-                snapshotNotice = "Couldn’t save this snapshot. Try again."
+                snapshotNotice = "Couldn’t save this snapshot. " + error.localizedDescription
+                snapshotHistoryWarning = snapshotNotice
             }
         }
     }
@@ -1389,6 +1451,38 @@ struct FileTypeStats: Sendable {
             guard snapshotHistoryGeneration == request else { return }
             snapshotHistoryWarning = "Couldn’t load saved history. Try refreshing. Your saved files remain on this Mac."
         }
+    }
+}
+
+extension ExplorerModel {
+    var scanScheduleCandidate: (url: URL, allowProtectedFolder: Bool)? {
+        guard let scan, !busy, !isScanning else { return nil }
+        let root = URL(fileURLWithPath: scan.rootPath, isDirectory: true)
+        let selected = scopedURL.flatMap { url in
+            url.standardizedFileURL.resolvingSymlinksInPath().path == root.standardizedFileURL.resolvingSymlinksInPath().path ? url : nil
+        } ?? root
+        return (selected, lastScanAllowedProtectedFolder)
+    }
+    var scanScheduleBlockReason: String? {
+        if busy || isScanning { return "A scan, cleanup or package command is running." }
+        if !staged.isEmpty || showCleanup || !incompleteCleanup.isEmpty { return "Your cleanup selections are waiting for review." }
+        if macTools?.isBusy == true { return "Mac Controls is busy." }
+        if moves.busy || moves.plan != nil || moves.isPresented { return "A file move or review is open." }
+        if snapshotBusy || snapshotHistoryLoading { return "Scan history is busy." }
+        if conversationArchive.busy || conversationArchive.reviewCleanup { return "A conversation export or review is open." }
+        if installedApplications.loading || installedApplications.removalBusy { return "Application discovery or removal review is open." }
+        if duplicatesLoading || appDataReviewLoading || projectReviewStatus == .loading || projectDependenciesBusy || ageRefreshing { return "A storage analysis is in progress." }
+        if folderExplanation != nil { return "A folder explanation is open." }
+        if agentAccess.waitingReviewCount > 0 || !agentAccess.pairings.isEmpty { return "An agent request is waiting for review." }
+        if NSApplication.shared.modalWindow != nil || NSApplication.shared.windows.contains(where: { $0.attachedSheet != nil }) { return "A dialog or review sheet is open." }
+        if DaddyCompletionNotices.hasVisibleAppWindow,
+           [.duplicates, .projects, .appData, .cleanup, .developer, .applications, .snapshots, .agents].contains(workspace) { return "You are reviewing storage results." }
+        return nil
+    }
+    func beginScheduledScan(_ url: URL, allowProtectedFolder: Bool) -> Bool {
+        guard scanScheduleBlockReason == nil, !FolderExclusions(paths: excludedFolders).contains(url.path) else { return false }
+        start(url, allowProtectedFolder: allowProtectedFolder, notifyOnCompletion: false, background: true)
+        return isScanning
     }
 }
 

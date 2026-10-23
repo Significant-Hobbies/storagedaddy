@@ -75,6 +75,7 @@ public enum DeveloperInsights {
 
         // Only metadata names are examined; manifest contents remain unread.
         var composerProjects = Set<Int>(), rubyProjects = Set<Int>(), podProjects = Set<Int>()
+        var dotNetProjects = Set<Int>()
         for node in scan.nodes {
             if node.id & 255 == 0 { try cancellationCheck() }
             guard !node.isDirectory, !node.isSymlink, let parent = node.parent else { continue }
@@ -84,6 +85,7 @@ public enum DeveloperInsights {
             case "podfile": podProjects.insert(parent)
             default: break
             }
+            if ["csproj", "fsproj", "vbproj", "sln", "slnx"].contains((node.name as NSString).pathExtension.lowercased()) { dotNetProjects.insert(parent) }
         }
         let rootContext = contextForRootPath(scan.rootPath)
         // Only directories can provide inherited context to another node.
@@ -101,14 +103,16 @@ public enum DeveloperInsights {
 
             var context = parentContext
             var explicitModules = false
+            var explicitBuild = false
             if node.isDirectory, let parent = node.parent {
                 let name = node.name.lowercased()
+                explicitBuild = ["bin", "obj"].contains(name) && dotNetProjects.contains(parent)
                 explicitModules = (name == "vendor" && composerProjects.contains(parent)) || (name == "pods" && podProjects.contains(parent))
                 if name == "bundle", scan.nodes.indices.contains(parent), scan.nodes[parent].name == "vendor", let project = scan.nodes[parent].parent {
                     explicitModules = rubyProjects.contains(project)
                 }
             }
-            if context.owner == nil, let category = explicitModules ? DeveloperCategory.installedModules : subtreeCategory(for: node, context: context) {
+            if context.owner == nil, let category = explicitModules ? DeveloperCategory.installedModules : explicitBuild ? .buildOutputs : subtreeCategory(for: node, context: context) {
                 context.owner = category
                 context.ownerRootID = node.id
             }
@@ -191,6 +195,9 @@ public enum DeveloperInsights {
         if packageCacheToolNames.contains(name), packageCacheParents.contains(context.parentName) {
             return .packageCaches
         }
+        if name == "cache", [".dart", ".pub-cache", ".composer", ".swiftpm", ".sbt", ".ivy2"].contains(context.parentName) { return .packageCaches }
+        if ["cache", "artifacts", "repositories"].contains(name), context.parentName == "org.swift.swiftpm", context.grandparentName == "caches" { return .packageCaches }
+        if name == "diagnosticreports", context.parentName == "logs", context.grandparentName == "library" { return .temporary }
         if name == "cache", context.parentName == ".yarn" { return .packageCaches }
         if name == "cache", context.parentName == "install", context.grandparentName == ".bun" { return .packageCaches }
         if name == "mod", context.parentName == "pkg", context.grandparentName == "go" { return .packageCaches }
@@ -201,6 +208,7 @@ public enum DeveloperInsights {
         }
         if name == "repository", context.parentName == ".m2" { return .packageCaches }
         if name == "packages", context.parentName == ".nuget" { return .packageCaches }
+        if ["providers", "modules"].contains(name), context.parentName == ".terraform" { return .packageCaches }
 
         if modelCacheToolNames.contains(name), packageCacheParents.contains(context.parentName) {
             return .modelCaches
@@ -210,7 +218,7 @@ public enum DeveloperInsights {
         if context.containerTool, containerVolumeNames.contains(name) { return .containerStorage }
         if context.containerStorageScope, name == "storage" { return .containerStorage }
 
-        if buildDirectoryNames.contains(name) { return .buildOutputs }
+        if buildDirectoryNames.contains(name) || name.hasPrefix("cmake-build-") { return .buildOutputs }
         if context.aiHome != nil, context.isDirectAIHomeChild, isAICacheDirectory(name) { return .aiCaches }
         return nil
     }
@@ -343,7 +351,8 @@ private struct RootKey: Hashable {
 }
 
 private let buildDirectoryNames: Set<String> = [
-    ".build", ".next", ".nuxt", ".svelte-kit", ".angular", ".dart_tool", "dist", "build", "deriveddata", "target"
+    ".build", ".next", ".nuxt", ".svelte-kit", ".angular", ".dart_tool", "dist", "build", "deriveddata", "target",
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".cxx", ".externalnativebuild"
 ]
 
 private let pythonDirectoryNames: Set<String> = [
@@ -351,7 +360,7 @@ private let pythonDirectoryNames: Set<String> = [
 ]
 
 private let packageCacheParents: Set<String> = [".cache", "caches"]
-private let packageCacheToolNames: Set<String> = ["npm", "pnpm", "yarn", "pip", "uv", "go-build", "cocoapods", "composer"]
+private let packageCacheToolNames: Set<String> = ["npm", "pnpm", "yarn", "pip", "uv", "homebrew", "go-build", "cocoapods", "composer", "ccache", "sccache", "ms-playwright", "playwright", "electron", "cypress", "puppeteer", "coursier", "ruby", "dart", "org.swift.swiftpm"]
 private let modelCacheToolNames: Set<String> = [
     "huggingface", "torch", "whisper", "transformers", "diffusers", "sentence-transformers"
 ]

@@ -18,8 +18,8 @@ public enum SnapshotArchive {
         try validate(value)
         return compact(value)
     }
-    public static func validate(_ value: ScanResult) throws {
-        guard value.rootPath.hasPrefix("/"), !value.nodes.isEmpty, value.nodes.count < 1_000_000 else { throw invalid("Invalid snapshot root or item count.") }
+    public static func validate(_ value: ScanResult, maximumNodes: Int = 999_999) throws {
+        guard value.rootPath.hasPrefix("/"), !value.nodes.isEmpty, value.nodes.count <= min(2_000_000, maximumNodes) else { throw invalid("Invalid snapshot root or item count.") }
         var referenced = Set<Int>()
         for (i, n) in value.nodes.enumerated() {
             guard n.id == i, n.logicalBytes >= 0, n.allocatedBytes >= 0, !n.name.isEmpty,

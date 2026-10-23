@@ -197,6 +197,10 @@ public struct DeveloperReport: Sendable {
             if names.contains("vendor") { return "Composer or Bundler" }
             return "Installed modules"
         case .packageCaches:
+            if names.contains("homebrew") { return "Homebrew" }
+            if names.contains("ccache") { return "ccache" }
+            if names.contains("sccache") { return "sccache" }
+            if names.contains(".terraform") { return "Terraform" }
             if names.contains("bun") || names.contains(".bun") { return "Bun" }
             if names.contains(".npm") || names.contains("npm") { return "npm" }
             if names.contains("pnpm") || names.contains(".pnpm-store") { return "pnpm" }

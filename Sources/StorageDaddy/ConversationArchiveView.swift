@@ -349,7 +349,7 @@ struct ConversationArchiveView: View {
                     .foregroundStyle(Tints.secondaryText)
             }
             .padding(16)
-            .background(Color.black, in: RoundedRectangle(cornerRadius: 14))
+            .background(AppColors.canvas, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Tints.mint.opacity(0.28)))
         }
     }
@@ -390,7 +390,7 @@ struct ConversationArchiveView: View {
         }
         .padding(17)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black, in: RoundedRectangle(cornerRadius: 14))
+        .background(AppColors.canvas, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Tints.mint.opacity(0.28)))
     }
 
@@ -452,7 +452,7 @@ struct ConversationArchiveView: View {
         HStack(alignment: .top, spacing: 14) {
             Text(number)
                 .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.black)
+                .foregroundStyle(AppColors.canvas)
                 .frame(width: 26, height: 26)
                 .background(color, in: Circle())
             VStack(alignment: .leading, spacing: 10) {
@@ -466,7 +466,7 @@ struct ConversationArchiveView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(16)
-        .background(Color.black, in: RoundedRectangle(cornerRadius: 14))
+        .background(AppColors.canvas, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Tints.mint.opacity(0.2)))
     }
 
@@ -484,7 +484,7 @@ struct ConversationArchiveView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black, in: RoundedRectangle(cornerRadius: 14))
+        .background(AppColors.canvas, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Tints.mint.opacity(0.18)))
     }
 

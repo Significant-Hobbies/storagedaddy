@@ -140,6 +140,8 @@ struct DeveloperView: View {
                     projectDependencies
                 }
                 cleanupOpportunities
+                GitWorktreeView()
+                PackageCacheCleanersView()
                 DeveloperReportView()
                 Button { showsCategories.toggle() } label: {
                     Label(showsCategories ? "Hide category breakdown" : "Show category breakdown", systemImage: showsCategories ? "chevron.up" : "chevron.down")
@@ -153,7 +155,7 @@ struct DeveloperView: View {
                 Text("Matches cover only the selected folder. Zero means no recognized files here, not zero usage across your Mac. Skipped items are excluded. Session counts describe files, not active contexts or tokens.")
                     .font(.callout).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
             }.padding(28)
-        }.background(Color.black).buttonStyle(StorageButtonStyle())
+        }.background(AppColors.canvas).buttonStyle(StorageButtonStyle())
     }
     private var storageFamilyGrid: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -337,7 +339,7 @@ struct DeveloperView: View {
                     if let delta = change(item.category) { Text(delta == 0 ? "No change" : (delta > 0 ? "+" : "") + DiskFormat.bytes(delta)) }
                 }.font(.caption).foregroundStyle(Tints.secondaryText).lineLimit(1)
             }.padding(17).frame(maxWidth: .infinity, alignment: .leading)
-                .background(item.category == category ? item.category.color.opacity(0.08) : Color.black, in: RoundedRectangle(cornerRadius: 13))
+                .background(item.category == category ? item.category.color.opacity(0.08) : AppColors.canvas, in: RoundedRectangle(cornerRadius: 13))
                 .overlay(RoundedRectangle(cornerRadius: 13).stroke(item.category == category ? item.category.color : item.category.color.opacity(0.22), lineWidth: 1))
                 .contentShape(RoundedRectangle(cornerRadius: 13))
         }.buttonStyle(.plain).accessibilityAddTraits(item.category == category ? .isSelected : [])

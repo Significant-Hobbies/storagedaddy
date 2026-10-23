@@ -104,7 +104,7 @@ struct ProjectPurgeRecoveryPlanSheet: View {
             }
         }
         .padding(24).frame(width: 520)
-        .background(Color.black)
+        .background(AppColors.canvas)
     }
 }
 
@@ -169,7 +169,7 @@ struct ProjectPurgeView: View {
                 .font(.caption).foregroundStyle(Tints.secondaryText)
         }
         .padding(20)
-        .background(Color.black, in: RoundedRectangle(cornerRadius: 14))
+        .background(AppColors.canvas, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Tints.mint.opacity(0.18)))
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
         .onChange(of: reviewIdentity) { _, _ in selection.reset(); recoveryDraft = nil }
@@ -226,7 +226,7 @@ struct ProjectPurgeView: View {
                                 .accessibilityLabel("Candidate artifact footprint relative to largest project")
                             }
                             .padding(12)
-                            .background(selection.focusedProjectID == record.id ? Tints.mint.opacity(0.08) : Color.black,
+                            .background(selection.focusedProjectID == record.id ? Tints.mint.opacity(0.08) : AppColors.canvas,
                                         in: RoundedRectangle(cornerRadius: 10))
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(selection.focusedProjectID == record.id ? Tints.mint : Tints.mint.opacity(0.18)))
                         }

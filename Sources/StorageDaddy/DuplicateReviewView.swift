@@ -72,6 +72,12 @@ struct DuplicateReviewView: View {
     let onCancel: () -> Void
     let onStage: ([Int]) -> Void
     var hasSearched = false
+    var log: [String] = []
+    var onMove: (([Int]) -> Void)? = nil
+    @AppStorage("duplicateVerboseLog") private var verboseLog = false
+    @AppStorage("duplicateCoveragePercent") private var coveragePercent = 100
+    @AppStorage("duplicateHashConcurrency") private var hashConcurrency = 4
+    @AppStorage("duplicateHashCache") private var hashCache = true
 
     @State private var selectedGroupID: String?
 
@@ -95,6 +101,21 @@ struct DuplicateReviewView: View {
                         .buttonStyle(StorageButtonStyle(prominent: true))
                 }
             }
+            HStack {
+                Picker("Search depth", selection: $coveragePercent) {
+                    ForEach([1, 10, 25, 50, 100], id: \.self) { Text("\($0)%").tag($0) }
+                }
+                Picker("Readers", selection: $hashConcurrency) { ForEach([1, 2, 4, 8], id: \.self) { Text("\($0)").tag($0) } }
+                Toggle("Reuse verified hashes", isOn: $hashCache)
+            }.font(.caption).disabled(isLoading)
+            Toggle("Show check log", isOn: $verboseLog).font(.caption).disabled(isLoading)
+            if verboseLog && !log.isEmpty {
+                DisclosureGroup("Check log (latest 100 entries)") { ScrollView { Text(log.joined(separator: "\n")).font(.caption.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 100) }
+            }
+            Text("Searches size groups ranked by potential duplicate space. 100% covers all eligible sizes; matches always receive full content and exact byte checks.").font(.caption2).foregroundStyle(Tints.secondaryText)
+            if coveragePercent < 100 {
+                Label("Limited search: largest \(coveragePercent)% of eligible size groups", systemImage: "line.3.horizontal.decrease.circle").font(.caption).foregroundStyle(Tints.yellow)
+            }
             if scan.skipped > 0 || !scan.errors.isEmpty {
                 Label("The scan is incomplete. Results cover only files that could be inspected.", systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(Tints.yellow)
@@ -117,6 +138,17 @@ struct DuplicateReviewView: View {
                     Image(systemName: "checkmark.circle").foregroundStyle(Tints.mint)
                 }
             } else {
+                HStack {
+                    Text("All \(groups.count) groups").font(.caption).foregroundStyle(Tints.secondaryText)
+                    Button("Stage extras · keep newest") { onStage(DuplicateRetention.removals(in: groups, scan: scan, keepNewest: true)) }
+                    Button("Stage extras · keep oldest") { onStage(DuplicateRetention.removals(in: groups, scan: scan, keepNewest: false)) }
+                    if let onMove {
+                        Menu("Move extras…") {
+                            Button("Keep newest; review moves") { onMove(DuplicateRetention.removals(in: groups, scan: scan, keepNewest: true)) }
+                            Button("Keep oldest; review moves") { onMove(DuplicateRetention.removals(in: groups, scan: scan, keepNewest: false)) }
+                        }
+                    }
+                }.buttonStyle(StorageButtonStyle())
                 GeometryReader { geometry in
                     if geometry.size.width >= 760 {
                         HStack(alignment: .top, spacing: 18) {
@@ -132,10 +164,11 @@ struct DuplicateReviewView: View {
                 }
             }
         }
-        .padding(24).foregroundStyle(.white)
+        .padding(24).foregroundStyle(AppColors.ink)
         .font(.system(size: 13, design: .rounded))
         .tint(Tints.mint)
-        .background(Color.black)
+        .background(AppColors.canvas)
+        .onChange(of: coveragePercent) { _, _ in onCancel() }
     }
 
     private var groupList: some View {
@@ -150,7 +183,7 @@ struct DuplicateReviewView: View {
                             Text("\(group.nodeIDs.count) copies · inspect to choose")
                                 .font(.caption).foregroundStyle(Tints.secondaryText)
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                            .background(selectedGroup?.id == group.id ? Tints.mint.opacity(0.14) : Color.white.opacity(0.04),
+                            .background(selectedGroup?.id == group.id ? Tints.mint.opacity(0.14) : AppColors.ink.opacity(0.04),
                                         in: RoundedRectangle(cornerRadius: 10))
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Tints.mint.opacity(selectedGroup?.id == group.id ? 0.5 : 0.12)))
                             .contentShape(RoundedRectangle(cornerRadius: 10))
@@ -164,7 +197,7 @@ struct DuplicateReviewView: View {
 
     @ViewBuilder private var inspector: some View {
         if let group = selectedGroup {
-            DuplicateGroupInspector(scan: scan, group: group, onStage: onStage)
+            DuplicateGroupInspector(scan: scan, group: group, onStage: onStage, onMove: onMove)
                 .id(group.id)
         }
     }
@@ -188,10 +221,11 @@ private struct DuplicateGroupInspector: View {
     let scan: ScanResult
     let group: DuplicateGroup
     let onStage: ([Int]) -> Void
+    let onMove: (([Int]) -> Void)?
     @State private var selection: DuplicateReviewSelection
 
-    init(scan: ScanResult, group: DuplicateGroup, onStage: @escaping ([Int]) -> Void) {
-        self.scan = scan; self.group = group; self.onStage = onStage
+    init(scan: ScanResult, group: DuplicateGroup, onStage: @escaping ([Int]) -> Void, onMove: (([Int]) -> Void)? = nil) {
+        self.scan = scan; self.group = group; self.onStage = onStage; self.onMove = onMove
         _selection = State(initialValue: DuplicateReviewSelection(group: group, scan: scan))
     }
 
@@ -202,6 +236,11 @@ private struct DuplicateGroupInspector: View {
                 .font(.caption).foregroundStyle(Tints.mint)
             Text("Keep at least one copy. All copies start kept; uncheck Keep to select a copy for cleanup.")
                 .font(.caption).foregroundStyle(Tints.secondaryText)
+            HStack {
+                Button("Keep newest") { choose(keepNewest: true) }
+                Button("Keep oldest") { choose(keepNewest: false) }
+                Button("Keep all") { for id in group.nodeIDs { selection.setSurvivor(id, kept: true) } }
+            }.buttonStyle(StorageButtonStyle())
             Divider().overlay(Tints.mint.opacity(0.18))
             if selection.isValid {
                 ScrollView {
@@ -214,6 +253,7 @@ private struct DuplicateGroupInspector: View {
                     .foregroundStyle(Tints.yellow)
                 Spacer()
             }
+            if let onMove { Button("Review moving selected copies…") { onMove(selection.removalIDs) }.disabled(!selection.canStage) }
             Divider().overlay(Tints.mint.opacity(0.18))
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 16) { estimate; Spacer(); stageButton }
@@ -222,7 +262,7 @@ private struct DuplicateGroupInspector: View {
             Text("Upper bound only. APFS copies can share blocks. Space is released only after Trash is emptied; reclaim is not guaranteed.")
                 .font(.caption).foregroundStyle(Tints.secondaryText)
         }.padding(18)
-            .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
+            .background(AppColors.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Tints.mint.opacity(0.18)))
     }
 
@@ -233,6 +273,12 @@ private struct DuplicateGroupInspector: View {
             Text("Allocated upper bound · \(selection.removalIDs.count) selected for cleanup")
                 .font(.caption).foregroundStyle(Tints.secondaryText)
         }
+    }
+
+    private func choose(keepNewest: Bool) {
+        let removals = Set(DuplicateRetention.removals(in: [group], scan: scan, keepNewest: keepNewest))
+        for id in group.nodeIDs { selection.setSurvivor(id, kept: true) }
+        for id in group.nodeIDs where removals.contains(id) { selection.setSurvivor(id, kept: false) }
     }
 
     private var stageButton: some View {
@@ -263,6 +309,6 @@ private struct DuplicateGroupInspector: View {
                     .help(kept && selection.survivorIDs.count == 1 ? "At least one copy must be kept" : "Keep this copy out of cleanup")
             }
         }.padding(12)
-            .background(kept ? Color.black.opacity(0.4) : Tints.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+            .background(kept ? AppColors.canvas.opacity(0.4) : Tints.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
     }
 }

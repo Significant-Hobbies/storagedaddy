@@ -77,8 +77,8 @@ struct DiskPickerView: View {
             }
         }
         .padding(24)
-        .background(Color.black)
-        .preferredColorScheme(.dark)
+        .background(AppColors.canvas)
+        .storageTheme(DaddyTheme.palette)
         .tint(Tints.mint)
         .buttonStyle(StorageButtonStyle())
         .onAppear { volumes = discoverVolumes() }
@@ -183,8 +183,8 @@ struct StorageMessageSheet: View {
             .padding(14)
         }
         .frame(width: 620, height: message.count < 500 ? 230 : 420)
-        .background(Color.black)
-        .preferredColorScheme(.dark)
+        .background(AppColors.canvas)
+        .storageTheme(DaddyTheme.palette)
         .buttonStyle(StorageButtonStyle())
     }
 

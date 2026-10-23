@@ -21,10 +21,11 @@ class SwiftPMResourcesTests(unittest.TestCase):
         with patch("subprocess.run") as build, patch("subprocess.check_output", return_value="/fixture/products/Release\n") as products:
             binary = swiftpm_resources.build_app(root)
         self.assertEqual(binary, Path("/fixture/products/Release/StorageDaddy"))
-        command = build.call_args.args[0]
+        command = build.call_args_list[0].args[0]
         self.assertEqual(command[command.index("--build-system") + 1], "swiftbuild")
         self.assertIn("--only-use-versions-from-resolved-file", command)
         self.assertEqual(products.call_args.args[0], [*command, "--show-bin-path"])
+        self.assertEqual(build.call_args_list[1].args[0][7], "storagedaddy-mcp")
 
     def test_packaged_loader_runs_without_build_path_fallback(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -124,6 +125,7 @@ class SwiftPMResourcesTests(unittest.TestCase):
             fonts = binary.parent / swiftpm_resources.UI_BUNDLE / "Contents/Resources/Fonts"
             fonts.mkdir(parents=True)
             binary.write_bytes(b"fixture executable")
+            (binary.parent / "storagedaddy-mcp").write_bytes(b"fixture agent helper")
             (fonts / "Figtree.ttf").write_bytes(b"fixture font")
             support = root / "artifacts/MemoryPackSupport"
             support.mkdir(parents=True)
@@ -173,6 +175,8 @@ class SwiftPMResourcesTests(unittest.TestCase):
                 copied = app / "Contents/Resources" / swiftpm_resources.UI_BUNDLE / "Contents/Resources/Fonts/Figtree.ttf"
                 self.assertEqual(copied.read_bytes(), b"fixture font")
                 self.assertEqual((app / "Contents/Resources/StorageDaddy.icns").read_bytes(), b"fixture asset")
+                self.assertEqual((app / "Contents/Helpers/storagedaddy-mcp").read_bytes(), b"fixture agent helper")
+                self.assertTrue((app / "Contents/Helpers/storagedaddy-mcp").stat().st_mode & 0o111)
                 info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
                 if name == "package-app.py":
                     self.assertNotIn("SUFeedURL", info)

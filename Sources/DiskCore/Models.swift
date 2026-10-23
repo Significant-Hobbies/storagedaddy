@@ -129,5 +129,12 @@ public struct ScanProgress: Sendable {
 }
 public enum ScanBackend: String, Sendable { case bulk, foundation, parallel }
 public enum DiskFormat {
-    public static func bytes(_ n: Int64) -> String { ByteCountFormatter.string(fromByteCount: n, countStyle: .file) }
+    public static func bytes(_ n: Int64) -> String {
+        guard UserDefaults.standard.bool(forKey: "binaryStorageUnits") else { return ByteCountFormatter.string(fromByteCount: n, countStyle: .file) }
+        let magnitude = Double(n.magnitude)
+        let units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"]
+        var value = magnitude, index = 0
+        while value >= 1024 && index < units.count - 1 { value /= 1024; index += 1 }
+        return (n < 0 ? "−" : "") + value.formatted(.number.precision(.fractionLength(index == 0 ? 0 : 1))) + " " + units[index]
+    }
 }

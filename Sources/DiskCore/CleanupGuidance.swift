@@ -3,6 +3,17 @@ import Foundation
 
 /// Recoverability guidance, never proof that a folder is unused or safe to delete.
 public enum CleanupGuidance {
+    /// uv owns cache locking and shared installed environments. Its supported
+    /// cleaner keeps the cache root and lock; direct Trash/delete is unsafe.
+    public static func requiredNativeCleaner(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String? {
+        let candidate = normalized(path)
+        for relative in [".cache/uv", "Library/Caches/uv"] {
+            let cache = normalized(home) + "/" + relative
+            if candidate == cache || candidate.hasPrefix(cache + "/") { return "uv cache clean" }
+            if cache.hasPrefix(candidate.hasSuffix("/") ? candidate : candidate + "/"), FileManager.default.fileExists(atPath: cache) { return "uv cache clean" }
+        }
+        return nil
+    }
     public static func chromeCacheNote(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String? {
         let cache = URL(fileURLWithPath: home).appendingPathComponent("Library/Caches/Google/Chrome").standardizedFileURL.path
         let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
@@ -52,7 +63,7 @@ public enum CleanupGuidance {
         let aliases = roots.map { "/System/Volumes/Data" + $0 }
         let tool = url.lastPathComponent.lowercased()
         return (roots + aliases).contains(parent)
-            && ["npm", "pnpm", "yarn", "pip", "uv", "go-build", "cocoapods", "composer"].contains(tool)
+            && ["npm", "pnpm", "yarn", "pip", "uv", "homebrew", "go-build", "cocoapods", "composer", "ccache", "sccache"].contains(tool)
     }
 
     /// Installed runtimes are not project dependencies or disposable build outputs.
@@ -131,6 +142,7 @@ public enum CleanupGuidance {
         }
         let candidates = Set(possible.filter {
             scan.nodes[$0].parent != nil && scan.nodes[$0].isDirectory
+                && requiredNativeCleaner(path: scan.url(for: $0).path, home: home) == nil
                 && isRegenerableFolder(path: scan.url(for: $0).path, home: home)
         })
         return candidates.filter { id in

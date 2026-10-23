@@ -34,12 +34,51 @@ sizes and timing are not a whole-disk benchmark.
   and reviewed removal of eligible apps.
 - AI Sessions for standard Claude and Codex transcript locations, independent
   of a disk scan. Older conversations can be exported locally before cleanup.
-- Saved snapshots in History and signed updates through Sparkle.
+- Git worktrees grouped by repository, with current status, lock/upstream/commit
+  checks and explicitly reviewed non-force Git removal. Git removal is permanent,
+  includes ignored files and keeps branch refs; unknown safety evidence blocks it.
+- Local scan history with per-file diffs, time-range choices and reopening saved
+  maps/developer artifacts. Completed scans save by default; Settings can turn
+  this off. Oversized metadata falls back to a saved summary with an explanation.
+  History stops at 512 scans or 2 GB until older metadata is reviewed
+  and moved to Trash. Optional per-folder retention keeps the latest 7, 14 or
+  30 scans after confirmation and moves older metadata to Trash. File contents are never stored.
+- Manager-native `yarn cache clean`, `uv cache clean`, `npm cache clean --force`,
+  `brew cleanup -s` and `pip3 cache purge`, with cache discovery and permanent
+  cleanup review. Homebrew can also remove old versions, unused dependencies,
+  logs and temporary files. uv caches use its own locking-aware cleaner.
+- Easy Move with a reviewed destination, symlink, verified copy, local recovery
+  journal and restore. Ordinary files/folders are supported; protected runtimes,
+  symlink-containing trees and unavailable cloud files are refused.
+- Duplicate content checks with selectable size-group coverage, bounded parallel
+  hashing, verified hash reuse, newest/oldest retention and reviewed batch moves.
+- Fresh joint-removal measurement accounts for external hard links and full APFS
+  clone references, and reports uncertain allocation separately.
+- All accessible processes with interval CPU/RSS, app/parent grouping, per-process
+  trends, one-core/system CPU scales, memory treemap, CPU heatmap,
+  details and reviewed quit/force quit. A pinnable system widget shows capacity,
+  scan state, CPU, memory and aggregate disk I/O (⌘⇧W).
+- Opt-in drive polling, persistent free-space events and drop alerts; separately
+  approved recurring full scans preserve your current page and defer for reviews.
+  Polling, idle gates, scan worker presets and start-minimized behavior are configurable.
+- Opt-in local MCP access for Claude/Codex and other clients, native approval,
+  roles, revocation and audited removal requests. Agent access never approves
+  or executes cleanup. The bundled stdio helper uses a private same-user socket;
+  loopback HTTP uses native OAuth approval and PKCE. HTTP logins expire when
+  the listener stops; the local transport is not an HTTPS conformance claim.
+- Tree and global Size treemap layouts, stable extension colors, color-blind
+  palette, dark/light/system appearance and decimal/binary units.
+- Signed updates through Sparkle.
 - A menu bar status item: closing the window keeps StorageDaddy available,
   scan status and cancel stay reachable, and opt-in **Launch at Login** and
   **Notify When Scan Finishes** cover scans that finish with no window open.
   Quitting during a scan, reviewed cleanup, snapshot save or conversation
   export asks before interrupting it.
+
+These additions follow the macOS feature set of [DiskHound](https://github.com/tzarebczan/diskhound).
+Its NTFS/MFT/USN scanner and per-process GPU counters are Windows features.
+Per-process disk I/O is unavailable in its macOS implementation; StorageDaddy
+shows measured aggregate driver I/O and explicit unavailable states instead.
 
 ## Install
 

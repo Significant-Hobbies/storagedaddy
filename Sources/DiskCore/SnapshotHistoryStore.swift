@@ -10,6 +10,9 @@ public struct SavedScanSnapshot: Codable, Sendable, Identifiable {
     public let id: UUID
     public let savedAt: Date
     public let scan: ScanResult
+    public var fileIndexVersion: Int? = nil
+    public var fullTreeVersion: Int? = nil
+    public var archivalWarning: String? = nil
 
     public init(id: UUID, savedAt: Date, scan: ScanResult) {
         self.id = id
@@ -34,12 +37,48 @@ public enum SnapshotHistoryStore {
     private static let maximumEntries = 512
     private static let maximumFileBytes: Int64 = 8 * 1024 * 1024
 
-    public static func save(scan: ScanResult, directory: URL, savedAt: Date = Date()) throws -> SavedScanSnapshot {
+    public static func save(scan: ScanResult, directory: URL, savedAt: Date = Date(), includeFileIndex: Bool = false) throws -> SavedScanSnapshot {
         try prepare(directory: directory)
-        let saved = SavedScanSnapshot(id: UUID(), savedAt: savedAt, scan: SnapshotArchive.compact(scan))
+        var saved = SavedScanSnapshot(id: UUID(), savedAt: savedAt, scan: SnapshotArchive.compact(scan))
         try SnapshotArchive.validate(saved.scan)
-        let data = try JSONEncoder().encode(saved)
+        var data = try JSONEncoder().encode(saved)
         guard data.count <= maximumFileBytes else { throw error("Compact snapshot exceeds the history file limit.") }
+        var snapshotPublished = false
+        defer {
+            if !snapshotPublished {
+                try? FileManager.default.removeItem(at: ScanFileIndex.url(id: saved.id, directory: directory))
+                try? FileManager.default.removeItem(at: ScanTreeArchive.url(id: saved.id, directory: directory))
+            }
+        }
+        if includeFileIndex {
+            let entries = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            guard entries.filter({ $0.pathExtension == "json" }).count < maximumEntries else {
+                throw error("History reached its 512-scan limit. Move older records to Trash from History before saving more scans.")
+            }
+            var used: Int64 = 0
+            for entry in entries where ["index", "tree", "json"].contains(entry.pathExtension) {
+                var info = stat()
+                if lstat(entry.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG { used = min(2 * 1024 * 1024 * 1024, used + min(2 * 1024 * 1024 * 1024, max(0, Int64(info.st_size)))) }
+            }
+            let budget: Int64 = 2 * 1024 * 1024 * 1024 - used - Int64(data.count) - 4096
+            guard budget > 0 else { throw error("History reached its 2 GB storage limit. Move older records to Trash from History before saving more scans.") }
+            do {
+                try Task.checkCancellation()
+                try ScanFileIndex.write(scan: scan, id: saved.id, directory: directory, byteBudget: budget)
+                saved.fileIndexVersion = 1
+                let indexSize = try ScanFileIndex.url(id: saved.id, directory: directory).resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                try ScanTreeArchive.write(scan: scan, id: saved.id, directory: directory, byteBudget: budget - Int64(indexSize))
+                saved.fullTreeVersion = 1
+            } catch {
+                try Task.checkCancellation()
+                if error is CancellationError { throw error }
+                let retained = saved.fileIndexVersion == 1 ? "Summary and file comparisons saved; reopening the full map is unavailable." : "Summary saved; file comparisons and reopening the full map are unavailable."
+                saved.archivalWarning = retained + " " + String(error.localizedDescription.prefix(512))
+            }
+            data = try JSONEncoder().encode(saved)
+            guard data.count <= maximumFileBytes else { throw error("Compact snapshot exceeds the history file limit.") }
+        }
+        try Task.checkCancellation()
 
         let timestamp = Int64(savedAt.timeIntervalSince1970 * 1_000_000)
         let filename = String(format: "%020lld-%@.json", timestamp, saved.id.uuidString)
@@ -50,6 +89,7 @@ public enum SnapshotHistoryStore {
         guard link(temporary.path, destination.path) == 0 else {
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
+        snapshotPublished = true
         return saved
     }
 
@@ -79,13 +119,41 @@ public enum SnapshotHistoryStore {
                     throw error("Snapshot identity does not match its filename.")
                 }
                 try SnapshotArchive.validate(value.scan)
-                snapshots.append(SavedScanSnapshot(id: value.id, savedAt: value.savedAt, scan: SnapshotArchive.compact(value.scan)))
+                var saved = SavedScanSnapshot(id: value.id, savedAt: value.savedAt, scan: SnapshotArchive.compact(value.scan))
+                saved.fileIndexVersion = value.fileIndexVersion
+                saved.fullTreeVersion = value.fullTreeVersion
+                saved.archivalWarning = value.archivalWarning
+                snapshots.append(saved)
             } catch {
                 unreadable += 1
             }
         }
         snapshots.sort { $0.savedAt == $1.savedAt ? $0.id.uuidString < $1.id.uuidString : $0.savedAt > $1.savedAt }
         return SnapshotHistoryListing(snapshots: snapshots, unreadableCount: unreadable, limitReached: limitReached)
+    }
+
+    /// Retention affects saved metadata only. The app obtains native consent
+    /// before enabling this policy; every removal keeps the system Trash path.
+    public static func excessSnapshots(_ snapshots: [SavedScanSnapshot], retainingPerRoot count: Int) -> [SavedScanSnapshot] {
+        guard (7...30).contains(count) else { return [] }
+        return Dictionary(grouping: snapshots, by: { $0.scan.rootPath }).values.flatMap { group in
+            group.sorted { $0.savedAt == $1.savedAt ? $0.id.uuidString < $1.id.uuidString : $0.savedAt > $1.savedAt }.dropFirst(count)
+        }.sorted { $0.savedAt < $1.savedAt }
+    }
+
+    public static func trash(id: UUID, directory: URL, moveToTrash: (URL) throws -> Void = { url in
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    }) throws {
+        try validateDirectory(directory)
+        let entries = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        guard let record = entries.first(where: { filenameIdentity($0)?.id == id }) else { throw error("The saved record is unavailable.") }
+        // Retain the listing on partial failure so its remaining sidecars can
+        // still be retried from History.
+        for sidecar in [ScanFileIndex.url(id: id, directory: directory), ScanTreeArchive.url(id: id, directory: directory)] {
+            var info = stat()
+            if lstat(sidecar.path, &info) == 0 { try moveToTrash(sidecar) }
+        }
+        try moveToTrash(record)
     }
 
     private static func prepare(directory: URL) throws {

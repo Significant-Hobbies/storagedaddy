@@ -44,10 +44,21 @@ public enum DiskAnalysisError: Error, LocalizedError, CustomStringConvertible, S
     public var description: String { errorDescription ?? "Disk analysis failed" }
 }
 
+public struct DuplicateSearchOptions: Sendable {
+    public var coveragePercent: Int
+    public var hashConcurrency: Int
+    public var useHashCache: Bool
+    public init(coveragePercent: Int = 100, hashConcurrency: Int = 4, useHashCache: Bool = true) {
+        self.coveragePercent = min(100, max(1, coveragePercent))
+        self.hashConcurrency = min(8, max(1, hashConcurrency))
+        self.useHashCache = useHashCache
+    }
+}
+
 public enum DuplicateFinder {
     private static let chunkSize = 1024 * 1024
 
-    public static func find(in scan: ScanResult) async throws -> [DuplicateGroup] {
+    public static func find(in scan: ScanResult, options: DuplicateSearchOptions = .init(), log: @escaping @Sendable (String) -> Void = { _ in }) async throws -> [DuplicateGroup] {
         try Task.checkCancellation()
 
         // The scan already records logical size. Avoid even lstat/resource-value work
@@ -61,7 +72,14 @@ public enum DuplicateFinder {
         var results: [DuplicateGroup] = []
         // Keep node IDs for the disk, and materialize paths/candidates for one
         // matching-size group at a time instead of retaining every candidate.
-        for size in nodesBySize.keys.sorted() where (nodesBySize[size]?.count ?? 0) > 1 {
+        let rankedSizes = nodesBySize.keys.filter { (nodesBySize[$0]?.count ?? 0) > 1 }.sorted {
+            let left = Double($0) * Double((nodesBySize[$0]?.count ?? 1) - 1)
+            let right = Double($1) * Double((nodesBySize[$1]?.count ?? 1) - 1)
+            return left == right ? $0 > $1 : left > right
+        }
+        let bucketCount = Int(ceil(Double(rankedSizes.count) * Double(options.coveragePercent) / 100))
+        log("Checking \(bucketCount) of \(rankedSizes.count) eligible size groups (\(options.coveragePercent)% coverage)")
+        for size in rankedSizes.prefix(bucketCount) {
             try Task.checkCancellation()
             var sameSize: [Candidate] = []
             var seenIdentities = Set<FileIdentity>()
@@ -87,16 +105,33 @@ public enum DuplicateFinder {
             }
             guard sameSize.count > 1 else { continue }
 
-            var byDigest: [Data: [Candidate]] = [:]
+            log("Checking \(sameSize.count) candidates of \(size) bytes")
+            // Prefix depth only filters candidates; all matches still receive full verification.
+            var byPrefix: [Data: [Candidate]] = [:]
             for candidate in sameSize {
                 try Task.checkCancellation()
-                let digest = try hash(candidate)
-                byDigest[digest, default: []].append(candidate)
+                let prefix = try hash(candidate, limit: 4096)
+                byPrefix[prefix, default: []].append(candidate)
+            }
+            var byDigest: [Data: [Candidate]] = [:]
+            for candidates in byPrefix.values where candidates.count > 1 {
+                // Bound simultaneous I/O and task count, including on huge groups.
+                for offset in stride(from: 0, to: candidates.count, by: options.hashConcurrency) {
+                    let batch = Array(candidates.dropFirst(offset).prefix(options.hashConcurrency))
+                    let hashed = try await withThrowingTaskGroup(of: (Candidate, Data).self) { group in
+                        for candidate in batch { group.addTask { (candidate, try await fullHash(candidate, useCache: options.useHashCache)) } }
+                        var values: [(Candidate, Data)] = []
+                        for try await value in group { values.append(value) }
+                        return values
+                    }
+                    for (candidate, digest) in hashed { byDigest[digest, default: []].append(candidate) }
+                }
             }
 
             for digest in byDigest.keys.sorted(by: { $0.base64EncodedString() < $1.base64EncodedString() }) {
                 try Task.checkCancellation()
-                guard let hashed = byDigest[digest], hashed.count > 1 else { continue }
+                guard let matches = byDigest[digest], matches.count > 1 else { continue }
+                let hashed = matches.sorted { $0.node.id < $1.node.id }
 
                 // SHA-256 is a prefilter. Establish equality by comparing bytes as well.
                 var exactGroups: [[Candidate]] = []
@@ -133,7 +168,7 @@ public enum DuplicateFinder {
         }
     }
 
-    private struct Candidate {
+    private struct Candidate: Sendable {
         let node: DiskNode
         let url: URL
         let state: FileState
@@ -144,7 +179,9 @@ public enum DuplicateFinder {
         let inode: UInt64
     }
 
-    private struct FileState: Equatable {
+    private struct FileState: Hashable, Sendable {
+        let changedSeconds: Int64
+        let changedNanoseconds: Int64
         let size: Int64
         let modified: Date
         let device: UInt64
@@ -180,21 +217,46 @@ public enum DuplicateFinder {
         return true
     }
 
-    private static func hash(_ candidate: Candidate) throws -> Data {
+    private struct CacheKey: Hashable, Sendable { let path: String; let state: FileState }
+    private actor DigestCache {
+        var values: [CacheKey: Data] = [:]
+        func get(_ key: CacheKey) -> Data? { values[key] }
+        func put(_ key: CacheKey, _ digest: Data) {
+            if values.count >= 8192 { values.removeAll(keepingCapacity: true) }
+            values[key] = digest
+        }
+    }
+    private static let digestCache = DigestCache()
+    private static func fullHash(_ candidate: Candidate, useCache: Bool) async throws -> Data {
+        let key = CacheKey(path: candidate.url.path, state: candidate.state)
+        if useCache, let digest = await digestCache.get(key) {
+            let handle = try open(candidate); defer { try? handle.close() }
+            try verifyUnchanged(candidate, descriptor: handle.fileDescriptor)
+            return digest
+        }
+        let digest = try hash(candidate)
+        if useCache { await digestCache.put(key, digest) }
+        return digest
+    }
+
+    private static func hash(_ candidate: Candidate, limit: Int? = nil) throws -> Data {
         let handle = try open(candidate)
         defer { try? handle.close() }
 
         var hasher = SHA256()
+        var remaining = limit ?? Int.max
         while true {
+            if remaining == 0 { break }
             try Task.checkCancellation()
             let chunk: Data
             do {
-                chunk = try handle.read(upToCount: chunkSize) ?? Data()
+                chunk = try handle.read(upToCount: min(chunkSize, remaining)) ?? Data()
             } catch {
                 throw DiskAnalysisError.readFailed(path: candidate.url.path, reason: error.localizedDescription)
             }
             if chunk.isEmpty { break }
             hasher.update(data: chunk)
+            remaining -= chunk.count
         }
         try verifyUnchanged(candidate, descriptor: handle.fileDescriptor)
         return Data(hasher.finalize())
@@ -302,7 +364,13 @@ public enum DuplicateFinder {
         let seconds = TimeInterval(info.st_mtim.tv_sec)
         let nanos = TimeInterval(info.st_mtim.tv_nsec) / 1_000_000_000
         #endif
+        #if canImport(Darwin)
+        let changedSeconds = Int64(info.st_ctimespec.tv_sec), changedNanoseconds = Int64(info.st_ctimespec.tv_nsec)
+        #else
+        let changedSeconds = Int64(info.st_ctim.tv_sec), changedNanoseconds = Int64(info.st_ctim.tv_nsec)
+        #endif
         return FileState(
+            changedSeconds: changedSeconds, changedNanoseconds: changedNanoseconds,
             size: Int64(info.st_size),
             modified: Date(timeIntervalSince1970: seconds + nanos),
             device: UInt64(info.st_dev),
