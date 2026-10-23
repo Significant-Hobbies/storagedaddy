@@ -248,6 +248,10 @@
               "a": "No. You can select recognized caches for review, and moving anything to Trash requires a separate confirmation. Trash is still yours to empty."
             },
             {
+              "q": "How should I review developer caches and AI session history?",
+              "a": "Example: a project’s node_modules and its Claude or Codex history are both large. Build 119’s published guidance labels dependencies Usually regenerable: check the project manifest, available versions and local edits before cleanup. It labels Claude and Codex history Not regenerable · archive first: reinstalling a tool cannot recover conversations. A build-folder name alone leaves regeneration unconfirmed. Inspect the source-backed decision example. This is a review example, not a reclaimed-space benchmark or a promise that an export can resume a session. Check the current release metadata."
+            },
+            {
               "q": "What does an AI archive include?",
               "a": "Recognized Codex and Claude sessions can be exported as a compact, date-filtered reading and analysis archive. The ZIP and content hash are validated before you review originals. It is intentionally lossy: tool payloads, attachments, and reasoning may be omitted, and the result cannot resume the original session. Originals stay in place until a separate cleanup confirmation."
             },

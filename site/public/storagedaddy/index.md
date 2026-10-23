@@ -7,7 +7,9 @@ Download: https://storage.daddyrad.com/download
 Source and feedback: https://github.com/sarthakagrawal927/storagedaddy
 
 ## Availability and pricing
-Version 0.1.2 beta supports Apple silicon Macs with macOS 14 or later. Intel Macs are not supported. The DMG is signed and notarized. Everyone who downloads during early access gets all future versions free forever. There is no trial expiry. There is no account, checkout or subscription today. Published source remains MIT-licensed; third-party libraries and provider artwork retain their own terms.
+The public beta supports Apple silicon Macs with macOS 14 or later. Intel Macs are not supported. The DMG is signed and notarized. Everyone who downloads during early access gets all future versions free forever. There is no trial expiry. There is no account, checkout or subscription today. Published source remains MIT-licensed; third-party libraries and provider artwork retain their own terms.
+
+[Current version, build, checksum and published source](/release.json) come from the qualified download manifest.
 
 ## What it does
 - Explore disk usage with live scan results, folder navigation, multiple graphs and an inspector.
@@ -35,3 +37,7 @@ Scanning, previews and archive validation run locally. The app makes no file upl
 
 ## Feedback
 Tell us what helped, what got in the way, and which developer storage sources are missing: https://github.com/sarthakagrawal927/storagedaddy/issues/new
+
+## Developer caches and AI history: a worked review
+
+Example: a project’s node_modules and its Claude or Codex history are both large. Build 119’s published guidance labels dependencies Usually regenerable: check the project manifest, available versions and local edits before cleanup. It labels Claude and Codex history Not regenerable · archive first: reinstalling a tool cannot recover conversations. A build-folder name alone leaves regeneration unconfirmed. [Inspect the source-backed decision example](/developer-storage-proof.json). This is a review example, not a reclaimed-space benchmark or a promise that an export can resume a session. [Check the current release metadata](/release.json).

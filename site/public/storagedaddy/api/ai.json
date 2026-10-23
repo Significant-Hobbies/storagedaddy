@@ -19,5 +19,7 @@
   "auth": {
     "public": true,
     "notes": "No account required to download. The macOS app runs locally."
-  }
+  },
+  "releaseMetadata": "https://storage.daddyrad.com/release.json",
+  "reviewExample": "https://storage.daddyrad.com/developer-storage-proof.json"
 }

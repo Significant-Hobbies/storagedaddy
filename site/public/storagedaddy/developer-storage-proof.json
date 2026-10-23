@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-backed decision example",
+  "checkedAt": "2026-10-23",
+  "basis": {
+    "version": "0.1.9-beta",
+    "build": 119,
+    "sourceSha": "ce5274ddabee4e8221a8d56173a45f517a1a53f1",
+    "guidanceUrl": "https://github.com/Significant-Hobbies/storagedaddy/blob/ce5274ddabee4e8221a8d56173a45f517a1a53f1/Sources/DiskCore/CleanupGuidance.swift",
+    "guidanceSha256": "9edd73780fbd1fc891a03f82dc63bcc7acba9248207d86b022c3754b2646c11f",
+    "archiveNoticeUrl": "https://github.com/Significant-Hobbies/storagedaddy/blob/ce5274ddabee4e8221a8d56173a45f517a1a53f1/Sources/StorageDaddy/ConversationArchiveView.swift",
+    "archiveNoticeSha256": "36c0656dc0be2d23bfd2dc0c2d6b8d1aa12e276ce8dd2dace52bfd82fb925f06"
+  },
+  "cases": [
+    {
+      "item": "Project dependency tree (node_modules)",
+      "label": "Usually regenerable",
+      "decision": "Verify the project manifest, dependency availability and local changes before choosing cleanup.",
+      "sourceFunction": "CleanupGuidance.label / explanation"
+    },
+    {
+      "item": "Claude or Codex session history",
+      "label": "Not regenerable · archive first",
+      "decision": "Preserve history before cleanup; reinstalling the tool does not recover conversations. Reading exports are lossy and cannot resume a session.",
+      "sourceFunction": "CleanupGuidance.label / explanation; ConversationArchiveView cleanup acknowledgement"
+    },
+    {
+      "item": "A build folder identified only by its name",
+      "label": "Regeneration unconfirmed",
+      "decision": "Inspect the project and original build inputs; a folder name does not establish recoverability.",
+      "sourceFunction": "CleanupGuidance.label / explanation"
+    }
+  ],
+  "currentReleaseMetadata": "https://storage.daddyrad.com/release.json",
+  "scope": [
+    "Labels and review decisions verified against the exact published source above",
+    "No owner files scanned or removed, no reclaimed-byte outcome or comparative cleanup benchmark",
+    "This example does not establish an installed scan-to-cleanup outcome or AI recommendation share"
+  ]
+}
