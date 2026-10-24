@@ -6,8 +6,26 @@ struct DiskMapView: View {
     var compact = false
     var chartHeight: CGFloat = 320
     @EnvironmentObject var m: ExplorerModel
+    @AppStorage("treemapLayout") private var treemapLayout = "tree"
+    @State private var flatFiles: [DiskNode] = []
+    @State private var flatTotal: Int64 = 0
+    @State private var flatCount = 0
+    @State private var flatLoading = false
+    @State private var flatGeneration = ""
+    private var flatIdentity: String { "\(m.filenameSearchIdentity):\(m.focus):\(m.allocated):\(m.mapMeasure.rawValue):\(treemapLayout)" }
+    private var currentFlatFiles: [DiskNode] { flatGeneration == flatIdentity ? flatFiles : [] }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if m.mode == .treemap {
+                HStack {
+                    Picker("Layout", selection: $treemapLayout) {
+                        Text("Tree · folder groups").tag("tree")
+                        Text("Size · all files").tag("size")
+                    }.pickerStyle(.segmented).frame(maxWidth: 360)
+                    if flatLoading { ProgressView().controlSize(.small) }
+                    Spacer()
+                }
+            }
             if m.mode == .top { rankedList }
             else if m.mode == .age { ageMap }
             else if m.mode == .types { typeStats }
@@ -24,7 +42,9 @@ struct DiskMapView: View {
                             let colorNode = isChild
                                 ? shape.node.parent.flatMap { m.scan?.nodes[$0] } ?? shape.node
                                 : shape.node
-                            let tint = isStaged ? Tints.coral : Tints.forMapNode(colorNode, kind: m.storageKind(colorNode))
+                            let tint = isStaged ? Tints.coral : (!shape.node.isDirectory && m.mode == .treemap
+                                ? FileExtensionPalette.color(for: shape.node.name)
+                                : Tints.forMapNode(colorNode, kind: m.storageKind(colorNode)))
                             let opacity = matches ? (m.mode == .treemap && !isChild ? 0.72 : 0.9) : 0.18
                             ctx.fill(shape.path, with: .color(MapTileFill.color(tint, intensity: opacity)))
                             if isStaged {
@@ -111,13 +131,42 @@ struct DiskMapView: View {
                 itemList(m.visible).frame(height: compact ? 200 : nil).frame(maxHeight: 200)
             }
         }
+        .task(id: flatIdentity) {
+            guard treemapLayout == "size", let scan = m.scan, scan.nodes.indices.contains(m.focus) else { return }
+            flatLoading = true
+            let generation = flatIdentity
+            let focus = m.focus, allocated = m.allocated, files = m.mapMeasure == .files
+            let worker = Task.detached(priority: .utility) {
+                var ranking = NodeRanking(limit: 240, allocated: allocated)
+                var stack = scan.nodes[focus].children, total: Int64 = 0, count = 0
+                while let id = stack.popLast() {
+                    try Task.checkCancellation()
+                    let node = scan.nodes[id]
+                    if node.isDirectory && !node.isSymlink { stack.append(contentsOf: node.children) }
+                    else {
+                        let bytes = files ? 1 : max(0, allocated ? node.allocatedBytes : node.logicalBytes)
+                        let sum = total.addingReportingOverflow(bytes)
+                        total = sum.overflow ? .max : sum.partialValue
+                        count += 1; ranking.insert(node)
+                    }
+                }
+                return (ranking.sorted, total, count)
+            }
+            do {
+                let result = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+                try Task.checkCancellation()
+                flatFiles = result.0; flatTotal = result.1; flatCount = result.2
+                flatGeneration = generation
+            } catch {}
+            flatLoading = false
+        }
     }
     private var mapLegend: some View {
         VStack(alignment: .leading, spacing: 6) {
             legendKinds
             Text("Diagonal lines: review candidate · Coral and dashed outline: staged for cleanup · M toggles Cleanup")
                 .font(.caption).foregroundStyle(Tints.secondaryText)
-            Text("Top-level folders use category or location colors. Nested tiles use a lighter shade of their parent.")
+            Text("Folders use category or location colors. Files use stable extension colors; hover to inspect the exact type and path.")
                 .font(.caption).foregroundStyle(Tints.secondaryText)
             Button(stagingActionLabel) { if let id = m.selected { m.toggleStage(id) } }
                 .keyboardShortcut("m", modifiers: [])
@@ -147,7 +196,7 @@ struct DiskMapView: View {
         case .flame: "Width shows size; each row is a deeper folder level. Up to four levels."
         case .bubbles: "Circle area shows size among the 36 largest items. Select an item below to inspect or open."
         case .mindMap: "Branch width shows relative size. The 18 largest items branch from the current folder."
-        case .treemap: "Area shows each item's share of this folder. Larger folders show one level of contents in lighter tiles of the same color; their area shows each child's share inside that folder. Select to inspect or double-click to open. Up to 120 top-level items drawn."
+        case .treemap: treemapLayout == "size" ? "All files below this folder, globally ordered by size. Up to 240 files drawn; the remaining area is labelled. Areas use exact weights." : "Folder groups with nested contents. Select to inspect or double-click to open. Up to 120 top-level items and eight children per visible folder; omitted area is labelled."
         default: "Area shows size in this folder. Select to inspect; double-click a folder tile or list item to explore it."
         }
     }
@@ -272,14 +321,14 @@ struct DiskMapView: View {
         }
         switch m.mode {
         case .treemap:
-            let children = scan.nodes[m.focus].children.map { scan.nodes[$0] }
+            let children = treemapLayout == "size" ? currentFlatFiles : scan.nodes[m.focus].children.map { scan.nodes[$0] }
             func sumBytes(_ nodes: [DiskNode]) -> Int64 {
                 nodes.reduce(Int64.zero) { sum, node in
                     let (value, overflow) = sum.addingReportingOverflow(max(0, m.mapWeight(node)))
                     return overflow ? Int64.max : value
                 }
             }
-            let folderBytes = sumBytes(children)
+            let folderBytes = treemapLayout == "size" ? (flatGeneration == flatIdentity ? flatTotal : 0) : sumBytes(children)
             totalBytes = Double(folderBytes)
             func partition(_ entries: ArraySlice<DiskNode>, _ r: CGRect, depth: Int = 0, parentBytes: Double? = nil) {
                 guard !entries.isEmpty, r.width > 1, r.height > 1 else { return }
@@ -287,14 +336,14 @@ struct DiskMapView: View {
                     let inset = r.insetBy(dx: 1, dy: 1)
                     let headerHeight = min(68, max(42, inset.height * 0.25))
                     tiles.append(DiskMapTile(node: n, path: Path(roundedRect: inset, cornerRadius: depth == 0 ? 9 : 5), labelRect: depth == 0 ? CGRect(x: inset.minX, y: inset.minY, width: inset.width, height: min(inset.height, headerHeight)) : inset, depth: depth, parentBytes: parentBytes))
-                    if depth == 0, n.isDirectory, inset.width >= 110, inset.height >= 125 {
+                    if depth < 8, n.isDirectory, inset.width >= 110, inset.height >= 125 {
                         let inside = CGRect(x: inset.minX + 5, y: inset.minY + headerHeight + 2, width: inset.width - 10, height: inset.height - headerHeight - 7)
                         let children = descendants(n).filter { weight($0) > 0 }
                         let shown = Array(children.prefix(8))
                         let shownBytes = sumBytes(shown)
                         let coverage = min(1, Double(shownBytes) / max(1, weight(n)))
                         if !shown.isEmpty, coverage > 0 {
-                            partition(shown[...], CGRect(x: inside.minX, y: inside.minY, width: inside.width * coverage, height: inside.height), depth: 1, parentBytes: weight(n))
+                            partition(shown[...], CGRect(x: inside.minX, y: inside.minY, width: inside.width * coverage, height: inside.height), depth: depth + 1, parentBytes: weight(n))
                         }
                         if children.count > shown.count, weight(n) > Double(shownBytes) {
                             remainders.append(TreemapRemainder(
@@ -324,15 +373,22 @@ struct DiskMapView: View {
                     partition(entries[split...], CGRect(x: r.minX, y: r.minY + r.height * ratio, width: r.width, height: r.height * (1 - ratio)), depth: depth, parentBytes: parentBytes)
                 }
             }
-            let positive = items.filter { weight($0) > 0 }
-            let shown = Array(positive.prefix(120))
+            let positive = (treemapLayout == "size" ? currentFlatFiles : items).filter { weight($0) > 0 }
+            let shown = Array(positive.prefix(treemapLayout == "size" ? 240 : 120))
             let shownBytes = sumBytes(shown)
             let coverage = min(1, Double(shownBytes) / max(1, totalBytes))
-            partition(shown[...], CGRect(x: 0, y: 0, width: full.width * coverage, height: full.height))
-            if children.count > shown.count, folderBytes > shownBytes {
+            let shownRect = CGRect(x: 0, y: 0, width: full.width * coverage, height: full.height)
+            if treemapLayout == "size" {
+                for (index, rect) in SquarifiedMap.layout(weights: shown.map(weight), in: shownRect).enumerated() {
+                    let inset = rect.insetBy(dx: 1, dy: 1)
+                    tiles.append(DiskMapTile(node: shown[index], path: Path(roundedRect: inset, cornerRadius: 4), labelRect: inset))
+                }
+            } else { partition(shown[...], shownRect) }
+            let count = treemapLayout == "size" ? flatCount : children.count
+            if count > shown.count, folderBytes > shownBytes {
                 remainders.append(TreemapRemainder(
                     rect: CGRect(x: full.width * coverage, y: 0, width: full.width * (1 - coverage), height: full.height).insetBy(dx: 2, dy: 2),
-                    count: children.count - shown.count,
+                    count: count - shown.count,
                     bytes: folderBytes - shownBytes,
                     title: "Not shown",
                     totalBytes: totalBytes

@@ -38,7 +38,7 @@ struct AcknowledgmentsView: View {
                 credit("Development assistance", "OpenAI Codex assisted implementation and review. The app icon and doodle illustrations were created with OpenAI image generation. Scanning and developer insights run locally without AI calls.", "https://openai.com/codex/")
                 Text("Memory Pack is bundled for conversation exports. Scanning uses Apple platform frameworks. Experimental tools are credited separately from shipped components.").font(.callout).foregroundStyle(Tints.secondaryText)
             }.padding(28).frame(maxWidth: .infinity, alignment: .leading)
-        }.background(Color.black)
+        }.background(AppColors.canvas)
     }
     private var outdoorsCredit: some View {
         VStack(alignment: .leading, spacing: 8) {

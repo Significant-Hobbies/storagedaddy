@@ -19,11 +19,11 @@ struct ExplorerView: View {
     var body: some View {
         NavigationSplitView {
             ScrollView { sidebar }
-                .background(Color.black).navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+                .background(AppColors.canvas).navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
         } detail: {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    if m.busy { HStack { ProgressView().controlSize(.small); Text(m.progress).lineLimit(1); Spacer(); Button("cancel") { m.cancel() }.accessibilityLabel("Cancel") }.padding(12).background(Color.black) }
+                    if m.busy { HStack { ProgressView().controlSize(.small); Text(m.progress).lineLimit(1); Spacer(); Button("cancel") { m.cancel() }.accessibilityLabel("Cancel") }.padding(12).background(AppColors.canvas) }
                     if !m.busy, m.exclusionResultsStale {
                         HStack {
                             Label("Exclusions changed. Rescan to update these results.", systemImage: "folder.badge.minus")
@@ -77,7 +77,7 @@ struct ExplorerView: View {
                 if inspector, !m.busy, m.scan != nil, m.workspace == .explore, m.storageSection == .explore {
                     Divider().overlay(Tints.secondaryText.opacity(0.18)); InspectorView().frame(width: 250)
                 }
-            }.background(Color.black)
+            }.background(AppColors.canvas)
         }
         .font(.custom(DaddyTheme.palette.sansFont, size: 13))
         .storageTheme(DaddyTheme.palette)
@@ -95,10 +95,12 @@ struct ExplorerView: View {
                 Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
                 Button("done") { m.showAbout = false }.accessibilityLabel("Done").buttonStyle(StorageButtonStyle(prominent: true))
-            }.padding(32).frame(width: 340).background(Color.black)
+            }.padding(32).frame(width: 340).background(AppColors.canvas)
         }
         .sheet(isPresented: Binding(get: { m.message != nil }, set: { if !$0 { m.message = nil } })) { StorageMessageSheet(message: m.message ?? "") }
         .sheet(isPresented: $m.showCleanup) { CleanupView().environmentObject(m).frame(width: 640, height: 490) }
+        .modifier(EasyMovePresentation(model: m.moves))
+        .onChange(of: m.progress) { _, progress in m.runtime.scanStatus = progress }
         .onChange(of: m.storageInspectorRequest) { _, _ in inspector = true }
         .onChange(of: m.busy) { _, busy in if busy && !StorageStartupCheck.enabled { accessIntroductionSeen = true } }
         .onAppear {
@@ -184,6 +186,9 @@ struct ExplorerView: View {
                 navigationItem(.projects)
                 navigationItem(.appData)
                 navigationHeading("TOOLS").padding(.top, 9)
+                navigationItem(.processes)
+                navigationItem(.driveMonitoring)
+                navigationItem(.agents)
                 navigationItem(.applications)
                 navigationItem(.aiSessions)
                 navigationItem(.macControls)
@@ -215,7 +220,7 @@ struct ExplorerView: View {
         .padding(.horizontal, 15)
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.black)
+        .background(AppColors.canvas)
     }
     private func navigationHeading(_ title: String) -> some View {
         Text(title.lowercased()).font(.custom(DaddyTheme.palette.sansFont, size: 10).weight(.semibold))
@@ -242,7 +247,7 @@ struct ExplorerView: View {
         }
         .buttonStyle(.plain)
         .background(destination == item ? Tints.mint.opacity(0.11) : .clear, in: RoundedRectangle(cornerRadius: 7))
-        .foregroundStyle(needsScan ? Tints.secondaryText : Color.white)
+        .foregroundStyle(needsScan ? Tints.secondaryText : AppColors.ink)
         .help(item == .snapshots ? "Browse snapshots saved from your scan results."
               : needsScan ? "Scan a disk or folder to see these results." : item.title)
         .accessibilityIdentifier("workspace-\(item.rawValue)")
@@ -258,6 +263,13 @@ struct ExplorerView: View {
     }
     @ViewBuilder private var content: some View {
         switch m.workspace {
+        case .processes:
+            GeometryReader { geometry in
+                RuntimeView(model: m.runtime)
+                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+            }
+        case .driveMonitoring: DriveMonitoringView(model: m.runtime)
+        case .agents: AgentAccessView(agents: m.agentAccess)
         case .macControls: StorageDaddyMacToolsView(session: m.macToolsSession(), accent: Tints.mint, secondaryInk: Tints.secondaryText, operationAllowed: !m.busy && !m.monitoring && m.staged.isEmpty && !m.snapshotBusy && !m.conversationArchive.busy)
             .onAppear { m.macTools?.setExcludedFolders(m.excludedFolders) }
             .onChange(of: m.excludedFolders) { _, paths in m.macTools?.setExcludedFolders(paths) }
@@ -276,7 +288,8 @@ struct ExplorerView: View {
             if let scan = m.scan {
                 DuplicateReviewView(scan: scan, groups: m.duplicateGroups, isLoading: m.duplicatesLoading,
                     error: m.duplicatesError, onFind: m.findDuplicates, onCancel: m.invalidateDuplicateReview,
-                    onStage: m.stageDuplicateCopies, hasSearched: m.duplicatesSearched)
+                    onStage: m.stageDuplicateCopies, hasSearched: m.duplicatesSearched, log: m.duplicateLog,
+                    onMove: { ids in m.moves.reviewCopies(ids: ids, scan: scan, excludedFolders: m.excludedFolders) })
                     .id("\(scan.started):\(scan.rootPath)")
             }
         case .developer: DeveloperView()
@@ -426,7 +439,7 @@ struct StorageExplorePanel: View {
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 9)
                 .frame(height: 30)
-                .background(Color.black)
+                .background(AppColors.canvas)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Tints.mint.opacity(0.45), lineWidth: 1))
                 .frame(maxWidth: 220)
             }
@@ -440,7 +453,7 @@ struct StorageExplorePanel: View {
                 } label: { Label(m.mode.rawValue, systemImage: m.mode.icon).padding(.horizontal, 10).padding(.vertical, 6) }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
-                    .background(Color.black)
+                    .background(AppColors.canvas)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Tints.mint.opacity(0.4), lineWidth: 1))
                     .accessibilityLabel("View: \(m.mode.rawValue)")
                 if ![.folders, .top, .age, .types].contains(m.mode) {
@@ -453,7 +466,7 @@ struct StorageExplorePanel: View {
                 HStack(spacing: 6) {
                     Button { explainingSizes = true } label: { Image(systemName: "info.circle") }
                         .accessibilityLabel("Explain disk usage, scan coverage and file sizes")
-                        .popover(isPresented: $explainingSizes) { ScrollView { SizeExplanationView(accounting: m.scanStorageAccounting, scan: m.scan).padding(22) }.frame(width: 420, height: 480).background(Color.black) }
+                        .popover(isPresented: $explainingSizes) { ScrollView { SizeExplanationView(accounting: m.scanStorageAccounting, scan: m.scan).padding(22) }.frame(width: 420, height: 480).background(AppColors.canvas) }
                     Button("on disk") { m.allocated = true }.accessibilityLabel("On disk")
                         .buttonStyle(StorageButtonStyle(prominent: m.allocated))
                         .accessibilityAddTraits(m.allocated ? .isSelected : [])
@@ -491,7 +504,7 @@ struct StorageExplorePanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
     private var folderList: some View {
-        List(m.visible) { n in
+        List(m.visible, selection: $m.selected) { n in
             Button { m.selected = n.id } label: {
                 HStack(spacing: 14) {
                     Image(systemName: n.isDirectory ? "folder.fill" : "doc.fill").font(.title3).foregroundStyle(Tints.forNode(n)).frame(width: 26)
@@ -501,9 +514,21 @@ struct StorageExplorePanel: View {
                     if n.isDirectory { Image(systemName: "chevron.right").font(.caption).foregroundStyle(Tints.secondaryText.opacity(0.7)) }
                 }.padding(.vertical, 8).contentShape(Rectangle())
             }.buttonStyle(.plain).simultaneousGesture(TapGesture(count: 2).onEnded { m.open(n) })
-                .listRowBackground(m.selected == n.id ? Tints.mint.opacity(0.1) : Color.black)
+                .listRowBackground(m.selected == n.id ? Tints.mint.opacity(0.1) : AppColors.canvas)
                 .contextMenu { StorageItemMenu(node: n) }
-        }.listStyle(.plain).scrollContentBackground(.hidden).background(Color.black)
+                .tag(n.id)
+        }.listStyle(.plain).scrollContentBackground(.hidden).background(AppColors.canvas)
+            .onKeyPress(.return) { openKeyboardSelection() }
+            .onKeyPress(.delete) {
+                guard let id = m.selected, !m.busy else { return .ignored }
+                m.stage(id); return .handled
+            }
+    }
+    private func openKeyboardSelection() -> KeyPress.Result {
+        guard let scan = m.scan, let id = m.selected, scan.nodes.indices.contains(id), !m.busy else { return .ignored }
+        if scan.nodes[id].isDirectory { m.open(scan.nodes[id]) }
+        else { NSWorkspace.shared.open(scan.url(for: id)) }
+        return .handled
     }
 }
 
@@ -526,8 +551,8 @@ struct StorageFreeSpaceView: View {
 
 enum Tints {
     static let electricBlue = DaddyPalette.blue
-    static let mint = DaddyPalette.mint
-    static let secondaryText = DaddyPalette.secondaryInk
+    static let mint = AppColors.mint
+    static let secondaryText = AppColors.secondary
     static let coral = DaddyPalette.coral
     static let yellow = DaddyPalette.amber
     static let cyan = DaddyPalette.cyan
@@ -662,7 +687,7 @@ struct InspectorView: View {
                 }.padding(16)
             }
             .frame(width: 700, height: 540)
-            .background(Color.black)
+            .background(AppColors.canvas)
             .buttonStyle(StorageButtonStyle())
         }
     }

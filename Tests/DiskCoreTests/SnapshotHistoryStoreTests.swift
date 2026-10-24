@@ -3,6 +3,29 @@ import XCTest
 @testable import DiskCore
 
 final class SnapshotHistoryStoreTests: XCTestCase {
+    func testRetentionGroupsByRootAndKeepsNewestRecords() {
+        let records = (0..<20).map { index in
+            SavedScanSnapshot(id: UUID(), savedAt: Date(timeIntervalSince1970: Double(index)), scan: makeScan(root: index < 10 ? "/one" : "/two", allocated: 1))
+        }
+        XCTAssertEqual(SnapshotHistoryStore.excessSnapshots(records, retainingPerRoot: 7).map(\.savedAt.timeIntervalSince1970), [0, 1, 2, 10, 11, 12])
+        XCTAssertTrue(SnapshotHistoryStore.excessSnapshots(records, retainingPerRoot: 0).isEmpty)
+    }
+
+    func testPartialTrashFailureRetainsVisibleRecordForRetry() throws {
+        let directory = try fixture()
+        let saved = try SnapshotHistoryStore.save(scan: makeScan(root: "/one", allocated: 1), directory: directory, includeFileIndex: true)
+        var attempted: [String] = []
+        XCTAssertThrowsError(try SnapshotHistoryStore.trash(id: saved.id, directory: directory) { url in
+            attempted.append(url.pathExtension)
+            if url.pathExtension == "tree" { throw CocoaError(.fileWriteNoPermission) }
+            try FileManager.default.removeItem(at: url)
+        })
+        XCTAssertEqual(attempted, ["index", "tree"])
+        XCTAssertEqual(try SnapshotHistoryStore.load(directory: directory).snapshots.count, 1)
+        try SnapshotHistoryStore.trash(id: saved.id, directory: directory) { try FileManager.default.removeItem(at: $0) }
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
     func testRoundTripPersistsCompactTopLevelTotals() throws {
         let directory = try fixture().appendingPathComponent("history")
         let scan = makeScan(root: "/first", allocated: 12_288)

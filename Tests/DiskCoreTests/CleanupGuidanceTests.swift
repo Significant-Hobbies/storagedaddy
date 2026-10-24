@@ -52,7 +52,8 @@ final class CleanupGuidanceTests: XCTestCase {
         }
         let ids = CleanupGuidance.quickCleanupIDs(in: scan, findings: findings, home: root.path)
         let names = Set(ids.map { scan.nodes[$0].name })
-        XCTAssertEqual(names, ["node_modules", "uv", "hub"])
+        XCTAssertEqual(names, ["node_modules", "hub"])
+        XCTAssertEqual(CleanupGuidance.requiredNativeCleaner(path: root.appendingPathComponent(".cache/uv/cache").path, home: root.path), "uv cache clean")
         XCTAssertEqual(ids.filter { scan.nodes[$0].name == "node_modules" }.count, 1)
     }
 

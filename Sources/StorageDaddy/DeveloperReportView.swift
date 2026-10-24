@@ -46,7 +46,7 @@ struct DeveloperReportView: View {
             selectedProjectID = m.developerReport?.projects.first?.id; expandedFindingID = nil
         }
         .padding(20)
-        .background(Color.black, in: RoundedRectangle(cornerRadius: 14))
+        .background(AppColors.canvas, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Tints.mint.opacity(0.18), lineWidth: 1))
     }
 
@@ -107,7 +107,7 @@ struct DeveloperReportView: View {
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 9)
                     .frame(width: 170, height: 29)
-                    .background(Color.black)
+                    .background(AppColors.canvas)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Tints.mint.opacity(0.4), lineWidth: 1))
             }
             let filtered = Array(report.findings.lazy.filter { toolFilter.isEmpty || $0.tool.localizedCaseInsensitiveContains(toolFilter) }.prefix(30))
@@ -150,7 +150,7 @@ struct DeveloperReportView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selectedProjectID == project.id ? Tints.mint.opacity(0.08) : Color.black, in: RoundedRectangle(cornerRadius: 10))
+            .background(selectedProjectID == project.id ? Tints.mint.opacity(0.08) : AppColors.canvas, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(selectedProjectID == project.id ? Tints.mint : Tints.mint.opacity(0.18), lineWidth: 1))
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }

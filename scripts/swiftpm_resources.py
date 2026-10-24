@@ -14,6 +14,7 @@ def build_app(root: Path) -> Path:
     command = ["swift", "build", "--build-system", "swiftbuild", "-c", "release",
                "--product", "StorageDaddy", "--only-use-versions-from-resolved-file"]
     subprocess.run(command, cwd=root, check=True)
+    subprocess.run([*command[:-3], "--product", "storagedaddy-mcp", "--only-use-versions-from-resolved-file"], cwd=root, check=True)
     products = subprocess.check_output([*command, "--show-bin-path"], cwd=root, text=True).strip()
     return Path(products) / "StorageDaddy"
 

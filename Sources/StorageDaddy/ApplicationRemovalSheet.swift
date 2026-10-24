@@ -59,8 +59,8 @@ struct ApplicationRemovalSheet: View {
             }
         }
         .padding(28).frame(width: 520)
-        .background(Color.black)
-        .foregroundStyle(Color.white)
+        .background(AppColors.canvas)
+        .foregroundStyle(AppColors.ink)
         .buttonStyle(StorageButtonStyle())
         .interactiveDismissDisabled(applications.movingApplication)
     }

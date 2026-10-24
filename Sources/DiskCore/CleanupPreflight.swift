@@ -54,6 +54,11 @@ public enum CleanupPreflight {
 
         let rootURL = URL(fileURLWithPath: scan.rootPath).standardizedFileURL
         let candidateURLs = candidates.map { (node: $0, url: scan.url(for: $0.id).standardizedFileURL) }
+        for candidate in candidateURLs {
+            if let command = CleanupGuidance.requiredNativeCleaner(path: candidate.url.path, home: home) {
+                throw DiskAnalysisError.unsafePath(path: candidate.url.path, reason: "Use \(command) in Developer Insights → Package-manager cleanup. Direct removal bypasses the tool’s cache lock.")
+            }
+        }
         for firstIndex in candidateURLs.indices {
             for secondIndex in candidateURLs.indices where secondIndex > firstIndex {
                 let firstPath = candidateURLs[firstIndex].url.path

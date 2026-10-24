@@ -113,7 +113,7 @@ struct DashboardView: View {
             }
             .scrollIndicators(.visible)
         }
-        .background(Color.black)
+        .background(AppColors.canvas)
         .buttonStyle(StorageButtonStyle())
         .task { dashboard.loadIfNeeded(); await dashboard.sampleWhileVisible() }
     }

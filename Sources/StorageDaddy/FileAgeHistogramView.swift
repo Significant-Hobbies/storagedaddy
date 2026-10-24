@@ -54,7 +54,7 @@ struct FileAgeHistogramView: View {
                     if histogram.totalFiles == 0 { Text("No files in this folder.").foregroundStyle(Tints.secondaryText) }
                 } else if !isRefreshing { Text("No calculated modification dates.").foregroundStyle(Tints.secondaryText) }
             }.padding(16)
-        }.foregroundStyle(Tints.secondaryText).background(Color.black)
+        }.foregroundStyle(Tints.secondaryText).background(AppColors.canvas)
     }
 
     private func percentile(_ title: String, _ seconds: TimeInterval) -> some View {

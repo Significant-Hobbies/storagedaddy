@@ -81,7 +81,7 @@ struct AISessionsView: View {
             }
         }
         .padding(24)
-        .background(Color.black)
+        .background(AppColors.canvas)
         .buttonStyle(StorageButtonStyle())
         .task(id: m.aiSessionsRefreshID) { await model.load() }
         .sheet(isPresented: $showCoverage) { coverageSheet }
@@ -384,7 +384,7 @@ struct AISessionsView: View {
         }
         .padding(24)
         .frame(width: 680, height: 470)
-        .background(Color.black)
+        .background(AppColors.canvas)
         .buttonStyle(StorageButtonStyle())
     }
 }

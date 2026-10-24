@@ -61,7 +61,7 @@ struct LiveScanView: View {
                 SizeExplanationView()
                 Text("Preview only · Cleanup is available after the scan completes.").font(.caption).foregroundStyle(Tints.secondaryText)
             }.padding(28).frame(maxWidth: .infinity, alignment: .leading)
-        }.background(Color.black)
+        }.background(AppColors.canvas)
         .accessibilityIdentifier("live-scan-results")
     }
 
