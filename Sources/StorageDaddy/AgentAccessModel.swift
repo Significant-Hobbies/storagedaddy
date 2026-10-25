@@ -219,9 +219,9 @@ private struct AgentPolicy: Codable {
         guard let node = scan.nodes.first(where: { $0.device == request.device && $0.inode == request.inode && scan.url(for: $0.id).path == request.path }), node.parent != nil else {
             reviews[i].pending = false; reviews[i].outcome = "Refused: scan or item identity changed; scan again"; save(); return
         }
-        if m.hasAncestor(node.id, in: m.staged) {
+        if m.hasAncestor(node.id, in: m.staged) || m.staged.contains(where: { m.hasAncestor($0, in: [node.id]) }) {
             reviews[i].pending = false
-            reviews[i].outcome = "Already covered by native Cleanup review. Existing staging is unchanged."
+            reviews[i].outcome = "Overlaps native Cleanup review. Existing staging is unchanged."
             save(); return
         }
         // Native action only. The existing preflight and Cleanup confirmation

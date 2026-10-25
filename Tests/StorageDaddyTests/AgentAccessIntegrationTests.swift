@@ -132,6 +132,28 @@ struct AgentAccessIntegrationTests {
         #expect(f.explorer.staged.contains(f.nodeID))
     }
 
+    @Test func agentParentReviewCannotReplaceAnOwnerStagedChild() async throws {
+        let f = try await fixture()
+        defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
+        let parent = f.root.appendingPathComponent("parent")
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: f.root.appendingPathComponent("sample.bin"), to: parent.appendingPathComponent("sample.bin"))
+        let scan = try await DiskScanner.scan(root: f.root)
+        f.explorer.scan = scan
+        let childID = try #require(scan.nodes.first { $0.name == "sample.bin" }?.id)
+        let parentID = try #require(scan.nodes.first { $0.name == "parent" }?.id)
+        f.explorer.stage(childID)
+        try await waitForReview(f)
+        #expect(f.explorer.staged.contains(childID))
+        _ = await call("move_to_trash", arguments: .object(["nodeIDs": .array([.integer(parentID)]), "reason": .string("Parent overlap fixture")]), fixture: f)
+        f.agents.review(try #require(f.agents.reviews.first?.id))
+        try await waitForReview(f)
+        f.agents.revoke(try #require(f.agents.sessions.first?.id))
+        #expect(f.agents.validateStagedPermissions())
+        #expect(f.explorer.staged == [childID])
+        #expect(FileManager.default.fileExists(atPath: parent.appendingPathComponent("sample.bin").path))
+    }
+
     @Test func rescanReusedNodeIDDoesNotInheritAgentAttribution() async throws {
         let f = try await fixture()
         defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
