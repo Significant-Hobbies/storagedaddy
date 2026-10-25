@@ -44,9 +44,15 @@ sizes and timing are not a whole-disk benchmark.
   and moved to Trash. Optional per-folder retention keeps the latest 7, 14 or
   30 scans after confirmation and moves older metadata to Trash. File contents are never stored.
 - Manager-native `yarn cache clean`, `uv cache clean`, `npm cache clean --force`,
-  `brew cleanup -s` and `pip3 cache purge`, with cache discovery and permanent
+  `brew cleanup -s`, `pip3 cache purge` and `pnpm store prune`, with cache/store discovery and permanent
   cleanup review. Homebrew can also remove old versions, unused dependencies,
   logs and temporary files. uv caches use its own locking-aware cleaner.
+- Individual npx cache-entry review checks open files, process paths and declared
+  CLI names before cleanup. Unknown package metadata blocks removal.
+- Reviewed Cursor snapshots, Claude VM bundles, iOS DeviceSupport, GorTex data
+  and sellTraces traces. These stay out of Easy Cleanup.
+  GorTex/sellTraces configuration and credentials remain protected; open files
+  and running owners block cleanup.
 - Easy Move with a reviewed destination, symlink, verified copy, local recovery
   journal and restore. Ordinary files/folders are supported; protected runtimes,
   symlink-containing trees and unavailable cloud files are refused.

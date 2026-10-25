@@ -4,17 +4,10 @@ import Foundation
 /// Positive evidence of current use, including working directories and mapped
 /// files. Absence of an open handle is not proof that a folder is never needed.
 enum CleanupActiveUse {
-    static func validate(urls: [URL]) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        process.arguments = ["-n", "-P", "-F0pcn", "-u", String(getuid())]
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0, let text = String(data: data, encoding: .utf8) else {
+    static func validate(urls: [URL], home: String = FileManager.default.homeDirectoryForCurrentUser.path) throws {
+        let text = try probe(executable: "/usr/sbin/lsof",
+            arguments: ["-n", "-P", "-F0pcn", "-u", String(getuid())], maximumOutputBytes: 32 * 1024 * 1024)
+        guard !text.contains("lsof:") else {
             throw error("Current file use could not be checked. Quit active builds or installs and review this folder again.")
         }
         for url in urls {
@@ -22,6 +15,30 @@ enum CleanupActiveUse {
                 throw error("\(url.lastPathComponent) is in use by \(user). Quit that process before cleanup.")
             }
         }
+        let entries = try NpxCacheReview.affectedEntries(urls: urls, home: home)
+        if urls.contains(where: { ToolStorage.containingData(path: $0.path) != nil }) {
+            let owners = try probe(executable: "/bin/ps", arguments: ["-ww", "-U", String(getuid()), "-o", "pid=,comm="],
+                                   maximumOutputBytes: 4 * 1024 * 1024)
+            try ToolStorage.validateActiveUse(urls: urls, processOutput: owners)
+        }
+        if !entries.isEmpty {
+            // Only interpreted locally for process/path and CLI-name matches.
+            // Arguments are never logged, persisted or displayed.
+            let processes = try probe(executable: "/bin/ps", arguments: ["-ww", "-U", String(getuid()), "-o", "pid=,command="],
+                                      maximumOutputBytes: 8 * 1024 * 1024)
+            try NpxCacheReview.validate(entries: entries, processOutput: processes)
+        }
+    }
+
+    private static func probe(executable: String, arguments: [String], maximumOutputBytes: Int) throws -> String {
+        do {
+            let result = try PackageToolCommand.run(executable: URL(fileURLWithPath: executable), arguments: arguments,
+                directory: FileManager.default.temporaryDirectory, timeout: 15,
+                maximumOutputBytes: maximumOutputBytes, requireCompleteOutput: true)
+            guard result.status == 0 else { throw error("Process evidence unavailable.") }
+            return result.output
+        } catch is CancellationError { throw CancellationError() }
+        catch { throw self.error("The current-use check could not finish completely. Nothing was approved for cleanup; keep these items and try again.") }
     }
 
     static func user(of path: String, in output: String) -> String? {

@@ -23,6 +23,7 @@ public enum CleanupGuidance {
 
     public static func label(for category: DeveloperCategory?) -> String {
         switch category {
+        case .toolData: "Tool data · review first"
         case .packageCaches, .nodeModules, .installedModules: "Usually regenerable"
         case .installers: "Usually re-downloadable"
         case .claudeSessions, .codexSessions: "Not regenerable · archive first"
@@ -32,6 +33,8 @@ public enum CleanupGuidance {
 
     public static func explanation(for category: DeveloperCategory?) -> String {
         switch category {
+        case .toolData:
+            "May contain recovery history, memories or recorded traces. Quit the owning tool and review its data individually; configuration and credentials stay separate."
         case .packageCaches:
             "Usually downloadable again. Offline or unavailable versions and local changes may be lost."
         case .nodeModules, .installedModules:

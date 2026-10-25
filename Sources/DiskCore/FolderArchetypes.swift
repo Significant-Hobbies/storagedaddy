@@ -104,6 +104,9 @@ public enum FolderArchetypes {
         if ChromeSigningClones.location(path: path) != nil {
             return assessment(.appSigningCopies, "Matched Chrome's temporary signing-copy location.")
         }
+        if let profile = ToolStorage.containingData(path: path) {
+            return assessment(.appData, "Recognized " + profile.tool + ". " + profile.consequence)
+        }
         let vmOwners: Set<String> = ["huaq24hbr6.dev.orbstack", "orbstack", "com.docker.docker", "group.com.docker", "com.podman.desktop", "com.utmapp.utm", "com.parallels.desktop", "com.vmware.fusion"]
         let inAppStore = homeLower.starts(with: ["library", "group containers"]) || homeLower.starts(with: ["library", "containers"]) || homeLower.starts(with: ["library", "application support"])
         if (inAppStore && homeLower.dropFirst(2).first.map(vmOwners.contains) == true) || homeLower.first == ".orbstack" || lower.contains(where: { $0.hasSuffix(".utm") || $0.hasSuffix(".pvm") || $0.hasSuffix(".vmwarevm") }) {
