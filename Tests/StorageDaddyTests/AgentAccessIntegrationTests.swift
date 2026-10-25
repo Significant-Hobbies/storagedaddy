@@ -132,7 +132,7 @@ struct AgentAccessIntegrationTests {
         #expect(f.explorer.staged.contains(f.nodeID))
     }
 
-    @Test func agentParentReviewCannotReplaceAnOwnerStagedChild() async throws {
+    @Test(arguments: [false, true]) func overlappingAgentReviewKeepsOwnerStaging(_ ownerStagesParent: Bool) async throws {
         let f = try await fixture()
         defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
         let parent = f.root.appendingPathComponent("parent")
@@ -142,16 +142,31 @@ struct AgentAccessIntegrationTests {
         f.explorer.scan = scan
         let childID = try #require(scan.nodes.first { $0.name == "sample.bin" }?.id)
         let parentID = try #require(scan.nodes.first { $0.name == "parent" }?.id)
-        f.explorer.stage(childID)
+        let ownerID = ownerStagesParent ? parentID : childID
+        let requestedID = ownerStagesParent ? childID : parentID
+        f.explorer.stage(ownerID)
         try await waitForReview(f)
-        #expect(f.explorer.staged.contains(childID))
-        _ = await call("move_to_trash", arguments: .object(["nodeIDs": .array([.integer(parentID)]), "reason": .string("Parent overlap fixture")]), fixture: f)
+        #expect(f.explorer.staged.contains(ownerID))
+        _ = await call("move_to_trash", arguments: .object(["nodeIDs": .array([.integer(requestedID)]), "reason": .string("Parent overlap fixture")]), fixture: f)
         f.agents.review(try #require(f.agents.reviews.first?.id))
         try await waitForReview(f)
         f.agents.revoke(try #require(f.agents.sessions.first?.id))
         #expect(f.agents.validateStagedPermissions())
-        #expect(f.explorer.staged == [childID])
+        #expect(f.explorer.staged == [ownerID])
         #expect(FileManager.default.fileExists(atPath: parent.appendingPathComponent("sample.bin").path))
+    }
+
+    @Test func agentPreflightRechecksNativeStagingBeforeInsertion() async throws {
+        let f = try await fixture()
+        defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
+        _ = await call("move_to_trash", arguments: .object(["nodeIDs": .array([.integer(f.nodeID)]), "reason": .string("Async native precedence fixture")]), fixture: f)
+        f.agents.review(try #require(f.agents.reviews.first?.id))
+        // Simulate native staging publishing while the agent's preflight awaits.
+        f.explorer.staged.insert(f.nodeID)
+        try await waitForReview(f)
+        f.agents.revoke(try #require(f.agents.sessions.first?.id))
+        #expect(f.agents.validateStagedPermissions())
+        #expect(f.explorer.staged == [f.nodeID])
     }
 
     @Test func rescanReusedNodeIDDoesNotInheritAgentAttribution() async throws {
