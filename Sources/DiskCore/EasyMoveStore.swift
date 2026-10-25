@@ -212,6 +212,12 @@ public actor EasyMoveStore {
             // Link identity plus exact stored target; never remove another link.
             guard record.linkIdentity.map({ $0.sameObject(sourceState) }) ?? (record.phase == .sourceStaged),
                   try Self.linkTarget(sourceParent, plan.source.lastPathComponent) == plan.destination.path else { throw EasyMoveError.changed(plan.source.path) }
+            if record.linkIdentity == nil {
+                // Adopt this verified crash-window link before any removal. The
+                // removal boundary rechecks the exact identity and target.
+                record.linkIdentity = sourceState
+                try save(record)
+            }
         } else if sourceState != nil {
             // A cross-volume interruption may leave the unchanged original and
             // verified destination. Stage that original before restoring edits.

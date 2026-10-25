@@ -44,7 +44,7 @@ struct AgentAccessIntegrationTests {
         )
     }
 
-    private func httpToken(_ f: Fixture) async throws -> String {
+    private func httpToken(_ f: Fixture, approvedName: String = "HTTP fixture") async throws -> String {
         let base = "http://127.0.0.1:\(f.port)"
         func fetch(_ target: String, method: String = "GET", body: Data? = nil, type: String? = nil) async throws -> Data {
             var request = URLRequest(url: URL(string: base + target)!)
@@ -62,7 +62,7 @@ struct AgentAccessIntegrationTests {
         let html = String(data: try await fetch(authorize.string!), encoding: .utf8)!
         let id = html.components(separatedBy: "/authorization-result?id=")[1].components(separatedBy: "'")[0]
         let pairing = try #require(f.agents.pairings.first(where: { $0.client == "HTTP fixture" }))
-        f.agents.approve(pairing.id, role: .explorer, name: "HTTP fixture")
+        f.agents.approve(pairing.id, role: .explorer, name: approvedName)
         let ready = try await fetch("/authorization-result?id=" + id)
         let redirect = try #require(JSONDecoder().decode(AgentJSON.self, from: ready)["redirect"].string)
         let code = try #require(URLComponents(string: redirect)?.queryItems?.first(where: { $0.name == "code" })?.value)
@@ -88,11 +88,72 @@ struct AgentAccessIntegrationTests {
             if !f.explorer.busy { break }
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(!f.agents.validateStagedPermissions())
+        #expect(f.agents.validateStagedPermissions())
         #expect(f.explorer.staged.isEmpty)
         #expect(FileManager.default.fileExists(atPath: f.root.appendingPathComponent("sample.bin").path))
         #expect(f.explorer.lastTrashedURLs.isEmpty)
         #expect(f.explorer.lastPermanentlyDeletedCount == 0)
+    }
+
+    private func waitForReview(_ f: Fixture) async throws {
+        for _ in 0..<500 {
+            if !f.explorer.busy { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!f.explorer.busy)
+    }
+
+    @Test func revokedOrUnstagedRequestsDoNotOwnLaterNativeCleanup() async throws {
+        let f = try await fixture()
+        defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
+        _ = await call("move_to_trash", arguments: .object(["nodeIDs": .array([.integer(f.nodeID)]), "reason": .string("Lifecycle fixture")]), fixture: f)
+        f.agents.review(try #require(f.agents.reviews.first?.id))
+        try await waitForReview(f)
+        #expect(f.explorer.staged.contains(f.nodeID))
+        f.explorer.unstage(f.nodeID)
+        f.agents.revoke(try #require(f.agents.sessions.first?.id))
+        f.explorer.stage(f.nodeID)
+        try await waitForReview(f)
+        #expect(f.agents.validateStagedPermissions())
+        #expect(f.explorer.staged.contains(f.nodeID))
+    }
+
+    @Test func rescanReusedNodeIDDoesNotInheritAgentAttribution() async throws {
+        let f = try await fixture()
+        defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
+        _ = await call("move_to_trash", arguments: .object(["nodeIDs": .array([.integer(f.nodeID)]), "reason": .string("Rescan fixture")]), fixture: f)
+        f.agents.review(try #require(f.agents.reviews.first?.id))
+        try await waitForReview(f)
+        f.explorer.scan = try await DiskScanner.scan(root: f.root)
+        f.explorer.stage(f.nodeID)
+        try await waitForReview(f)
+        f.agents.revoke(try #require(f.agents.sessions.first?.id))
+        #expect(f.agents.validateStagedPermissions())
+        #expect(f.explorer.staged.contains(f.nodeID))
+    }
+
+    @Test func cancelScanRequiresTheExactSuccessfullyStartedScan() async throws {
+        let f = try await fixture()
+        defer { f.explorer.cancel(); f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
+        f.agents.approveCurrentRoot()
+        let started = await call("start_scan", arguments: .object(["root": .string(f.root.path)]), fixture: f)
+        #expect(started["result"]["isError"].bool == false)
+        f.explorer.cancel()
+        f.explorer.start(f.root, notifyOnCompletion: false)
+        let nativeVersion = try #require(f.explorer.activeScanVersion)
+        let refused = await call("cancel_scan", fixture: f)
+        #expect(refused["result"]["isError"].bool == true)
+        #expect(f.explorer.activeScanVersion == nativeVersion)
+        f.explorer.cancel()
+        f.explorer.snapshotBusy = true
+        let failed = await call("start_scan", arguments: .object(["root": .string(f.root.path)]), fixture: f)
+        #expect(failed.text.contains("false"))
+        f.explorer.snapshotBusy = false
+        f.explorer.start(f.root, notifyOnCompletion: false)
+        let laterVersion = try #require(f.explorer.activeScanVersion)
+        let stillRefused = await call("cancel_scan", fixture: f)
+        #expect(stillRefused["result"]["isError"].bool == true)
+        #expect(f.explorer.activeScanVersion == laterVersion)
     }
 
     @Test func roleReductionRejectsWaitingReviewAndHiddenToolAttemptIsLogged() async throws {
@@ -108,6 +169,25 @@ struct AgentAccessIntegrationTests {
         #expect(f.agents.audit.contains(where: { $0.blocked }))
         #expect(f.agents.sessions.first?.blocked == 1)
         #expect(f.explorer.staged.isEmpty)
+    }
+
+    @Test func forgettingRenamedOAuthSessionUsesClientIdentity() async throws {
+        let f = try await fixture()
+        defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
+        let firstToken = try await httpToken(f, approvedName: "Owner renamed client")
+        let secondToken = try await httpToken(f)
+        let revoked = try #require(f.agents.sessions.first { $0.tokenHash == AgentSecurity.hash(firstToken) })
+        let active = try #require(f.agents.sessions.first { $0.tokenHash == AgentSecurity.hash(secondToken) })
+        let revokedClient = try #require(revoked.oauthClientID)
+        let activeClient = try #require(active.oauthClientID)
+        #expect(revokedClient != activeClient)
+        f.agents.revoke(revoked.id)
+        f.agents.forgetRevoked()
+        let saved = try JSONDecoder().decode(AgentJSON.self, from: Data(contentsOf: f.agentDirectory.appendingPathComponent("agent-policy.json")))
+        let registrations = try #require(saved["oauthRegistrations"].array)
+        #expect(!registrations.contains { $0["clientID"].string == revokedClient })
+        #expect(registrations.contains { $0["clientID"].string == activeClient })
+        #expect(f.agents.sessions.contains { $0.id == active.id })
     }
 
     @Test func actualSocketHTTPMetadataAndPersistenceRemainLocalAndOffAfterRestart() async throws {

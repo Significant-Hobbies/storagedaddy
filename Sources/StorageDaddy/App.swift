@@ -288,6 +288,7 @@ struct FileTypeStats: Sendable {
             UserDefaults.standard.set(excludedFolders, forKey: "excludedFolders")
             macTools?.setExcludedFolders(excludedFolders)
             // Existing results remain historical; clear prior cleanup approvals.
+            agentAccess.clearStagedRequests()
             staged.removeAll()
             incompleteCleanup.removeAll()
             exclusionResultsStale = scan != nil
@@ -323,7 +324,7 @@ struct FileTypeStats: Sendable {
     @Published var showWelcome = false
     @Published var lastTrashedURLs: [URL] = []
     @Published private(set) var filenameSearchIdentity = UUID()
-    @Published var scan: ScanResult? { didSet { allocationIndex = nil; filenameSearchIdentity = UUID(); invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview(); quickCleanupFailures = [:]; quickCleanupCandidateIDs = []; lastPermanentlyDeletedCount = 0 } }
+    @Published var scan: ScanResult? { didSet { agentAccess.clearStagedRequests(); staged = []; allocationIndex = nil; filenameSearchIdentity = UUID(); invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview(); quickCleanupFailures = [:]; quickCleanupCandidateIDs = []; lastPermanentlyDeletedCount = 0 } }
     @Published var allocationIndex: StorageAllocationIndex?
     @Published var scanStorageAccounting: ScanStorageAccounting?
     @Published private(set) var promptAvoidanceFolders: [String] = []
@@ -435,7 +436,7 @@ struct FileTypeStats: Sendable {
     private var priorScanPeakRSS: UInt64?
     private var memoryTask: Task<Void, Never>?
     private var scanVersion = UUID()
-    private var activeScanVersion: UUID?
+    private(set) var activeScanVersion: UUID?
     var isScanning: Bool { activeScanVersion != nil }
     var menuStatus: String {
         if isScanning { return "Scan in progress" }
@@ -794,7 +795,7 @@ struct FileTypeStats: Sendable {
         let initialWorkspace = workspace
         let initialStorageSection = storageSection
         if !background { lastTrashedURLs = [] }
-        task?.cancel(); scanVersion = UUID(); staged = []; incompleteCleanup = [:]; busy = true; message = nil
+        task?.cancel(); scanVersion = UUID(); agentAccess.clearStagedRequests(); staged = []; incompleteCleanup = [:]; busy = true; message = nil
         scopedURL?.stopAccessingSecurityScopedResource(); scopedURL = url; _ = url.startAccessingSecurityScopedResource()
         liveProgress = nil
         liveStorageCapacity = nil
@@ -1044,8 +1045,10 @@ struct FileTypeStats: Sendable {
         }
         return nil
     }
-    func stage(_ id: Int) {
-        guard let scan, !busy, !moves.busy, macTools?.isBusy != true, !monitoring, scan.nodes.indices.contains(id) else { return }
+    func stage(_ id: Int, authorization: (() -> Bool)? = nil, didStage: (() -> Void)? = nil, didFinish: (() -> Void)? = nil) {
+        var launched = false
+        defer { if !launched { didFinish?() } }
+        guard let scan, !busy, !moves.busy, macTools?.isBusy != true, !monitoring, scan.nodes.indices.contains(id), authorization?() != false else { return }
         if let provider = sessionProvider(for: id) {
             let alert = NSAlert()
             alert.messageText = "Keep the conversation before cleaning up?"
@@ -1062,8 +1065,9 @@ struct FileTypeStats: Sendable {
         quickCleanupFailures.removeValue(forKey: id)
         busy = true
         progress = "Checking \(StorageLabels.name(scan.nodes[id]))…"
+        launched = true
         task = Task {
-            defer { busy = false }
+            defer { busy = false; didFinish?() }
             do {
                 var acknowledgement: CleanupIncompleteReview?
                 do {
@@ -1071,7 +1075,7 @@ struct FileTypeStats: Sendable {
                                                         regenerableIDs: regenerableCleanupIDs([id], in: scan))
                 } catch let CleanupPreflightError.incompleteRescan(_, review) {
                     try Task.checkCancellation()
-                    guard scanVersion == version else { return }
+                    guard scanVersion == version, authorization?() != false else { return }
                     guard review.canAcknowledge else { throw CleanupPreflightError.incompleteRescan(path: scan.url(for: id).path, review: review) }
                     guard showIncompleteReview(review, name: StorageLabels.name(scan.nodes[id]), allowsOverride: true) else {
                         progress = "Nothing added · Keep exploring"
@@ -1082,7 +1086,7 @@ struct FileTypeStats: Sendable {
                     acknowledgement = review
                 }
                 try Task.checkCancellation()
-                guard scanVersion == version else { return }
+                guard scanVersion == version, authorization?() != false else { return }
                 let path = scan.url(for: id).path
                 for other in Array(staged) where other != id {
                     let otherPath = scan.url(for: other).path
@@ -1092,6 +1096,7 @@ struct FileTypeStats: Sendable {
                     if otherPath.hasPrefix(path + "/") { unstage(other) }
                 }
                 staged.insert(id)
+                didStage?()
                 incompleteCleanup[id] = acknowledgement
                 progress = "Added \(StorageLabels.name(scan.nodes[id])) to Cleanup · Nothing moved yet"
             } catch is CancellationError {
@@ -1213,6 +1218,7 @@ struct FileTypeStats: Sendable {
     }
 
     func unstage(_ id: Int) {
+        agentAccess.unstageRequest(id)
         staged.remove(id)
         incompleteCleanup.removeValue(forKey: id)
         stagedProjectOwners.removeValue(forKey: id)

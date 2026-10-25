@@ -28,14 +28,14 @@ import CryptoKit
     private var registrations: [String: Registration] = [:]
     private var authorizations: [String: Authorization] = [:]
     private var activeTokenHashes: Set<String> = []
-    private let onPair: @MainActor @Sendable (String, String, Set<String>, String) -> Void
+    private let onPair: @MainActor @Sendable (String, String, Set<String>, String, String) -> Void
     private let status: @MainActor @Sendable (String) -> String
     private let permissions: @MainActor @Sendable (String) -> Set<String>
     private let rpc: @MainActor @Sendable (String, AgentJSON) async -> AgentJSON
     private let saveRegistration: @MainActor @Sendable (Registration) -> Void
 
     public init(port: UInt16 = 51736, registrations: [Registration] = [],
-                onPair: @escaping @MainActor @Sendable (String, String, Set<String>, String) -> Void,
+                onPair: @escaping @MainActor @Sendable (String, String, Set<String>, String, String) -> Void,
                 status: @escaping @MainActor @Sendable (String) -> String,
                 permissions: @escaping @MainActor @Sendable (String) -> Set<String>,
                 saveRegistration: @escaping @MainActor @Sendable (Registration) -> Void,
@@ -104,7 +104,7 @@ import CryptoKit
         do {
             let id = try AgentSecurity.randomToken(), token = try AgentSecurity.randomToken(), nonce = try AgentSecurity.randomToken()
             authorizations[id] = Authorization(id: id, registration: registration, redirect: redirect, state: p["state"], challenge: challenge, permissions: requested, token: token, createdAt: Date())
-            onPair(registration.clientName, AgentSecurity.hash(token), requested, redirect)
+            onPair(registration.clientName, AgentSecurity.hash(token), requested, redirect, registration.clientID)
             let html = """
             <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Continue in StorageDaddy</title></head>
             <body style="background:#090d0b;color:#e3f8ec;font:17px system-ui;max-width:38rem;margin:15vh auto;padding:24px"><h1>Continue in StorageDaddy</h1><p>Open AI Agents in StorageDaddy and review the waiting request. Only the app can approve access.</p><p id="status">Waiting for your decision…</p>

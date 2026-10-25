@@ -155,6 +155,21 @@ final class EasyMoveTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: record.sourceBackup.path))
     }
 
+    func testUnjournaledSourceLinkRecoversAfterSourceStagedCrash() async throws {
+        let (root, source, destination, store) = try fixture()
+        let plan = try await store.prepare(source: source, destinationFolder: destination)
+        var record = EasyMoveRecord(plan: plan, created: Date(), phase: .sourceStaged)
+        try FileManager.default.moveItem(at: source, to: plan.destination)
+        record.destinationIdentity = try identity(plan.destination)
+        try writeJournal(record, root: root)
+        // Crash after symlink creation but before its identity/linked phase saved.
+        try FileManager.default.createSymbolicLink(at: source, withDestinationURL: plan.destination)
+        let restored = try await store.rollback(recordID: record.id)
+        XCTAssertEqual(restored.phase, .restored)
+        XCTAssertEqual(try Data(contentsOf: source), Data("reviewed file".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: plan.destination.path))
+    }
+
     func testChangedDestinationParentBlocksExecution() async throws {
         let (root, source, destination, store) = try fixture()
         let plan = try await store.prepare(source: source, destinationFolder: destination)

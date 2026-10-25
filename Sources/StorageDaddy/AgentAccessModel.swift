@@ -15,6 +15,7 @@ struct AgentSession: Codable, Identifiable {
     var lastAction: String?
     var lastActionAt: Date?
     var blocked = 0
+    var oauthClientID: String? = nil
     var connection: String? = nil
     var permissions: Set<String> { revokedAt == nil ? role.permissions.intersection(requestedPermissions) : [] }
 }
@@ -25,6 +26,7 @@ struct AgentPairing: Identifiable {
     var tokenHash: String
     var createdAt = Date()
     var requestedPermissions: Set<String>
+    var oauthClientID: String? = nil
     var connection = "Private same-account stdio connection"
 }
 
@@ -77,7 +79,8 @@ private struct AgentPolicy: Codable {
     private var oauthRegistrations: [AgentOAuth.Registration] = []
     private let directory: URL
     private let httpPort: UInt16
-    private var scanOwner: UUID?
+    private var scanOwner: (sessionID: UUID, version: UUID)?
+    private var pendingStaging: [Int: UUID] = [:]
     private var policyHealthy = true
     private var deniedHashes: Set<String> = []
     private var stagedRequests: [Int: UUID] = [:]
@@ -112,9 +115,9 @@ private struct AgentPolicy: Codable {
                 guard let self else { return .object(["error": .string("StorageDaddy closed.")]) }
                 return await self.handle(request)
             }
-            let oauth = AgentOAuth(port: httpPort, registrations: oauthRegistrations, onPair: { [weak self] client, hash, permissions, redirect in
+            let oauth = AgentOAuth(port: httpPort, registrations: oauthRegistrations, onPair: { [weak self] client, hash, permissions, redirect, clientID in
                 guard let self, self.enabled, self.pairings.count < 20 else { return }
-                self.pairings.append(AgentPairing(client: client, tokenHash: hash, requestedPermissions: permissions, connection: "HTTP OAuth · Redirect: " + redirect))
+                self.pairings.append(AgentPairing(client: client, tokenHash: hash, requestedPermissions: permissions, oauthClientID: clientID, connection: "HTTP OAuth · Redirect: " + redirect))
             }, status: { [weak self] hash in
                 guard let self, self.enabled else { return "revoked" }
                 if self.deniedHashes.contains(hash) { return "denied" }
@@ -149,7 +152,7 @@ private struct AgentPolicy: Codable {
         guard enabled, let pairing = pairings.first(where: { $0.id == id }), Date().timeIntervalSince(pairing.createdAt) < 600,
               sessions.count < 100 else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        sessions.append(AgentSession(name: String((trimmed.isEmpty ? pairing.client : trimmed).prefix(100)), tokenHash: pairing.tokenHash, role: role, requestedPermissions: pairing.requestedPermissions, connection: pairing.connection))
+        sessions.append(AgentSession(name: String((trimmed.isEmpty ? pairing.client : trimmed).prefix(100)), tokenHash: pairing.tokenHash, role: role, requestedPermissions: pairing.requestedPermissions, oauthClientID: pairing.oauthClientID, connection: pairing.connection))
         pairings.removeAll { $0.id == id }
         appendAudit(session: pairing.client, action: "Approved \(role.title)", blocked: false)
         save()
@@ -173,9 +176,10 @@ private struct AgentPolicy: Codable {
         sessions[index].role = role; _ = validateStagedPermissions(); save()
     }
     func forgetRevoked() {
-        let names = Set(sessions.filter { $0.revokedAt != nil }.map(\.name))
+        let revokedClients = Set(sessions.filter { $0.revokedAt != nil }.compactMap(\.oauthClientID))
+        let activeClients = Set(sessions.filter { $0.revokedAt == nil }.compactMap(\.oauthClientID))
         sessions.removeAll { $0.revokedAt != nil }
-        oauthRegistrations.removeAll { names.contains($0.clientName) }
+        oauthRegistrations.removeAll { revokedClients.subtracting(activeClients).contains($0.clientID) }
         save()
     }
     func approveCurrentRoot() {
@@ -214,11 +218,31 @@ private struct AgentPolicy: Codable {
         }
         // Native action only. The existing preflight and Cleanup confirmation
         // remain authoritative. RPC has no route to trashStaged/deleteStaged.
-        m.stageReviewBatch([node.id]); m.workspace = .cleanup
-        stagedRequests[node.id] = request.id
+        pendingStaging[node.id] = request.id
+        m.stage(node.id, authorization: { [weak self] in
+            guard let self else { return false }
+            return self.pendingStaging[node.id] == request.id && self.policyHealthy &&
+                self.sessions.contains { $0.id == request.sessionID && $0.permissions.contains(permission) }
+        }, didStage: { [weak self] in
+            self?.pendingStaging.removeValue(forKey: node.id)
+            self?.stagedRequests[node.id] = request.id
+        }, didFinish: { [weak self] in
+            if self?.pendingStaging[node.id] == request.id { self?.pendingStaging.removeValue(forKey: node.id) }
+        })
+        m.workspace = .cleanup
         reviews[i].pending = false
         reviews[i].outcome = "Sent to native Cleanup preflight. Nothing removed; verify staging and choose the cleanup action there."
         save()
+    }
+
+    func unstageRequest(_ nodeID: Int) {
+        pendingStaging.removeValue(forKey: nodeID)
+        stagedRequests.removeValue(forKey: nodeID)
+    }
+
+    func clearStagedRequests() {
+        pendingStaging.removeAll()
+        stagedRequests.removeAll()
     }
 
     /// Call immediately before native Cleanup preflight and again before its
@@ -226,15 +250,20 @@ private struct AgentPolicy: Codable {
     @discardableResult func validateStagedPermissions() -> Bool {
         guard let m = explorer else { return false }
         var valid = true
+        for (nodeID, requestID) in pendingStaging {
+            guard let request = reviews.first(where: { $0.id == requestID }), policyHealthy,
+                  sessions.contains(where: { $0.id == request.sessionID && $0.permissions.contains(request.permanent ? "request_permanent" : "request_trash") }) else {
+                m.unstage(nodeID); valid = false; continue
+            }
+        }
         for (nodeID, requestID) in stagedRequests {
+            guard m.staged.contains(nodeID) else { stagedRequests.removeValue(forKey: nodeID); continue }
             guard let request = reviews.first(where: { $0.id == requestID }) else { m.unstage(nodeID); stagedRequests.removeValue(forKey: nodeID); valid = false; continue }
             let permitted = policyHealthy && sessions.contains { $0.id == request.sessionID && $0.permissions.contains(request.permanent ? "request_permanent" : "request_trash") }
             let matches = m.scan.map { scan in scan.nodes.indices.contains(nodeID) && scan.nodes[nodeID].device == request.device && scan.nodes[nodeID].inode == request.inode && scan.url(for: nodeID).path == request.path } ?? false
             if !permitted || !matches {
                 m.unstage(nodeID); valid = false
-                // A staging preflight may still be running. Keep revoked
-                // attribution until execution so it cannot reappear unowned.
-                if !matches { stagedRequests.removeValue(forKey: nodeID) }
+                stagedRequests.removeValue(forKey: nodeID)
             }
         }
         return valid
@@ -327,11 +356,13 @@ private struct AgentPolicy: Codable {
                   let raw = a["root"].string, raw.hasPrefix("/"), !raw.utf8.contains(0) else { throw AgentSecurity.failure("Finish active work and native Cleanup review first.") }
             let root = URL(fileURLWithPath: raw).resolvingSymlinksInPath().standardizedFileURL
             guard approvedRoots.contains(root.path) else { throw AgentSecurity.failure("Approve this exact scan root in StorageDaddy → AI Agents first.") }
-            scanOwner = sessionID; m.start(root, notifyOnCompletion: false)
+            scanOwner = nil
+            m.start(root, notifyOnCompletion: false)
+            if let version = m.activeScanVersion { scanOwner = (sessionID, version) }
             return .object(["started": .bool(m.isScanning), "root": .string(root.path)])
         }
         if name == "storagedaddy_cancel_scan" {
-            guard scanOwner == sessionID, m.isScanning else { throw AgentSecurity.failure("This session does not own the current scan.") }
+            guard scanOwner?.sessionID == sessionID, let version = m.activeScanVersion, scanOwner?.version == version else { throw AgentSecurity.failure("This session does not own the current scan.") }
             m.cancel(); scanOwner = nil; return .object(["cancelRequested": .bool(true)])
         }
         if name == "storagedaddy_show" {

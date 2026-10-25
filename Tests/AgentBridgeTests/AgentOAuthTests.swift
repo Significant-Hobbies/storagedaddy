@@ -12,7 +12,7 @@ import Foundation
 final class AgentOAuthTests: XCTestCase {
     @MainActor func testPKCERegistrationNativeApprovalTokenReplayAndRevocation() async throws {
         let consent = NativeConsent()
-        let oauth = AgentOAuth(onPair: { _, hash, scopes, _ in consent.hash = hash; consent.requested = scopes }, status: { hash in hash == consent.hash ? consent.state : "unknown" }, permissions: { _ in AgentRole.guide.permissions }, saveRegistration: { _ in consent.saved += 1 }, rpc: { _, request in AgentMCP.result(id: request["id"], .object(["approved": .bool(true)])) })
+        let oauth = AgentOAuth(onPair: { _, hash, scopes, _, _ in consent.hash = hash; consent.requested = scopes }, status: { hash in hash == consent.hash ? consent.state : "unknown" }, permissions: { _ in AgentRole.guide.permissions }, saveRegistration: { _ in consent.saved += 1 }, rpc: { _, request in AgentMCP.result(id: request["id"], .object(["approved": .bool(true)])) })
         func request(_ method: String, _ target: String, _ body: Data = Data(), _ type: String? = nil, token: String? = nil) -> AgentHTTPRequest {
             var headers = ["host": "127.0.0.1:51736"]
             if let type { headers["content-type"] = type }
@@ -79,7 +79,7 @@ final class AgentOAuthTests: XCTestCase {
 
     @MainActor func testBrowserCannotApproveAndBadResourceIsRefused() async throws {
         let consent = NativeConsent()
-        let oauth = AgentOAuth(onPair: { _, hash, _, _ in consent.hash = hash }, status: { _ in "pending" }, permissions: { _ in [] }, saveRegistration: { _ in }, rpc: { _, _ in .null })
+        let oauth = AgentOAuth(onPair: { _, hash, _, _, _ in consent.hash = hash }, status: { _ in "pending" }, permissions: { _ in [] }, saveRegistration: { _ in }, rpc: { _, _ in .null })
         let approval = await oauth.handle(.init(method: "POST", target: "/approve", headers: ["host": "127.0.0.1:51736"]))
         XCTAssertEqual(approval.status, 404)
         XCTAssertNil(consent.hash)
