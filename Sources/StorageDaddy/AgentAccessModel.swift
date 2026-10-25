@@ -241,8 +241,10 @@ private struct AgentPolicy: Codable {
     }
 
     func clearStagedRequests() {
+        let ownedIDs = Array(stagedRequests.keys)
         pendingStaging.removeAll()
         stagedRequests.removeAll()
+        for id in ownedIDs { explorer?.unstage(id) }
     }
 
     /// Call immediately before native Cleanup preflight and again before its

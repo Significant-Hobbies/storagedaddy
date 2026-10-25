@@ -147,7 +147,8 @@ struct AgentAccessIntegrationTests {
         f.explorer.cancel()
         f.explorer.snapshotBusy = true
         let failed = await call("start_scan", arguments: .object(["root": .string(f.root.path)]), fixture: f)
-        #expect(failed.text.contains("false"))
+        let failedText = try #require(failed["result"]["content"].array?.first?["text"].string)
+        #expect(try JSONDecoder().decode(AgentJSON.self, from: Data(failedText.utf8))["started"].bool == false)
         f.explorer.snapshotBusy = false
         f.explorer.start(f.root, notifyOnCompletion: false)
         let laterVersion = try #require(f.explorer.activeScanVersion)
