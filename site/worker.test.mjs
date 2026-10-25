@@ -8,6 +8,25 @@ function env(status = 200) {
   const events = []; const requested = [];
   return { events, requested, DOWNLOADS: { writeDataPoint(point) { events.push(point); } }, ASSETS: { async fetch(request) { requested.push(request.url); return new Response('fixture', { status }); } } };
 }
+test('current release metadata follows the qualified manifest without counting a download', async () => {
+ const e = env();
+ const response = await worker.fetch(new Request('https://storage.daddyrad.com/release.json?ignored=value'), e);
+ const metadata = await response.json();
+ assert.equal(metadata.version, release.version);
+ assert.equal(metadata.build, release.build);
+ assert.equal(metadata.sourceSha, release.sourceSha);
+ assert.equal(metadata.sha256, release.sha256);
+ assert.equal(metadata.downloadUrl, 'https://storage.daddyrad.com/download');
+ assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8');
+ assert.equal(response.headers.get('cache-control'), 'public, max-age=300');
+ assert.match(response.headers.get('content-security-policy'), /default-src 'none'/);
+ assert.deepEqual(e.requested, []);
+ assert.deepEqual(e.events, []);
+ const head = await worker.fetch(new Request('https://storage.daddyrad.com/release.json', { method: 'HEAD' }), e);
+ assert.equal(head.status, 200);
+ assert.equal(await head.text(), '');
+ assert.deepEqual(e.events, []);
+});
 test('download serves exact release with attachment, no query forwarding or client identifiers', async () => {
  const e = env(); const response = await worker.fetch(new Request('https://storage.daddyrad.com/download?email=private', { headers: {'CF-Connecting-IP':'127.0.0.1'} }), e);
  assert.equal(response.status,200); assert.match(response.headers.get('content-disposition'), /attachment/);

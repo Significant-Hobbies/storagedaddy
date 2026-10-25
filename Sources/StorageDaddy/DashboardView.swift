@@ -117,10 +117,10 @@ struct DashboardView: View {
         }
         .background(AppColors.canvas)
         .buttonStyle(StorageButtonStyle())
+        .background(DashboardSamplingObserver(dashboard: dashboard).frame(width: 0, height: 0))
         .task {
             dashboard.loadIfNeeded()
             trashInventory.refresh(excludedFolders: m.excludedFolders)
-            await dashboard.sampleWhileVisible()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { trashInventory.refresh(excludedFolders: m.excludedFolders) }
