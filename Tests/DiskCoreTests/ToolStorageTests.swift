@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import XCTest
 @testable import DiskCore
@@ -93,6 +94,38 @@ final class ToolStorageTests: XCTestCase {
         }
         XCTAssertNoThrow(try ToolStorage.validateCleanup(path: root.appendingPathComponent("bundle/.selltraces/traces.db").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("bundle/.selltraces/credentials.json").path))
+    }
+
+    func testMixedCaseContainingFoldersProtectConfigurationEvenWithUnreadableAcknowledgement() async throws {
+        let root = fixtureRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for tool in [".GorTex", ".SellTraces"] {
+            let parent = root.appendingPathComponent(tool + "-bundle")
+            let protected = parent.appendingPathComponent(tool)
+            try write(tool + "-bundle/" + tool + "/config.json", root: root)
+            let scan = try await DiskScanner.scan(root: root)
+            let id = try nodeID(tool + "-bundle", scan: scan, root: root)
+            do {
+                try await CleanupPreflight.validate(ids: [id], in: scan, home: root.path)
+                XCTFail("Mixed-case containing folder bypassed configuration protection")
+            } catch let error as NSError { XCTAssertEqual(error.domain, "ToolStorage") }
+            // Re-scan after making the tool directory unreadable; even explicit
+            // acknowledgement of that skipped subtree cannot authorize its removal.
+            XCTAssertEqual(chmod(protected.path, 0), 0)
+            defer { _ = chmod(protected.path, 0o700) }
+            let incomplete = try await DiskScanner.scan(root: parent)
+            XCTAssertGreaterThan(incomplete.skipped, 0)
+            let review = CleanupIncompleteReview(skipped: incomplete.skipped,
+                evidence: incomplete.incompleteEvidence ?? [], truncated: incomplete.incompleteEvidenceTruncated == true,
+                root: parent, device: scan.nodes[id].device, inode: scan.nodes[id].inode)
+            XCTAssertTrue(review.canAcknowledge)
+            do {
+                try await CleanupPreflight.validate(ids: [id], in: scan, acknowledgedIncomplete: [id: review], home: root.path)
+                XCTFail("Unreadable acknowledgement bypassed tool configuration protection")
+            } catch let error as NSError { XCTAssertEqual(error.domain, "ToolStorage") }
+            XCTAssertEqual(chmod(protected.path, 0o700), 0)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: protected.appendingPathComponent("config.json").path))
+        }
     }
 
     func testEveryReviewedToolAndOrdinaryFileRejectsOpenHandles() async throws {

@@ -101,7 +101,7 @@ public enum CleanupPreflight {
 
             let result = try await DiskScanner.scan(root: candidate.url)
             activeUseURLs.append(contentsOf: ToolStorage.dataRoots(in: result))
-            for node in result.nodes where node.name == ".gortex" || node.name == ".selltraces" {
+            for node in result.nodes where node.name.lowercased() == ".gortex" || node.name.lowercased() == ".selltraces" {
                 try ToolStorage.validateCleanup(path: result.url(for: node.id).path)
             }
             // Broad parent selections must not bypass signing-copy checks.
