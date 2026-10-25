@@ -7,6 +7,8 @@ public enum DeveloperCategory: String, CaseIterable, Sendable {
     case claudeSessions
     case codexSessions
     case aiCaches
+    /// Snapshots, support bundles and persistent tool data that need individual review.
+    case toolData
     case gitRepositories
     case nodeModules
     case installedModules
@@ -87,7 +89,8 @@ public enum DeveloperInsights {
             }
             if ["csproj", "fsproj", "vbproj", "sln", "slnx"].contains((node.name as NSString).pathExtension.lowercased()) { dotNetProjects.insert(parent) }
         }
-        let rootContext = contextForRootPath(scan.rootPath)
+        var rootContext = contextForRootPath(scan.rootPath)
+        if ToolStorage.containingData(path: scan.rootPath) != nil { rootContext.owner = .toolData }
         // Only directories can provide inherited context to another node.
         var contexts: [Int: NodeContext] = [:]
 
@@ -112,7 +115,9 @@ public enum DeveloperInsights {
                     explicitModules = rubyProjects.contains(project)
                 }
             }
-            if context.owner == nil, let category = explicitModules ? DeveloperCategory.installedModules : explicitBuild ? .buildOutputs : subtreeCategory(for: node, context: context) {
+            let toolData = ToolStorage.mayRecognize(name: node.name)
+                && ToolStorage.recognizedRoot(path: scan.url(for: node.id).path) != nil
+            if context.owner == nil, let category = toolData ? DeveloperCategory.toolData : explicitModules ? .installedModules : explicitBuild ? .buildOutputs : subtreeCategory(for: node, context: context) {
                 context.owner = category
                 context.ownerRootID = node.id
             }
@@ -192,6 +197,7 @@ public enum DeveloperInsights {
         if name == "site-packages" { return .pythonEnvironments }
 
         if name == ".npm" || name == ".pnpm-store" { return .packageCaches }
+        if name == "store", context.parentName == "pnpm", context.grandparentName == "library" { return .packageCaches }
         if packageCacheToolNames.contains(name), packageCacheParents.contains(context.parentName) {
             return .packageCaches
         }

@@ -4,7 +4,7 @@ import XCTest
 @testable import DiskCore
 
 final class CleanupPreflightTests: XCTestCase {
-    func testProjectDependenciesUseFolderReviewDespitePackageChangesAndOpenFiles() async throws {
+    func testProjectDependenciesUseFolderReviewButRejectOpenFiles() async throws {
         let fixture = try PreflightFixture()
         try fixture.write("project/package.json", bytes: Array("{}".utf8))
         try fixture.write("project/node_modules/pkg/index.js", bytes: [1])
@@ -14,7 +14,11 @@ final class CleanupPreflightTests: XCTestCase {
         // Package fixtures with sensitive-looking names do not need per-file review.
         try fixture.write("project/node_modules/pkg/certificate.pem", bytes: [4])
         let handle = try FileHandle(forReadingFrom: fixture.root.appendingPathComponent("project/node_modules/pkg/index.js"))
-        defer { try? handle.close() }
+        do {
+            try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id])
+            XCTFail("Running dependencies must not be removed")
+        } catch let error as NSError { XCTAssertEqual(error.domain, "CleanupActiveUse") }
+        try handle.close()
         try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id])
         XCTAssertTrue(FileManager.default.fileExists(atPath: scan.url(for: id).path), "Review must not move the folder")
 

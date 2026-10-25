@@ -293,8 +293,8 @@ struct CleanupView: View {
         ScrollView {
         VStack(alignment: .leading, spacing: 16) {
             HStack { SMSectionHeader("Quick Cleanup", size: 28).accessibilityLabel("Quick Cleanup"); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") } }
-            Text(m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders and choose how to clean up. Items with issues are kept.").foregroundStyle(Tints.secondaryText)
-            if !m.showCleanup && m.staged.isEmpty { TrashInventoryView() }
+            Text(m.scan == nil ? "Review Trash, or scan a folder to find cleanup candidates." : m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders and choose how to clean up. Items with issues are kept.").foregroundStyle(Tints.secondaryText)
+            TrashInventoryView()
             if let scan = m.scan, !m.easyCleanupIDs.isEmpty {
                 AutoCleanerCard(scan: scan)
             }
@@ -334,7 +334,7 @@ struct CleanupView: View {
                 Spacer()
             } else if m.staged.isEmpty && m.lastPermanentlyDeletedCount == 0 {
                 if m.easyCleanupIDs.isEmpty {
-                    StorageEmptyView("No rebuildable items found in this scan", systemImage: "tray", description: Text("Scan another folder, or add an item from Storage for individual review."))
+                    StorageEmptyView(m.scan == nil ? "Scan to find rebuildable items" : "No rebuildable items found in this scan", systemImage: "tray", description: Text("Scan a folder, or add an item from Storage for individual review."))
                 }
             }
             else if !m.staged.isEmpty, let scan = m.scan {

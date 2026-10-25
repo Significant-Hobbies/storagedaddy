@@ -17,7 +17,8 @@ struct CleanupBatchTests {
     }
 
     private func wait(_ model: ExplorerModel) async throws {
-        for _ in 0..<500 {
+        // A batch can run a fresh, bounded process probe for each item.
+        for _ in 0..<6_000 {
             if !model.busy { return }
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -138,7 +139,8 @@ struct CleanupBatchTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         model.stageDuplicateCopies([copy])
-        for _ in 0..<200 {
+        // Fresh process evidence can take several seconds on a busy Mac.
+        for _ in 0..<2_000 {
             if model.staged == [copy], !model.busy { break }
             try await Task.sleep(for: .milliseconds(10))
         }

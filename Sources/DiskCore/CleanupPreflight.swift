@@ -55,6 +55,7 @@ public enum CleanupPreflight {
         let rootURL = URL(fileURLWithPath: scan.rootPath).standardizedFileURL
         let candidateURLs = candidates.map { (node: $0, url: scan.url(for: $0.id).standardizedFileURL) }
         for candidate in candidateURLs {
+            try ToolStorage.validateCleanup(path: candidate.url.path)
             if let command = CleanupGuidance.requiredNativeCleaner(path: candidate.url.path, home: home) {
                 throw DiskAnalysisError.unsafePath(path: candidate.url.path, reason: "Use \(command) in Developer Insights → Package-manager cleanup. Direct removal bypasses the tool’s cache lock.")
             }
@@ -91,12 +92,18 @@ public enum CleanupPreflight {
                                        allowingRegenerableChanges: regenerable.contains(candidate.id), home: home)
         }
 
+        var activeUseURLs = candidateURLs.map(\.url)
+
         // Reinstallable project dependencies are reviewed as a whole folder.
         // Keep root identity/path checks without walking every package again.
         for candidate in candidateURLs where candidate.node.isDirectory && !dependencies.contains(candidate.node.id) {
             try Task.checkCancellation()
 
             let result = try await DiskScanner.scan(root: candidate.url)
+            activeUseURLs.append(contentsOf: ToolStorage.dataRoots(in: result))
+            for node in result.nodes where node.name == ".gortex" || node.name == ".selltraces" {
+                try ToolStorage.validateCleanup(path: result.url(for: node.id).path)
+            }
             // Broad parent selections must not bypass signing-copy checks.
             for node in result.nodes where node.isDirectory && node.name == "com.google.Chrome.code_sign_clone" {
                 try ChromeSigningClones.validateForCleanup(at: result.url(for: node.id))
@@ -131,12 +138,11 @@ public enum CleanupPreflight {
             }
         }
 
-        let checkedForUse = regenerable.subtracting(dependencies)
-        if !checkedForUse.isEmpty {
-            let urls = candidateURLs.filter { checkedForUse.contains($0.node.id) }.map(\.url)
-            let probe = Task.detached(priority: .utility) { try CleanupActiveUse.validate(urls: urls) }
-            try await probe.value
-        }
+        // An unchanged database, snapshot, dependency tree or ordinary file can
+        // still be open. Regeneration changes comparison rules, never use checks.
+        let urls = activeUseURLs
+        let probe = Task.detached(priority: .utility) { try CleanupActiveUse.validate(urls: urls, home: home) }
+        try await probe.value
 
         // Run the final identity/path checks after all subtree comparisons. This
         // detects stale scan identities. Path-based moves still have a small
