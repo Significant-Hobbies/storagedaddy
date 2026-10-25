@@ -219,7 +219,7 @@ private struct AgentPolicy: Codable {
         guard let node = scan.nodes.first(where: { $0.device == request.device && $0.inode == request.inode && scan.url(for: $0.id).path == request.path }), node.parent != nil else {
             reviews[i].pending = false; reviews[i].outcome = "Refused: scan or item identity changed; scan again"; save(); return
         }
-        if m.hasAncestor(node.id, in: m.staged) || m.staged.contains(where: { m.hasAncestor($0, in: [node.id]) }) {
+        if overlapsNativeStaging(node.id, in: m) {
             reviews[i].pending = false
             reviews[i].outcome = "Overlaps native Cleanup review. Existing staging is unchanged."
             save(); return
@@ -230,6 +230,7 @@ private struct AgentPolicy: Codable {
         m.stage(node.id, authorization: { [weak self] in
             guard let self else { return false }
             return self.pendingStaging[node.id] == request.id && self.policyHealthy &&
+                !self.overlapsNativeStaging(node.id, in: m) &&
                 self.sessions.contains { $0.id == request.sessionID && $0.permissions.contains(permission) }
         }, didStage: { [weak self] in
             self?.pendingStaging.removeValue(forKey: node.id)
@@ -241,6 +242,10 @@ private struct AgentPolicy: Codable {
         reviews[i].pending = false
         reviews[i].outcome = "Sent to native Cleanup preflight. Nothing removed; verify staging and choose the cleanup action there."
         save()
+    }
+
+    private func overlapsNativeStaging(_ nodeID: Int, in model: ExplorerModel) -> Bool {
+        model.hasAncestor(nodeID, in: model.staged) || model.staged.contains { model.hasAncestor($0, in: [nodeID]) }
     }
 
     func unstageRequest(_ nodeID: Int) {
