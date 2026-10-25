@@ -53,7 +53,7 @@ struct AppLeftoverReviewView: View {
                                         .font(.caption).monospacedDigit().foregroundStyle(Tints.secondaryText)
                                 }
                                 .padding(10).contentShape(Rectangle())
-                                .background(inspectedPath == record.path ? Tints.mint.opacity(0.08) : Color.black)
+                                .background(inspectedPath == record.path ? Tints.mint.opacity(0.08) : AppColors.canvas)
                             }
                             .buttonStyle(.plain)
                             .help(record.path)
@@ -93,7 +93,7 @@ struct AppLeftoverReviewView: View {
                 }.frame(maxHeight: 250)
             }
         }
-        .padding(20).background(Color.black, in: RoundedRectangle(cornerRadius: 14))
+        .padding(20).background(AppColors.canvas, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Tints.mint.opacity(0.18)))
     }
 

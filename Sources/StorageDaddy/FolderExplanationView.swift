@@ -32,7 +32,7 @@ struct FolderExplanationView: View {
             }.padding(16)
         }
         .frame(width: 640, height: 520)
-        .background(Color.black)
+        .background(AppColors.canvas)
         .buttonStyle(StorageButtonStyle())
     }
 

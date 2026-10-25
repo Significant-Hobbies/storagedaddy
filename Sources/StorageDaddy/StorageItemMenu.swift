@@ -8,6 +8,12 @@ struct StorageItemMenu: View {
         Button("Inspect") { m.selected = node.id; m.openStorage(.explore) }
         if node.isDirectory { Button("Open Folder") { m.open(node); m.openStorage(.explore) } }
         Button("Reveal in Finder") { m.reveal(node.id) }
+        if node.parent != nil, !node.isSymlink, let scan = m.scan {
+            Button("Move to another drive…", systemImage: "externaldrive.badge.plus") {
+                m.moves.review(source: scan.url(for: node.id), expected: node,
+                               scanRoot: URL(fileURLWithPath: scan.rootPath), excludedFolders: m.excludedFolders)
+            }.disabled(m.busy || m.moves.busy || !m.staged.isEmpty)
+        }
         if node.isDirectory {
             Button("Copy Ask AI Prompt", systemImage: "sparkles") { m.copyFolderPrompt(node.id) }
         }

@@ -4,6 +4,25 @@ import XCTest
 @testable import DiskCore
 
 final class AnalysisTests: XCTestCase {
+    func testDuplicateDepthRanksSizeGroupsAndFullDepthFindsAll() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        for (name, size) in [("large-a", 8192), ("large-b", 8192), ("small-a", 16), ("small-b", 16)] {
+            try fixture.write(name, data: Data(repeating: 7, count: size))
+        }
+        let scan = try await DiskScanner.scan(root: fixture.root)
+        let shallow = try await DuplicateFinder.find(in: scan, options: .init(coveragePercent: 1, hashConcurrency: 1))
+        XCTAssertEqual(shallow.count, 1)
+        XCTAssertEqual(Set(shallow[0].nodeIDs.map { scan.nodes[$0].name }), ["large-a", "large-b"])
+        let full = try await DuplicateFinder.find(in: scan, options: .init(coveragePercent: 100, hashConcurrency: 8))
+        XCTAssertEqual(full.count, 2)
+        try fixture.write("large-b", data: Data(repeating: 8, count: 8192))
+        let updated = try await DiskScanner.scan(root: fixture.root)
+        let afterMutation = try await DuplicateFinder.find(in: updated)
+        XCTAssertEqual(afterMutation.count, 1, "Changed contents must invalidate the cached digest")
+        XCTAssertEqual(Set(afterMutation[0].nodeIDs.map { updated.nodes[$0].name }), ["small-a", "small-b"])
+    }
+
     func testDuplicateFinderUsesContentsAndNotNames() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }

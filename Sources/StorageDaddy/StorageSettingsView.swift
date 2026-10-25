@@ -6,23 +6,41 @@ struct StorageSettingsView: View {
     @EnvironmentObject private var model: ExplorerModel
     @ObservedObject var updates: AppUpdates
     @State private var tab = 1
+    @AppStorage("automaticallySaveScans") private var automaticallySaveScans = true
+    @AppStorage("appearanceMode") private var appearance = "dark"
+    @AppStorage("colorBlindMap") private var colorBlindMap = false
+    @AppStorage("binaryStorageUnits") private var binaryStorageUnits = false
+
+    @AppStorage("scanWorkerCount") private var scanWorkerCount = 0
+    @AppStorage("startMinimized") private var startMinimized = false
 
     var body: some View {
         TabView(selection: $tab) {
-            VStack(alignment: .leading, spacing: 20) {
+            ScrollView { VStack(alignment: .leading, spacing: 20) {
                 Text("General").font(.title2.weight(.semibold))
+                Picker("Appearance", selection: $appearance) {
+                    Text("System").tag("system"); Text("Dark").tag("dark"); Text("Light").tag("light")
+                }
+                Picker("Scan power", selection: $scanWorkerCount) {
+                    Text("Automatic").tag(0); Text("Efficient · 1 worker").tag(1); Text("Balanced · 4 workers").tag(4); Text("Fast · 8 workers").tag(8)
+                }.disabled(model.busy)
+                Toggle("Start minimized in the menu bar", isOn: $startMinimized)
+                Toggle("Color-blind map palette", isOn: $colorBlindMap)
+                Toggle("Binary storage units (KiB, MiB, GiB)", isOn: $binaryStorageUnits)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Yours free forever, including all future versions.").font(.headline).foregroundStyle(Tints.mint)
                     Text("Everyone who downloads during early access gets every future version free. No trial expiry or subscription.")
                         .foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
                 }
                 Toggle("Automatically check for updates", isOn: $updates.automaticallyChecks)
+                Toggle("Save completed scans to local history", isOn: $automaticallySaveScans)
+                Text("Keeps file paths, sizes and modification dates for comparisons. File contents stay out of history.").font(.caption).foregroundStyle(Tints.secondaryText)
                 Text("storagedaddy checks for new versions. Installation waits until scans, exports and cleanup review are finished.")
                     .foregroundStyle(Tints.secondaryText)
                 Button("Check for Updates…", action: updates.check)
                     .disabled(!updates.canCheck || !updates.isIdle)
                 Spacer()
-            }.padding(28)
+            }.padding(28) }
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(0)
 
             VStack(alignment: .leading, spacing: 16) {
@@ -83,10 +101,12 @@ struct StorageSettingsView: View {
 
             AcknowledgmentsView()
                 .tabItem { Label("Acknowledgments", systemImage: "heart.text.square") }.tag(2)
+            ScanScheduleSettingsView(schedule: model.scanSchedule)
+                .tabItem { Label("Recurring Scans", systemImage: "clock.arrow.circlepath") }.tag(3)
         }
         .frame(width: 620, height: 520)
-        .background(Color.black)
-        .preferredColorScheme(.dark)
+        .background(AppColors.canvas)
+        .storageTheme(DaddyTheme.palette)
         .tint(Tints.mint)
         .buttonStyle(StorageButtonStyle())
     }

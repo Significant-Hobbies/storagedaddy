@@ -2,6 +2,24 @@ import XCTest
 @testable import DiskCore
 
 final class DeveloperInsightsTests: XCTestCase {
+    func testDiagnosticLogsAndNamespacedBrowserCaches() {
+        let scan = ScanResult(rootPath: "/Users/test/Library", nodes: [
+            node(0, nil, "Library", true, children: [1, 4, 7]),
+            node(1, 0, "Logs", true, children: [2]),
+            node(2, 1, "DiagnosticReports", true, children: [3]),
+            node(3, 2, "app.ips", false, allocated: 10),
+            node(4, 0, "Caches", true, children: [5]),
+            node(5, 4, "ms-playwright", true, children: [6]),
+            node(6, 5, "browser", false, allocated: 20),
+            node(7, 0, "ordinary", true, children: [8]),
+            node(8, 7, "playwright", true, children: [9]),
+            node(9, 8, "source", false, allocated: 30)
+        ])
+        let groups = DeveloperInsights.analyze(scan)
+        XCTAssertEqual(group(.temporary, in: groups).allocatedBytes, 10)
+        XCTAssertEqual(group(.packageCaches, in: groups).allocatedBytes, 20)
+    }
+
     func testInstalledModulesRequireSupportingMarkersAndScopedCaches() {
         let scan = ScanResult(rootPath: "/Users/test", nodes: [
             node(0, nil, "test", true, children: [1, 5, 8, 11, 16]),

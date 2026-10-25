@@ -46,21 +46,21 @@ final class CleanupPreflightTests: XCTestCase {
 
     func testRegenerableCacheAcceptsNormalWritesWithoutWeakeningExactReview() async throws {
         let fixture = try PreflightFixture()
-        try fixture.write(".cache/uv/archive-v0/pkg/__pycache__/one.pyc", bytes: [1])
+        try fixture.write(".cache/pip/archive-v0/pkg/__pycache__/one.pyc", bytes: [1])
         let scan = try await fixture.scan()
-        let id = try fixture.nodeID(".cache/uv", in: scan)
-        try fixture.write(".cache/uv/archive-v0/pkg/__pycache__/one.pyc", bytes: [2, 3])
-        try fixture.write(".cache/uv/new-cache-entry", bytes: [4])
+        let id = try fixture.nodeID(".cache/pip", in: scan)
+        try fixture.write(".cache/pip/archive-v0/pkg/__pycache__/one.pyc", bytes: [2, 3])
+        try fixture.write(".cache/pip/new-cache-entry", bytes: [4])
         do {
             try await CleanupPreflight.validate(ids: [id], in: scan)
             XCTFail("Exact review must still reject a changed subtree")
         } catch { }
         try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id], home: fixture.root.path)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent(".cache/uv/new-cache-entry").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent(".cache/pip/new-cache-entry").path))
 
-        let cache = fixture.root.appendingPathComponent(".cache/uv")
-        try FileManager.default.moveItem(at: cache, to: fixture.root.appendingPathComponent("held-uv"))
-        try fixture.write(".cache/uv/replacement", bytes: [5])
+        let cache = fixture.root.appendingPathComponent(".cache/pip")
+        try FileManager.default.moveItem(at: cache, to: fixture.root.appendingPathComponent("held-pip"))
+        try fixture.write(".cache/pip/replacement", bytes: [5])
         do {
             try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id], home: fixture.root.path)
             XCTFail("Replacing the cache root must still be rejected")
@@ -79,12 +79,26 @@ final class CleanupPreflightTests: XCTestCase {
         } catch { }
     }
 
-    func testRegenerableCacheStillRequiresApprovalForExcludedContents() async throws {
+    func testUVCacheAndContainingFolderRequireNativeCleanerEvenWithRegenerableApproval() async throws {
         let fixture = try PreflightFixture()
         try fixture.write(".cache/uv/item", bytes: [1])
-        try fixture.write(".cache/uv/.env.example", bytes: [2])
         let scan = try await fixture.scan()
-        let id = try fixture.nodeID(".cache/uv", in: scan)
+        for relative in [".cache/uv", ".cache"] {
+            let id = try fixture.nodeID(relative, in: scan)
+            do {
+                try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id], home: fixture.root.path)
+                XCTFail("uv locking must be honored for both the cache and containing folders")
+            } catch let DiskAnalysisError.unsafePath(_, reason) { XCTAssertTrue(reason.contains("uv cache clean")) }
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent(".cache/uv/item").path))
+    }
+
+    func testRegenerableCacheStillRequiresApprovalForExcludedContents() async throws {
+        let fixture = try PreflightFixture()
+        try fixture.write(".cache/pip/item", bytes: [1])
+        try fixture.write(".cache/pip/.env.example", bytes: [2])
+        let scan = try await fixture.scan()
+        let id = try fixture.nodeID(".cache/pip", in: scan)
         let review: CleanupIncompleteReview
         do {
             try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id], home: fixture.root.path)
@@ -95,10 +109,10 @@ final class CleanupPreflightTests: XCTestCase {
 
     func testRegenerableCacheRejectsOpenFiles() async throws {
         let fixture = try PreflightFixture()
-        try fixture.write(".cache/uv/item", bytes: [1])
+        try fixture.write(".cache/pip/item", bytes: [1])
         let scan = try await fixture.scan()
-        let id = try fixture.nodeID(".cache/uv", in: scan)
-        let handle = try FileHandle(forReadingFrom: fixture.root.appendingPathComponent(".cache/uv/item"))
+        let id = try fixture.nodeID(".cache/pip", in: scan)
+        let handle = try FileHandle(forReadingFrom: fixture.root.appendingPathComponent(".cache/pip/item"))
         defer { try? handle.close() }
         do {
             try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id], home: fixture.root.path)

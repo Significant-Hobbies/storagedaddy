@@ -29,6 +29,9 @@ binary = args.binary or swiftpm_resources.build_app(root)
 update_configuration = sparkle_support.configuration() if args.check else {}
 if not binary.is_file():
     raise SystemExit(f"Build the executable first: {binary}")
+agent_helper = binary.parent / "storagedaddy-mcp"
+if not agent_helper.is_file():
+    raise SystemExit("Build the storagedaddy-mcp executable alongside StorageDaddy before packaging.")
 swiftpm_resources.ui_resource_bundle(binary)
 support = root / "artifacts/MemoryPackSupport"
 required_support = [support / "memory-pack", support / "THIRD_PARTY_NOTICES.txt", support / "provenance.json", support / "cargo-metadata.json"]
@@ -80,6 +83,10 @@ pending_search = contents / "Helpers/storage-search.pending"
 shutil.copy2(finder_support / "storage-search", pending_search)
 pending_search.chmod(0o755)
 pending_search.replace(contents / "Helpers/storage-search")
+pending_agent = contents / "Helpers/storagedaddy-mcp.pending"
+shutil.copy2(agent_helper, pending_agent)
+pending_agent.chmod(0o755)
+pending_agent.replace(contents / "Helpers/storagedaddy-mcp")
 (contents / "Resources").mkdir(exist_ok=True)
 for source, name in [("THIRD_PARTY_NOTICES.txt", "FinderSearch-THIRD_PARTY_NOTICES.txt"), ("provenance.json", "FinderSearch-provenance.json")]:
     shutil.copy2(finder_support / source, contents / "Resources" / name)
@@ -105,6 +112,7 @@ with (contents / "Info.plist").open("wb") as f:
 sparkle_support.sign(bundle, "-", timestamp=False)
 subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(contents / "Helpers/memory-pack")], check=True)
 subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(contents / "Helpers/storage-search")], check=True)
+subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(contents / "Helpers/storagedaddy-mcp")], check=True)
 subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(bundle)], check=True)
 swiftpm_resources.check_ui_resources(binary, bundle)
 subprocess.run([

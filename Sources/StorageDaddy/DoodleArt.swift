@@ -118,7 +118,7 @@ struct ScanWelcomeView: View {
             .padding(32)
             .frame(maxWidth: .infinity, alignment: .center)
         }
-        .background(Color.black).buttonStyle(StorageButtonStyle())
+        .background(AppColors.canvas).buttonStyle(StorageButtonStyle())
         .onAppear { accessStatus = FullDiskAccessProbe.status() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { accessStatus = FullDiskAccessProbe.status() }

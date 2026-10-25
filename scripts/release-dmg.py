@@ -63,7 +63,8 @@ def main():
     helper = ROOT / "artifacts/MemoryPackSupport/memory-pack"
     for source, destination in [(binary, app / "Contents/MacOS/StorageDaddy"),
                                 (helper, app / "Contents/Helpers/memory-pack"),
-                                (ROOT / "artifacts/FinderSearchSupport/storage-search", app / "Contents/Helpers/storage-search")]:
+                                (ROOT / "artifacts/FinderSearchSupport/storage-search", app / "Contents/Helpers/storage-search"),
+                                (binary.parent / "storagedaddy-mcp", app / "Contents/Helpers/storagedaddy-mcp")]:
         shutil.copyfile(source, destination)
         destination.chmod(0o755)
     for name in ["StorageDaddy.png", "StorageDaddy.icns", "Welcome.png", "PageDoodles.png",
@@ -89,7 +90,7 @@ def main():
     sparkle_support.embed(app)
     sparkle_support.sign(app, args.identity)
     # Stable identity; a distribution signature replaces the local ad-hoc one.
-    for target in [app / "Contents/Helpers/memory-pack", app / "Contents/Helpers/storage-search", app]:
+    for target in [app / "Contents/Helpers/memory-pack", app / "Contents/Helpers/storage-search", app / "Contents/Helpers/storagedaddy-mcp", app]:
         run("codesign", "--force", "--sign", args.identity, "--timestamp", "--options", "runtime", target)
     run("codesign", "--verify", "--deep", "--strict", app)
     swiftpm_resources.check_ui_resources(binary, app)
@@ -108,6 +109,7 @@ def main():
         "stapled": False, "publicReady": False,
         "sourceBinarySha256": sha256(binary), "helperSha256": sha256(helper),
         "searchHelperSha256": sha256(ROOT / "artifacts/FinderSearchSupport/storage-search"),
+        "agentHelperSha256": sha256(binary.parent / "storagedaddy-mcp"),
         "dmgSha256": sha256(dmg), "dmgBytes": dmg.stat().st_size,
         "sourceSha": args.source_sha,
     }

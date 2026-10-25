@@ -158,7 +158,7 @@ struct ApplicationsView: View {
         .padding(24)
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
-        .background(Color.black)
+        .background(AppColors.canvas)
         .buttonStyle(StorageButtonStyle())
         .task { await applications.loadIfNeeded() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
@@ -338,6 +338,7 @@ struct CleanupView: View {
                 }
             }
             else if !m.staged.isEmpty, let scan = m.scan {
+                RemovalMeasurementView(scan: scan, ids: m.staged.sorted()).id("\(scan.started):\(m.staged.sorted())")
                 LazyVStack(alignment: .leading, spacing: 16) {
                 ForEach(m.staged.sorted(), id: \.self) { id in
                     HStack(alignment: .top) {
@@ -399,7 +400,7 @@ struct CleanupView: View {
         }.padding(24)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
-        }.background(Color.black).buttonStyle(StorageButtonStyle())
+        }.background(AppColors.canvas).buttonStyle(StorageButtonStyle())
     }
 }
 

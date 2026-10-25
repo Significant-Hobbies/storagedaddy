@@ -118,7 +118,7 @@ struct FilenameSearchView: View {
                 }
             }
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Color.black).buttonStyle(StorageButtonStyle())
+            .background(AppColors.canvas).buttonStyle(StorageButtonStyle())
             .task(id: key) {
                 let request = key
                 await searchModel.update(scan: m.scan, identity: request.identity, query: request.query, scope: request.scope)
