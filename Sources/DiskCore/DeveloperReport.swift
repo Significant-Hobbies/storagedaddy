@@ -73,9 +73,9 @@ public struct DeveloperReport: Sendable {
                 category: root.category,
                 allocatedBytes: root.allocatedBytes,
                 projectID: projectID,
-                tool: tool,
+                tool: ToolStorage.containingData(path: scan.url(for: node.id).path)?.tool ?? tool,
                 evidence: "Matched \(node.name) using a metadata path rule; file contents were not read.",
-                consequence: consequence(for: root.category),
+                consequence: ToolStorage.containingData(path: scan.url(for: node.id).path)?.consequence ?? consequence(for: root.category),
                 confidence: confidence(for: root.category),
                 lastModified: node.modified
             )
@@ -165,7 +165,7 @@ public struct DeveloperReport: Sendable {
 
     private static func isShared(_ category: DeveloperCategory) -> Bool {
         switch category {
-        case .claudeSessions, .codexSessions, .aiCaches, .packageCaches, .containerStorage, .modelCaches,
+        case .claudeSessions, .codexSessions, .aiCaches, .toolData, .packageCaches, .containerStorage, .modelCaches,
              .installers, .oldDownloads:
             return true
         case .gitRepositories, .nodeModules, .pythonEnvironments, .installedModules, .buildOutputs, .temporary:
@@ -186,6 +186,7 @@ public struct DeveloperReport: Sendable {
         case .claudeSessions: return "Claude"
         case .codexSessions: return "Codex"
         case .aiCaches: return "AI cache"
+        case .toolData: return "Tool data"
         case .gitRepositories: return "Git"
         case .nodeModules: return "Node.js"
         case .pythonEnvironments: return "Python"
@@ -273,6 +274,8 @@ public struct DeveloperReport: Sendable {
             return "Package cache entries may be recreated by their tool, but verify source and remote availability before cleanup."
         case .aiCaches:
             return "AI cache data may be recreated, but verify the tool can restore it before cleanup."
+        case .toolData:
+            return "Snapshots and persistent tool data can contain recovery history or original records. Review individually; keep configuration and credentials."
         case .modelCaches:
             return "Models may need to be downloaded again; verify remote availability before cleanup."
         case .installers:

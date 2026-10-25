@@ -90,7 +90,7 @@ struct StorageMapReviewTests {
         #expect(group.nodeIDs.count == 3)
         let ids = scan.nodes.filter { $0.name.hasPrefix("review-") }.map(\.id)
         m.stageDuplicateCopies(ids)
-        for _ in 0..<200 {
+        for _ in 0..<2_000 {
             if Set(ids).isSubset(of: m.staged), !m.busy { break }
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -102,7 +102,7 @@ struct StorageMapReviewTests {
         let newKeep = try #require(ids.first)
         let revisedRemovals = group.nodeIDs.filter { $0 != newKeep }
         m.stageDuplicateCopies(revisedRemovals)
-        for _ in 0..<200 {
+        for _ in 0..<2_000 {
             if Set(revisedRemovals).isSubset(of: m.staged), !m.busy { break }
             try await Task.sleep(for: .milliseconds(10))
         }

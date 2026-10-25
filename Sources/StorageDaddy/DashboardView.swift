@@ -66,6 +66,8 @@ struct DashboardView: View {
     @EnvironmentObject var m: ExplorerModel
     @ObservedObject var dashboard: DashboardModel
     @State private var showingSystemDetails = false
+    @StateObject private var trashInventory = TrashInventoryModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     private var scanLeaders: [DiskNode] {
         guard let scan = m.scan, let root = scan.nodes.first else { return [] }
@@ -97,7 +99,7 @@ struct DashboardView: View {
                             scoreScope: scoped.0, isRefreshing: dashboard.loading, onRefresh: dashboard.refresh,
                             onReviewSnapshots: { showingSystemDetails = true })
                         layout {
-                            DashboardTrashPanel(excludedFolders: m.excludedFolders)
+                            DashboardTrashPanel(excludedFolders: m.excludedFolders, inventory: trashInventory)
                                 .frame(maxWidth: .infinity)
                             usefulSignals(report)
                                 .frame(maxWidth: .infinity)
@@ -116,7 +118,15 @@ struct DashboardView: View {
         .background(AppColors.canvas)
         .buttonStyle(StorageButtonStyle())
         .background(DashboardSamplingObserver(dashboard: dashboard).frame(width: 0, height: 0))
-        .task { dashboard.loadIfNeeded() }
+        .task {
+            dashboard.loadIfNeeded()
+            trashInventory.refresh(excludedFolders: m.excludedFolders)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { trashInventory.refresh(excludedFolders: m.excludedFolders) }
+        }
+        .onChange(of: m.excludedFolders) { _, _ in trashInventory.refresh(excludedFolders: m.excludedFolders) }
+        .onDisappear { trashInventory.cancel() }
     }
 
     private var header: some View {
@@ -236,6 +246,16 @@ struct DashboardView: View {
                     .font(.caption).foregroundStyle(Tints.secondaryText)
                 Button("scan user caches", action: m.scanUserCaches).accessibilityLabel("Scan user caches").disabled(m.busy)
             }
+            Divider().overlay(Tints.yellow.opacity(0.22))
+            HStack {
+                Label("In Trash", systemImage: "trash")
+                Spacer()
+                Text(trashInventory.sizeLabel).monospacedDigit()
+            }
+            .font(.callout.weight(.medium))
+            Text("Home Trash · separate from the candidates above")
+                .font(.caption2).foregroundStyle(Tints.secondaryText)
+            Button("review trash") { m.showWelcome = false; m.workspace = .cleanup }.accessibilityLabel("Review Trash")
             Spacer(minLength: 0)
         }
         .padding(22)
@@ -587,9 +607,7 @@ struct DashboardView: View {
 
 private struct DashboardTrashPanel: View {
     let excludedFolders: [String]
-    @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var inventory = TrashInventoryModel()
-    @State private var hasFullDiskAccess = false
+    @ObservedObject var inventory: TrashInventoryModel
     private let trash = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash", isDirectory: true)
 
     var body: some View {
@@ -628,9 +646,6 @@ private struct DashboardTrashPanel: View {
                 }
             } else if let error = inventory.error {
                 Text(error).font(.caption).foregroundStyle(Tints.yellow)
-            } else if !hasFullDiskAccess {
-                Text("Review the items in Finder. Listing Home Trash here needs Full Disk Access; this dashboard will not ask for it.")
-                    .font(.caption).foregroundStyle(Tints.secondaryText)
             } else if inventory.loading {
                 Text("Reading Home Trash item names and sizes…")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
@@ -643,18 +658,6 @@ private struct DashboardTrashPanel: View {
         }
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .onAppear(perform: updateAccess)
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { updateAccess() }
-        }
-        .onDisappear { inventory.cancel() }
-    }
-
-    private func updateAccess() {
-        hasFullDiskAccess = FullDiskAccessProbe.status() == .accessible
-        if hasFullDiskAccess && inventory.scan == nil && !inventory.loading {
-            inventory.refresh(excludedFolders: excludedFolders)
-        }
     }
 }
 

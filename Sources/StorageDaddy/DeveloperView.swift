@@ -17,6 +17,8 @@ private struct DeveloperStorageFamily: Identifiable, CaseIterable {
     static let allCases: [Self] = [
         Self(title: "AI storage", symbol: "sparkles", color: Tints.cyan,
              categories: [.claudeSessions, .codexSessions, .aiCaches, .modelCaches]),
+        Self(title: "Tool data", symbol: "archivebox", color: Tints.cyan,
+             categories: [.toolData]),
         Self(title: "Builds & caches", symbol: "hammer.fill", color: Tints.electricBlue,
              categories: [.buildOutputs, .temporary]),
         Self(title: "Docker & VMs", symbol: "externaldrive.fill", color: Tints.yellow,
@@ -38,6 +40,7 @@ extension DeveloperCategory {
         case .claudeSessions: "Claude sessions"
         case .codexSessions: "Codex sessions"
         case .aiCaches: "AI caches"
+        case .toolData: "Tool data"
         case .gitRepositories: ".git repositories"
         case .nodeModules: "node_modules"
         case .installedModules: "Installed modules"
@@ -56,6 +59,7 @@ extension DeveloperCategory {
         case .claudeSessions: "sparkle"
         case .codexSessions: "terminal"
         case .aiCaches: "cpu"
+        case .toolData: "archivebox"
         case .gitRepositories: "arrow.triangle.branch"
         case .nodeModules: "shippingbox"
         case .installedModules: "shippingbox.fill"
@@ -74,6 +78,7 @@ extension DeveloperCategory {
         case .claudeSessions: Tints.coral
         case .codexSessions: Tints.mint
         case .aiCaches: Tints.cyan
+        case .toolData: Tints.cyan
         case .gitRepositories: Tints.coral
         case .nodeModules: Color(red: 0.69, green: 0.79, blue: 0.35)
         case .installedModules: Tints.mint
@@ -92,6 +97,7 @@ extension DeveloperCategory {
         case .claudeSessions: "Local Claude session records. Classification uses file metadata."
         case .codexSessions: "Local Codex session records, including archived sessions."
         case .aiCaches: "Recognized AI cache paths in this scan."
+        case .toolData: "Recognized snapshots, VM support bundles, device support and persistent tool databases. Configuration and credentials stay separate. Review individually."
         case .gitRepositories: "Git object databases and repository metadata, grouped by project. This is not an automatic cleanup category."
         case .nodeModules: "Dependency trees. Nested installations are counted once."
         case .installedModules: "Recognized Composer, Bundler, CocoaPods and Bower dependency folders."
@@ -142,6 +148,7 @@ struct DeveloperView: View {
                 cleanupOpportunities
                 GitWorktreeView()
                 PackageCacheCleanersView()
+                NpxCacheReviewView()
                 DeveloperReportView()
                 Button { showsCategories.toggle() } label: {
                     Label(showsCategories ? "Hide category breakdown" : "Show category breakdown", systemImage: showsCategories ? "chevron.up" : "chevron.down")
@@ -160,7 +167,7 @@ struct DeveloperView: View {
     private var storageFamilyGrid: some View {
         VStack(alignment: .leading, spacing: 12) {
             SMSectionHeader("Developer storage by type", size: 22).accessibilityLabel("Developer storage by type")
-            Text("Seven useful groups first. Open the category breakdown for the underlying tools and folders.")
+            Text("Open the category breakdown for the underlying tools and folders.")
                 .font(.callout).foregroundStyle(Tints.secondaryText)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 ForEach(storageFamilies) { family in
@@ -300,7 +307,7 @@ struct DeveloperView: View {
             Button(m.easyCleanupIDs.isEmpty ? "Easy Cleanup…" : "Easy Cleanup — \(m.easyCleanupIDs.count) regenerable items · \(DiskFormat.bytes(m.easyCleanupBytes))…", action: m.stageEasyCleanup)
                 .disabled(m.busy || m.monitoring || m.easyCleanupIDs.isEmpty)
             let findings = Array((m.developerReport?.findings ?? []).lazy.filter {
-                [.buildOutputs, .packageCaches, .aiCaches, .installers, .oldDownloads].contains($0.category)
+                [.buildOutputs, .packageCaches, .aiCaches, .toolData, .installers, .oldDownloads].contains($0.category)
             }.prefix(5))
             if findings.isEmpty {
                 Text("No recognized cache, build, installer or stale-download candidates in this scan. Explore the largest folders to review other files.").foregroundStyle(Tints.secondaryText)

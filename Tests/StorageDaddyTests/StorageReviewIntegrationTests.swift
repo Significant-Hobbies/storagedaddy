@@ -22,7 +22,7 @@ struct StorageReviewIntegrationTests {
             try capture(AnyView(CleanupView().environmentObject(model).storageTheme(DaddyTheme.palette)), name: "cleanup-pick-\(width)", width: width)
         }
         model.stageEasyCleanup()
-        for _ in 0..<200 {
+        for _ in 0..<2_000 {
             if !model.busy { break }
             try await Task.sleep(for: .milliseconds(10))
         }

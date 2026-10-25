@@ -147,7 +147,7 @@ enum Workspace: String, CaseIterable, Identifiable {
     case macControls = "Mac Controls", findFiles = "Find Files", aiSessions = "AI Sessions", developer = "Developer Insights", explore = "Explore", applications = "Applications", snapshots = "Snapshots", duplicates = "Duplicates", projects = "Projects", appData = "App Data", cleanup = "Cleanup", acknowledgments = "Acknowledgments", dashboard = "Dashboard"
     var id: String { rawValue }
     var title: String { switch self { case .explore: "Storage"; case .cleanup: "Quick Cleanup"; case .snapshots: "History"; default: rawValue } }
-    var requiresScan: Bool { [.findFiles, .developer, .cleanup, .duplicates, .projects, .appData].contains(self) }
+    var requiresScan: Bool { [.findFiles, .developer, .duplicates, .projects, .appData].contains(self) }
     var icon: String { switch self { case .agents: "person.crop.circle.badge.checkmark"; case .processes: "cpu"; case .driveMonitoring: "waveform.path"; case .macControls: "slider.horizontal.3"; case .findFiles: "magnifyingglass"; case .aiSessions: "bubble.left.and.text.bubble.right.fill"; case .developer: "terminal"; case .explore: "internaldrive.fill"; case .applications: "app.badge"; case .snapshots: "clock.arrow.circlepath"; case .duplicates: "doc.on.doc"; case .projects: "folder.badge.gearshape"; case .appData: "questionmark.folder"; case .cleanup: "trash"; case .acknowledgments: "heart.text.square"; case .dashboard: "speedometer" } }
 }
 

@@ -8,7 +8,17 @@ import SwiftUI
     @Published private(set) var error: String?
     private var task: Task<Void, Never>?
     private var generation = UUID()
-    private let trash = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash", isDirectory: true)
+    private let trash: URL
+
+    init(trash: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash", isDirectory: true)) {
+        self.trash = trash
+    }
+
+    var sizeLabel: String {
+        if loading { return "Measuring…" }
+        guard let scan else { return error == nil ? "Not measured" : "Size unavailable" }
+        return DiskFormat.bytes(allocatedBytes) + (scan.skipped > 0 ? " · partial" : "")
+    }
 
     var items: [DiskNode] {
         guard let scan, let root = scan.nodes.first else { return [] }
@@ -64,19 +74,17 @@ struct TrashInventoryView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var inventory = TrashInventoryModel()
     @State private var expanded = false
-    @State private var hasFullDiskAccess = false
     private let trash = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash", isDirectory: true)
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Review or restore Trash items in Finder. When storagedaddy already has Full Disk Access, it can also list the current user's Home Trash here. Other volumes are not included.")
+                Text("Review or restore items in Finder. This measures the current user's Home Trash; other volumes are not included. Trash still uses space until emptied.")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
                 HStack {
                     Button("Open Trash in Finder") { NSWorkspace.shared.open(trash) }
-                    if hasFullDiskAccess && inventory.scan == nil && !inventory.loading {
-                        Button("Check Home Trash") { inventory.refresh(excludedFolders: m.excludedFolders) }
-                    }
+                    Button("Refresh Trash") { inventory.refresh(excludedFolders: m.excludedFolders) }
+                        .disabled(inventory.loading)
                 }
                 if inventory.loading {
                     HStack {
@@ -88,14 +96,16 @@ struct TrashInventoryView: View {
                 }
                 if let error = inventory.error {
                     Text(error).font(.callout).foregroundStyle(Tints.yellow)
+                    Text("If macOS blocks Trash access, enable storagedaddy in Full Disk Access to show its size. This grants broad file access.")
+                        .font(.caption).foregroundStyle(Tints.secondaryText)
+                    Button("Open Full Disk Access Settings") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { NSWorkspace.shared.open(url) }
+                    }
                 }
                 if let scan = inventory.scan {
                     HStack {
                         Text("\(inventory.items.count.formatted()) top-level \(inventory.items.count == 1 ? "item" : "items") · \(DiskFormat.bytes(inventory.allocatedBytes)) allocated")
                             .font(.callout.weight(.medium)).monospacedDigit()
-                        Spacer()
-                        Button("Refresh") { inventory.refresh(excludedFolders: m.excludedFolders) }
-                            .disabled(inventory.loading)
                     }
                     if scan.skipped > 0 {
                         Text("\(scan.skipped.formatted()) items skipped. The measured size is partial.")
@@ -133,15 +143,21 @@ struct TrashInventoryView: View {
                 Label("In Trash", systemImage: "trash")
                     .font(.headline).foregroundStyle(Tints.mint)
                 Spacer()
-                if inventory.scan != nil {
-                    Text(DiskFormat.bytes(inventory.allocatedBytes))
-                        .monospacedDigit().foregroundStyle(Tints.secondaryText)
-                }
+                Text(inventory.sizeLabel)
+                    .monospacedDigit().foregroundStyle(Tints.secondaryText)
+                    .accessibilityLabel("Trash size: " + inventory.sizeLabel)
             }
         }
-        .onAppear { hasFullDiskAccess = FullDiskAccessProbe.status() == .accessible }
+        .onAppear { inventory.refresh(excludedFolders: m.excludedFolders) }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { hasFullDiskAccess = FullDiskAccessProbe.status() == .accessible }
+            if phase == .active { inventory.refresh(excludedFolders: m.excludedFolders) }
+        }
+        .onChange(of: m.excludedFolders) { _, _ in inventory.refresh(excludedFolders: m.excludedFolders) }
+        .onChange(of: m.busy) { _, busy in
+            if !busy && !m.lastTrashedURLs.isEmpty { inventory.refresh(excludedFolders: m.excludedFolders) }
+        }
+        .onChange(of: inventory.error) { _, error in
+            if error != nil { expanded = true }
         }
         .onDisappear { inventory.cancel() }
         .padding(14)

@@ -20,7 +20,7 @@ public enum StorageKind: String, CaseIterable, Sendable {
         case .nodeModules, .installedModules, .packageCaches: .packages
         case .pythonEnvironments, .containerStorage: .toolchains
         case .aiCaches, .modelCaches, .buildOutputs, .temporary: .caches
-        case .claudeSessions, .codexSessions: .agents
+        case .claudeSessions, .codexSessions, .toolData: .agents
         case .installers, .oldDownloads: .generic
         }
     }
