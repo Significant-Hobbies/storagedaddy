@@ -115,7 +115,8 @@ struct DashboardView: View {
         }
         .background(Color.black)
         .buttonStyle(StorageButtonStyle())
-        .task { dashboard.loadIfNeeded(); await dashboard.sampleWhileVisible() }
+        .background(DashboardSamplingObserver(dashboard: dashboard).frame(width: 0, height: 0))
+        .task { dashboard.loadIfNeeded() }
     }
 
     private var header: some View {
