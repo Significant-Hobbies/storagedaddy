@@ -19,6 +19,23 @@ final class ToolStorageTests: XCTestCase {
             processOutput: "123 /Users/fixture/.local/bin/claude"))
     }
 
+    func testParentSelectionsIncludeOwningToolRoots() async throws {
+        let root = fixtureRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for (path, command) in [
+            ("Library/Application Support/Cursor/snapshots", "/Applications/Cursor.app/Contents/MacOS/Cursor"),
+            ("Library/Application Support/Claude/vm_bundles", "/Applications/Claude.app/Contents/MacOS/Claude"),
+            ("Library/Developer/Xcode/iOS DeviceSupport", "/Applications/Xcode.app/Contents/MacOS/Xcode")
+        ] {
+            try write(path + "/state.bin", root: root)
+            let parent = root.appendingPathComponent(path).deletingLastPathComponent()
+            let scan = try await DiskScanner.scan(root: parent)
+            let urls = ToolStorage.dataRoots(in: scan)
+            XCTAssertEqual(urls.map(\.lastPathComponent), [URL(fileURLWithPath: path).lastPathComponent])
+            XCTAssertThrowsError(try ToolStorage.validateActiveUse(urls: urls, processOutput: "123 " + command))
+        }
+    }
+
     func testRecognizesDataFootprintsWithoutClaimingConfigurationOrDoubleCounting() async throws {
         let root = fixtureRoot()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -87,7 +104,7 @@ final class ToolStorageTests: XCTestCase {
             ("Library/Developer/Xcode/iOS DeviceSupport", "symbols.bin"),
             (".gortex/store", "index.sqlite"),
             (".selltraces", "traces.db"),
-            ("ordinary", "original.txt")
+            ("ordinary", "lsof:original.txt")
         ]
         for (parent, file) in paths { try write(parent + "/" + file, root: root) }
         let scan = try await DiskScanner.scan(root: root)

@@ -6,10 +6,7 @@ import Foundation
 enum CleanupActiveUse {
     static func validate(urls: [URL], home: String = FileManager.default.homeDirectoryForCurrentUser.path) throws {
         let text = try probe(executable: "/usr/sbin/lsof",
-            arguments: ["-n", "-P", "-F0pcn", "-u", String(getuid())], maximumOutputBytes: 32 * 1024 * 1024)
-        guard !text.contains("lsof:") else {
-            throw error("Current file use could not be checked. Quit active builds or installs and review this folder again.")
-        }
+            arguments: ["-w", "-n", "-P", "-F0pcn", "-u", String(getuid())], maximumOutputBytes: 32 * 1024 * 1024)
         for url in urls {
             if let user = user(of: url.path, in: text) {
                 throw error("\(url.lastPathComponent) is in use by \(user). Quit that process before cleanup.")
@@ -34,7 +31,7 @@ enum CleanupActiveUse {
         do {
             let result = try PackageToolCommand.run(executable: URL(fileURLWithPath: executable), arguments: arguments,
                 directory: FileManager.default.temporaryDirectory, timeout: 15,
-                maximumOutputBytes: maximumOutputBytes, requireCompleteOutput: true)
+                maximumOutputBytes: maximumOutputBytes, requireCompleteOutput: true, mergeStandardError: false)
             guard result.status == 0 else { throw error("Process evidence unavailable.") }
             return result.output
         } catch is CancellationError { throw CancellationError() }

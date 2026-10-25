@@ -28,11 +28,12 @@ public enum PackageCacheTool: String, CaseIterable, Identifiable, Sendable {
 
     public func executable(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL? {
         let name = self == .pip ? "pip3" : rawValue
-        let roots = [home.appendingPathComponent(".local/bin").path,
+        let pnpmRoots = self == .pnpm ? [
                      home.appendingPathComponent(".local/share/mise/shims").path,
                      home.appendingPathComponent(".local/share/mise/installs/node/lts/bin").path,
-                     home.appendingPathComponent("Library/pnpm").path,
-                     "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+                     home.appendingPathComponent("Library/pnpm").path] : []
+        let roots = [home.appendingPathComponent(".local/bin").path] + pnpmRoots
+            + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
             + (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
         return roots.map { URL(fileURLWithPath: $0).appendingPathComponent(name) }
             .first { FileManager.default.isExecutableFile(atPath: $0.path) }
@@ -66,14 +67,15 @@ public enum PackageToolCommand {
     /// Fixed executable and arguments, never a shell command. Drain output even
     /// after the display bound; a verbose manager cannot deadlock the pipe.
     public static func run(executable: URL, arguments: [String], directory: URL, timeout: TimeInterval = 300,
-                           maximumOutputBytes: Int = 262_144, requireCompleteOutput: Bool = false) throws -> PackageToolCommandResult {
+                           maximumOutputBytes: Int = 262_144, requireCompleteOutput: Bool = false, mergeStandardError: Bool = true) throws -> PackageToolCommandResult {
         try Task.checkCancellation()
         let process = Process(), pipe = Pipe()
         process.executableURL = executable
         process.arguments = arguments
         process.currentDirectoryURL = directory
         process.standardOutput = pipe
-        process.standardError = pipe
+        if mergeStandardError { process.standardError = pipe }
+        else { process.standardError = FileHandle.nullDevice }
         process.standardInput = FileHandle.nullDevice
         var environment = ProcessInfo.processInfo.environment
         environment["HOMEBREW_NO_AUTO_UPDATE"] = "1"

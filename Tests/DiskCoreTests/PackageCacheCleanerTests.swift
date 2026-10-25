@@ -38,6 +38,10 @@ final class PackageCacheCleanerTests: XCTestCase {
         let output = try PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/printf"), arguments: ["%s", "$(touch should-not-exist); literal"], directory: FileManager.default.temporaryDirectory)
         XCTAssertEqual(output.status, 0)
         XCTAssertEqual(output.output, "$(touch should-not-exist); literal")
+        let evidence = try PackageToolCommand.run(executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf stdout; printf warning >&2"], directory: FileManager.default.temporaryDirectory,
+            requireCompleteOutput: true, mergeStandardError: false)
+        XCTAssertEqual(evidence.output, "stdout")
         let failure = try PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/false"), arguments: [], directory: FileManager.default.temporaryDirectory)
         XCTAssertNotEqual(failure.status, 0)
         XCTAssertThrowsError(try PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/printf"),

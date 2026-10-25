@@ -5,6 +5,8 @@ struct NpxCacheReviewView: View {
     @EnvironmentObject private var m: ExplorerModel
     @State private var showAll = false
     @State private var entries: [NpxCacheEntry] = []
+    @State private var entriesScan: Date?
+    private var currentEntries: [NpxCacheEntry] { entriesScan == m.scan?.started ? entries : [] }
     private var cache: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".npm/_npx") }
 
     var body: some View {
@@ -16,11 +18,11 @@ struct NpxCacheReviewView: View {
             }
             Text("Review individual downloaded tool versions. Cleanup checks open files and running CLI names, including tools that already closed their scripts. Modification dates do not prove an entry is unused.")
                 .font(.callout).foregroundStyle(Tints.secondaryText)
-            if entries.isEmpty {
+            if currentEntries.isEmpty {
                 Text("Scan the npx cache to review its entries. Active tools are kept; uncertain package metadata blocks cleanup.")
                     .font(.callout).foregroundStyle(Tints.secondaryText)
             }
-            ForEach(Array(entries.prefix(showAll ? entries.count : 10))) { entry in
+            ForEach(Array(currentEntries.prefix(showAll ? currentEntries.count : 10))) { entry in
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(entry.packageSummary ?? "Package metadata unavailable").font(.callout).lineLimit(2)
@@ -30,16 +32,20 @@ struct NpxCacheReviewView: View {
                     }
                     Spacer()
                     Text(DiskFormat.bytes(entry.allocatedBytes)).monospacedDigit()
-                    Button(m.staged.contains(entry.id) ? "Added" : "Add to Cleanup") { m.stage(entry.id) }
+                    Button(m.staged.contains(entry.id) ? "Added" : "Add to Cleanup") {
+                        guard entriesScan == m.scan?.started else { return }
+                        m.stage(entry.id)
+                    }
                         .disabled(m.busy || m.monitoring || m.staged.contains(entry.id))
                 }.padding(.vertical, 5)
             }
-            if entries.count > 10 {
-                Button(showAll ? "Show fewer entries" : "Show all \(entries.count) entries") { showAll.toggle() }
+            if currentEntries.count > 10 {
+                Button(showAll ? "Show fewer entries" : "Show all \(currentEntries.count) entries") { showAll.toggle() }
             }
         }.padding(18).storagePanel()
             .task(id: m.scan?.started) {
-                guard let scan = m.scan else { entries = []; return }
+                entries = []; entriesScan = nil
+                guard let scan = m.scan else { return }
                 let result = await Task.detached(priority: .utility) {
                     NpxCacheReview.entries(in: scan).map { original in
                         var entry = original
@@ -47,7 +53,9 @@ struct NpxCacheReviewView: View {
                         return entry
                     }
                 }.value
-                if !Task.isCancelled { entries = result }
+                if !Task.isCancelled, m.scan?.started == scan.started {
+                    entries = result; entriesScan = scan.started
+                }
             }
     }
 }

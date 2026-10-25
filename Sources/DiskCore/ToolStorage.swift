@@ -59,6 +59,15 @@ public enum ToolStorage {
         }
     }
 
+    /// Include recognized descendants when a containing folder is selected.
+    static func dataRoots(in scan: ScanResult) -> [URL] {
+        scan.nodes.compactMap { node in
+            guard mayRecognize(name: node.name) else { return nil }
+            let url = scan.url(for: node.id)
+            return recognizedRoot(path: url.path) == nil ? nil : url
+        }
+    }
+
     /// A tool-root selection would also remove small, valuable configuration.
     /// This remains blocked even when an incomplete-scan warning is acknowledged.
     public static func validateCleanup(path: String) throws {

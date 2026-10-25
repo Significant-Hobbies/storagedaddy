@@ -52,7 +52,7 @@ final class NpxCacheReviewTests: XCTestCase {
     func testCurrentProcessCLIBlocksOtherwiseUnopenedEntry() async throws {
         let root = fixtureRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let entry = try package(root: root, name: "abc", dependency: "some-package", bin: "swift-test")
+        let entry = try package(root: root, name: "abc", dependency: "some-package", bin: URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0]).lastPathComponent)
         let scan = try await DiskScanner.scan(root: root)
         let id = try XCTUnwrap(scan.nodes.first { scan.url(for: $0.id).path == entry.path }?.id)
         do {

@@ -92,12 +92,15 @@ public enum CleanupPreflight {
                                        allowingRegenerableChanges: regenerable.contains(candidate.id), home: home)
         }
 
+        var activeUseURLs = candidateURLs.map(\.url)
+
         // Reinstallable project dependencies are reviewed as a whole folder.
         // Keep root identity/path checks without walking every package again.
         for candidate in candidateURLs where candidate.node.isDirectory && !dependencies.contains(candidate.node.id) {
             try Task.checkCancellation()
 
             let result = try await DiskScanner.scan(root: candidate.url)
+            activeUseURLs.append(contentsOf: ToolStorage.dataRoots(in: result))
             for node in result.nodes where node.name == ".gortex" || node.name == ".selltraces" {
                 try ToolStorage.validateCleanup(path: result.url(for: node.id).path)
             }
@@ -137,7 +140,7 @@ public enum CleanupPreflight {
 
         // An unchanged database, snapshot, dependency tree or ordinary file can
         // still be open. Regeneration changes comparison rules, never use checks.
-        let urls = candidateURLs.map(\.url)
+        let urls = activeUseURLs
         let probe = Task.detached(priority: .utility) { try CleanupActiveUse.validate(urls: urls, home: home) }
         try await probe.value
 
