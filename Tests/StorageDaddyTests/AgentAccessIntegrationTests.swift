@@ -118,6 +118,20 @@ struct AgentAccessIntegrationTests {
         #expect(f.explorer.staged.contains(f.nodeID))
     }
 
+    @Test func agentReviewCannotTakeOverAnExistingNativeCleanupItem() async throws {
+        let f = try await fixture()
+        defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
+        f.explorer.stage(f.nodeID)
+        try await waitForReview(f)
+        #expect(f.explorer.staged.contains(f.nodeID))
+        _ = await call("move_to_trash", arguments: .object(["nodeIDs": .array([.integer(f.nodeID)]), "reason": .string("Already staged fixture")]), fixture: f)
+        f.agents.review(try #require(f.agents.reviews.first?.id))
+        try await waitForReview(f)
+        f.agents.revoke(try #require(f.agents.sessions.first?.id))
+        #expect(f.agents.validateStagedPermissions())
+        #expect(f.explorer.staged.contains(f.nodeID))
+    }
+
     @Test func rescanReusedNodeIDDoesNotInheritAgentAttribution() async throws {
         let f = try await fixture()
         defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
@@ -189,6 +203,13 @@ struct AgentAccessIntegrationTests {
         #expect(!registrations.contains { $0["clientID"].string == revokedClient })
         #expect(registrations.contains { $0["clientID"].string == activeClient })
         #expect(f.agents.sessions.contains { $0.id == active.id })
+        // Forgetting applies immediately to the listening OAuth instance too.
+        for (client, expected) in [(revokedClient, 400), (activeClient, 200)] {
+            var authorize = URLComponents(string: "http://127.0.0.1:\(f.port)/authorize")!
+            authorize.queryItems = ["client_id": client, "response_type": "code", "redirect_uri": "http://127.0.0.1:56321/callback", "resource": "http://127.0.0.1:\(f.port)/mcp", "scope": "read", "code_challenge_method": "S256", "code_challenge": AgentOAuth.challenge(String(repeating: "a", count: 64))].map { URLQueryItem(name: $0.key, value: $0.value) }
+            let (_, response) = try await URLSession.shared.data(from: #require(authorize.url))
+            #expect((response as? HTTPURLResponse)?.statusCode == expected)
+        }
     }
 
     @Test func actualSocketHTTPMetadataAndPersistenceRemainLocalAndOffAfterRestart() async throws {

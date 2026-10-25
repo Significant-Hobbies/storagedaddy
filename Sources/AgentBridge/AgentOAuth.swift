@@ -45,6 +45,11 @@ import CryptoKit
     }
     public func resetPending() { authorizations.removeAll(); activeTokenHashes.removeAll() }
 
+    public func forgetRegistrations(_ clientIDs: Set<String>) {
+        registrations = registrations.filter { !clientIDs.contains($0.key) }
+        authorizations = authorizations.filter { !clientIDs.contains($0.value.registration.clientID) }
+    }
+
     public func handle(_ request: AgentHTTPRequest) async -> AgentHTTPResponse {
         do { try AgentHTTPServer.validateHeaders(request.headers, port: port) }
         catch { return .failure("invalid_request", status: 400) }

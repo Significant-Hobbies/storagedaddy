@@ -178,8 +178,11 @@ private struct AgentPolicy: Codable {
     func forgetRevoked() {
         let revokedClients = Set(sessions.filter { $0.revokedAt != nil }.compactMap(\.oauthClientID))
         let activeClients = Set(sessions.filter { $0.revokedAt == nil }.compactMap(\.oauthClientID))
+        let forgottenClients = revokedClients.subtracting(activeClients)
         sessions.removeAll { $0.revokedAt != nil }
-        oauthRegistrations.removeAll { revokedClients.subtracting(activeClients).contains($0.clientID) }
+        oauthRegistrations.removeAll { forgottenClients.contains($0.clientID) }
+        oauth?.forgetRegistrations(forgottenClients)
+        pairings.removeAll { $0.oauthClientID.map(forgottenClients.contains) == true }
         save()
     }
     func approveCurrentRoot() {
@@ -215,6 +218,11 @@ private struct AgentPolicy: Codable {
         }
         guard let node = scan.nodes.first(where: { $0.device == request.device && $0.inode == request.inode && scan.url(for: $0.id).path == request.path }), node.parent != nil else {
             reviews[i].pending = false; reviews[i].outcome = "Refused: scan or item identity changed; scan again"; save(); return
+        }
+        if m.hasAncestor(node.id, in: m.staged) {
+            reviews[i].pending = false
+            reviews[i].outcome = "Already covered by native Cleanup review. Existing staging is unchanged."
+            save(); return
         }
         // Native action only. The existing preflight and Cleanup confirmation
         // remain authoritative. RPC has no route to trashStaged/deleteStaged.
