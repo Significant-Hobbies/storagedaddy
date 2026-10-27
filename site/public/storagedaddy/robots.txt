@@ -1,4 +1,132 @@
 User-agent: *
 Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: GPTBot
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: ClaudeBot
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: Google-Extended
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: Applebot-Extended
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: CCBot
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: Bytespider
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: ChatGPT-User
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: Claude-SearchBot
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: Claude-User
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: PerplexityBot
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
+
+User-agent: Perplexity-User
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /auth
+Disallow: /dashboard
+Allow: /api/ai$
+Allow: /api/md$
+Allow: /api/md/
 
 Sitemap: https://storage.daddyrad.com/sitemap.xml
+# Keep in sync with ai.txt and llms.txt.

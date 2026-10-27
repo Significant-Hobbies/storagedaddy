@@ -1,12 +1,22 @@
-# storagedaddy
+# StorageDaddy
 
-> Open-source Mac storage analyzer for developers. Download now and get all future versions free forever.
+> Free, open-source Mac disk space analyzer for developers. Find large files, builds and caches, then review cleanup before moving anything to Trash.
 
-## Product
-- [Product guide](https://storage.daddyrad.com/index.md): Features, system requirements, cleanup safeguards, privacy and archive limitations.
-- [Download](https://storage.daddyrad.com/download): Signed and notarized Apple silicon macOS app.
-- [Source and feedback](https://github.com/sarthakagrawal927/storagedaddy): MIT source and GitHub issues.
+## Download and source
 
-## Machine surfaces
-- [Agent catalog](https://storage.daddyrad.com/api/ai)
-- [Sitemap](https://storage.daddyrad.com/sitemap.xml)
+[Download](https://storage.daddyrad.com/download)
+[Source and feedback](https://github.com/sarthakagrawal927/storagedaddy)
+
+<!-- Keep in sync with robots.txt and ai.txt. -->
+
+## Public pages
+
+- [Free Mac Disk Space Analyzer for Developers | storagedaddy](https://storage.daddyrad.com/index.md): Free, open-source Mac disk space analyzer for developers. Find large files, builds and caches, then review cleanup before moving anything to Trash.
+
+## Machine-readable
+
+- [Full content](https://storage.daddyrad.com/llms-full.txt): Bounded public page content
+- [Markdown catalog](https://storage.daddyrad.com/api/md/_catalog): All registered public routes
+- [Agent catalog](https://storage.daddyrad.com/api/ai): Existing discovery contract
+- [AI usage policy](https://storage.daddyrad.com/ai.txt): Permissions and attribution
+- [Sitemap](https://storage.daddyrad.com/sitemap.xml): Canonical HTML pages

@@ -16,3 +16,5 @@ if (!html.includes('data-fleet-footer="studio"')) {
 cpSync(new URL('_astro/', dist), new URL('_astro/', target), { recursive: true });
 cpSync(new URL('home/', dist), new URL('home/', target), { recursive: true });
 cpSync(new URL('index.html', dist), new URL('index.html', target));
+
+await import('./build-readability.mjs');
