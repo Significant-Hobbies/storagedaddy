@@ -1,3 +1,4 @@
+import { handleReadability, advertiseMarkdown } from './agent-readability.mjs';
 import release from './release.json' with { type: 'json' };
 
 const base = '/storagedaddy';
@@ -24,11 +25,14 @@ export default {
   /** @param {Request} request @param {Env} env */
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (!['GET', 'HEAD'].includes(request.method)) return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
     const legacyPath = url.pathname === base || url.pathname.startsWith(base + '/');
     if (legacyPath) return Response.redirect(canonicalOrigin + (url.pathname.slice(base.length) || '/') + url.search, 308);
     if (url.hostname === legacyOrigin) return Response.redirect(canonicalOrigin + url.pathname + url.search, 308);
     if (url.hostname === 'significanthobbies.com') return new Response('Not found', { status: 404 });
+    const readable = await handleReadability(request);
+    if (readable) return secure(readable);
+    if (request.method === 'OPTIONS') return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
     if (url.pathname === '/release.json') {
       const metadata = {
         name: 'storagedaddy', version: release.version, build: release.build,
@@ -72,6 +76,6 @@ export default {
     } else if (url.pathname === '/' && request.method === 'GET' && response.status === 200) {
       record(env, 'page_view');
     }
-    return result;
+    return url.pathname === '/' && response.ok ? advertiseMarkdown(result, canonicalOrigin, '/index.md') : result;
   }
 };

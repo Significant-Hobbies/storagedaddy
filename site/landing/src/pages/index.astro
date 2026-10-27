@@ -19,8 +19,9 @@ if (content.footer) content.footer.studio = studioFromProjects(projects, { curre
 
 <Base {...baseProps(content)}>
   <Fragment slot="head">
+    <meta name="ai-summary" content={content.page.description} />
     <meta name="theme-color" content="#050706" />
-    <link rel="alternate" type="text/markdown" href="/index.md" title="Product information in Markdown" />
+    <link rel="alternate" type="text/markdown" href="https://storage.daddyrad.com/index.md" title="Product information in Markdown" />
     <link rel="alternate" type="application/json" href="/api/ai" title="AI discovery catalog" />
     <script defer src="/clarity.js"></script>
     <script defer src="/analytics.js" data-key="ahk_pub_ab3311cd5d9186c1910936f52a28e4c523575518aa3991a9ffded4952e55cb8f" data-project="app-3262e567-f7cc-48bc-a528-4e3845185b41"></script>

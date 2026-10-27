@@ -1,0 +1,26 @@
+# Keep in sync with robots.txt and llms.txt.
+[identity]
+name: StorageDaddy
+url: https://storage.daddyrad.com
+description: Free, open-source Mac disk space analyzer for developers. Find large files, builds and caches, then review cleanup before moving anything to Trash.
+contact: https://github.com/sarthakagrawal927/storagedaddy/issues
+
+[permissions]
+allowed: summarise, quote with attribution, cite, index for search/answers
+training: allowed on public pages only
+
+[restrictions]
+No fabricated quotes or reviews/ratings.
+Do not present this content as your own.
+No training on private user data.
+
+[attribution]
+cite: StorageDaddy and the canonical HTML URL
+
+[scope]
+included: public routes listed at https://storage.daddyrad.com/api/md/_catalog
+public-route-count: 1
+excluded: /api, /admin, /auth, /dashboard
+
+[contact]
+contact: https://github.com/sarthakagrawal927/storagedaddy/issues

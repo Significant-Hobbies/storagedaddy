@@ -115,12 +115,13 @@ test('agent endpoints keep GET and HEAD types and routes without download events
   for (const method of ['GET', 'HEAD']) {
    const e=env(); const response=await worker.fetch(new Request('https://storage.daddyrad.com'+path,{method}),e);
    assert.equal(response.status,200);
-   assert.equal(new URL(e.requested[0]).pathname,'/storagedaddy'+target);
+   if (['/api/ai', '/sitemap.xml'].includes(path)) assert.equal(new URL(e.requested[0]).pathname,'/storagedaddy'+target);
+   else assert.deepEqual(e.requested, []);
    assert.equal(response.headers.get('content-type'),type+'; charset=utf-8');
    assert.equal(e.events.length,0);
   }
  }
- const e=env(404); const response=await worker.fetch(new Request('https://storage.daddyrad.com/index.md'),e);
+ const e=env(404); const response=await worker.fetch(new Request('https://storage.daddyrad.com/unknown.md'),e);
  assert.equal(response.status,404);
- assert.notEqual(response.headers.get('content-type'),'text/markdown; charset=utf-8');
+ assert.equal(response.headers.get('content-type'),'text/markdown; charset=utf-8');
 });
