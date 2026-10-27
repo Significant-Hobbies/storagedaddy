@@ -16,7 +16,7 @@ for (const product of ['storagedaddy']) {
     const port = await freePort();
     const inspectorPort = await freePort();
     const origin = `http://127.0.0.1:${port}`;
-    const server = spawn(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'dev', '--local', '--local-upstream', 'storage.daddyrad.com', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', String(inspectorPort), '--compatibility-date', '2026-08-11', '--log-level', 'info'], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const server = spawn(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'dev', '--local', '--local-upstream', 'storage.daddyrad.com', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', String(inspectorPort), '--log-level', 'info'], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let logs = '';
     server.stdout.on('data', (chunk) => { logs += chunk; });
     server.stderr.on('data', (chunk) => { logs += chunk; });

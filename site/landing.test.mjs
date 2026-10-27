@@ -31,7 +31,7 @@ test('home preserves discovery metadata and the StudioFooter identity', () => {
   }
   const ld = [...html.matchAll(/<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g)].flatMap(([, data]) => JSON.parse(data));
   assert.deepEqual(ld, content.page.jsonLd);
-  for (const [type, href] of [['text/markdown', '/index.md'], ['application/json', '/api/ai']]) {
+  for (const [type, href] of [['text/markdown', 'https://storage.daddyrad.com/index.md'], ['application/json', '/api/ai']]) {
     assert.ok(tags('link').some((tag) => attr(tag, 'rel') === 'alternate' && attr(tag, 'type') === type && attr(tag, 'href') === href));
   }
 });

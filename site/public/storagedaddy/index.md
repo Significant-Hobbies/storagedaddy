@@ -99,7 +99,7 @@ No. You can select recognized caches for review, and moving anything to Trash re
 
 ### How should I review developer caches and AI session history?
 
-Example: a project’s node_modules and its Claude or Codex history are both large. Build 119’s published guidance labels dependencies Usually regenerable: check the project manifest, available versions and local edits before cleanup. It labels Claude and Codex history Not regenerable · archive first: reinstalling a tool cannot recover conversations. A build-folder name alone leaves regeneration unconfirmed. Inspect the source-backed decision example. This is a review example, not a reclaimed-space benchmark or a promise that an export can resume a session. Check the current release metadata.
+Example: a project’s node_modules and its Claude or Codex history are both large. Build 119’s published guidance labels dependencies Usually regenerable: check the project manifest, available versions and local edits before cleanup. It labels Claude and Codex history Not regenerable · archive first: reinstalling a tool cannot recover conversations. A build-folder name alone leaves regeneration unconfirmed. [Inspect the source-backed decision example.](https://storage.daddyrad.com/developer-storage-proof.json) This is a review example, not a reclaimed-space benchmark or a promise that an export can resume a session. [Check the current release metadata.](https://storage.daddyrad.com/release.json)
 
 ### What does an AI archive include?
 
@@ -111,11 +111,11 @@ Download the DMG, open it, then drag storagedaddy into Applications. Open the ap
 
 ### Why is Mac System Data large, and can storagedaddy show it?
 
-Apple uses System Data for files that do not fit a more specific Storage category, including caches, logs and other system resources. It is a category, not a folder that storagedaddy can reproduce. Scan a disk or folder to find readable large files; Developer Insights can highlight builds and caches worth reviewing. Protected locations, snapshots and shared APFS storage can make the scan total differ from macOS Storage. Review every cleanup choice, and do not assume allocated bytes will become free space. See Apple’s storage guidance. On Macs with limited memory, download storagedaddy and start with a folder scan.
+Apple uses System Data for files that do not fit a more specific Storage category, including caches, logs and other system resources. It is a category, not a folder that storagedaddy can reproduce. Scan a disk or folder to find readable large files; Developer Insights can highlight builds and caches worth reviewing. Protected locations, snapshots and shared APFS storage can make the scan total differ from macOS Storage. Review every cleanup choice, and do not assume allocated bytes will become free space. [See Apple’s storage guidance.](https://support.apple.com/102624) On Macs with limited memory, [download storagedaddy](https://storage.daddyrad.com/download) and start with a folder scan.
 
 ### Is storagedaddy free and open source?
 
-Everyone who downloads during early access gets all future versions free forever. There is no trial expiry, account, checkout or subscription. The published source remains available under the MIT license. Read the code, report an issue, or contribute on GitHub. Third-party libraries and provider artwork retain their own terms; see the repository notices.
+Everyone who downloads during early access gets all future versions free forever. There is no trial expiry, account, checkout or subscription. The published source remains available under the MIT license. [Read the code, report an issue, or contribute on GitHub.](https://github.com/sarthakagrawal927/storagedaddy) Third-party libraries and provider artwork retain their own terms; see the repository notices.
 
 ### Find the space.
 *Make the call.*

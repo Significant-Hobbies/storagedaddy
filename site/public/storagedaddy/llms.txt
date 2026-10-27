@@ -2,6 +2,10 @@
 
 > Free, open-source Mac disk space analyzer for developers. Find large files, builds and caches, then review cleanup before moving anything to Trash.
 
+## Download and source
+
+[Download](https://storage.daddyrad.com/download)
+[Source and feedback](https://github.com/sarthakagrawal927/storagedaddy)
 
 <!-- Keep in sync with robots.txt and ai.txt. -->
 

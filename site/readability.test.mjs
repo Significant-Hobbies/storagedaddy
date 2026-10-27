@@ -48,3 +48,13 @@ test('unknown Markdown paths cannot advertise off-origin canonicals', async () =
     assert.ok(response.headers.get('link').includes(fixtureOrigin + '/llms.txt'));
   }
 });
+
+test('authored FAQ links and legacy agent actions remain discoverable', async () => {
+  const { default: compat } = await import('./landing/src/content/head-compat.json', { with: { type: 'json' } });
+  const body = await (await fetch('/index.md')).text();
+  for (const { text, href } of compat.faqLinks) assert.ok(body.includes(`[${text}](${new URL(href, origin).href})`), href);
+  const index = await (await fetch('/llms.txt')).text();
+  assert.ok(index.includes(origin + '/download'));
+  assert.ok(index.includes('https://github.com/sarthakagrawal927/storagedaddy'));
+  assert.equal((await fetch('/robots.txt')).headers.get('cache-control'), 'public, max-age=300');
+});

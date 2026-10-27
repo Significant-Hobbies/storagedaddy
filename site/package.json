@@ -6,7 +6,7 @@
     "dev": "wrangler dev",
     "landing:build": "node scripts/build-landing.mjs",
     "landing:optimize": "node scripts/optimize-landing.mjs",
-    "check": "node --test worker.test.mjs analytics.test.mjs clarity.test.mjs landing.test.mjs && tsc --noEmit && wrangler deploy --dry-run",
+    "check": "node --test worker.test.mjs analytics.test.mjs clarity.test.mjs landing.test.mjs readability.test.mjs && tsc --noEmit && wrangler deploy --dry-run",
     "deploy": "node check-release.mjs && npm run check && wrangler deploy --tag \"$(git rev-parse HEAD)\"",
     "readability:build": "node scripts/build-readability.mjs",
     "test:readability": "node --test readability.test.mjs worker.test.mjs",
