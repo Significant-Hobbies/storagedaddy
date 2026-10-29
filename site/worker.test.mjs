@@ -134,7 +134,8 @@ test('known web routes redirect directly to the mounted family website with exac
  ];
  for (const section of ['privacy', 'terms', 'support', 'accessibility', 'release', 'testflight', 'blog']) {
   routes.push([`/${section}`, `/${section}/`], [`/${section}/`, `/${section}/`],
-   [`/${section}/index.html`, `/${section}/`], [`/${section}/index.md`, `/${section}/index.md`]);
+   [`/${section}/index.html`, `/${section}/`], [`/${section}/index.md`, `/${section}/index.md`],
+   [`/${section}.md`, `/${section}/index.md`]);
  }
  const query = '?utm_source=old&keep=a%2Fb&keep=%25';
  for (const base of ['https://storage.daddyrad.com', 'https://storagedaddy.significanthobbies.com', 'https://significanthobbies.com/storagedaddy']) {

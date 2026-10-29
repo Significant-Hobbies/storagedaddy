@@ -14,6 +14,7 @@ for (const section of ['privacy', 'terms', 'support', 'accessibility', 'release'
   routes.set(`/${section}/`, `/${section}/`);
   routes.set(`/${section}/index.html`, `/${section}/`);
   routes.set(`/${section}/index.md`, `/${section}/index.md`);
+  routes.set(`/${section}.md`, `/${section}/index.md`);
 }
 
 /** @param {string} path @param {string} search @param {string} mount */

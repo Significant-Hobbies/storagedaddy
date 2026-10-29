@@ -32,7 +32,7 @@ for (const product of ['storagedaddy']) {
       assert.equal(catalogResponse.status, 200);
       const catalog = await catalogResponse.json();
       const query = '?keep=a%2Fb&source=legacy';
-      for (const [path, target] of [['/', '/'], ['/index.md', '/index.md'], ['/release', '/release/'], ['/robots.txt', '/robots.txt'], ['/llms-full.txt', '/llms-full.txt']]) {
+      for (const [path, target] of [['/', '/'], ['/index.md', '/index.md'], ['/release', '/release/'], ['/privacy.md', '/privacy/index.md'], ['/robots.txt', '/robots.txt'], ['/llms-full.txt', '/llms-full.txt']]) {
         for (const method of ['GET', 'HEAD']) {
           const response = await fetch(origin + path + query, { method, redirect: 'manual' });
           assert.equal(response.status, 308);
