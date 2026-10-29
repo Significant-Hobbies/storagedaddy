@@ -39,12 +39,14 @@ test('HEAD, range requests and missing downloads are not counted', async () => {
  }
  const e=env(404); const response=await worker.fetch(new Request('https://storage.daddyrad.com/download'),e); assert.equal(response.status,404); assert.equal(e.events.length,0);
 });
-test('root landing and relative assets map to packaged assets without duplicate events', async () => {
+test('marketing root redirects while relative assets retain their packaged route', async () => {
  const e=env();
- const response=await worker.fetch(new Request('https://storage.daddyrad.com/'),e);
- await worker.fetch(new Request('https://storage.daddyrad.com/style.css'),e);
- assert.deepEqual(e.requested.map(u=>new URL(u).pathname),['/storagedaddy/','/storagedaddy/style.css']);
- assert.equal(e.events.length,1); assert.equal(e.events[0].blobs[0],'page_view');
+ const landing=await worker.fetch(new Request('https://storage.daddyrad.com/'),e);
+ assert.equal(landing.status,308);
+ assert.equal(landing.headers.get('location'),'https://daddyrad.com/storage/');
+ const response=await worker.fetch(new Request('https://storage.daddyrad.com/style.css'),e);
+ assert.deepEqual(e.requested.map(u=>new URL(u).pathname),['/storagedaddy/style.css']);
+ assert.equal(e.events.length,0);
  assert.match(response.headers.get('content-security-policy'), /https:\/\/\*\.clarity\.ms/);
  assert.match(response.headers.get('content-security-policy'), /https:\/\/c\.bing\.com/);
  assert.match(response.headers.get('content-security-policy'), /script-src[^;]*https:\/\/static\.cloudflareinsights\.com/);
@@ -77,14 +79,14 @@ test('footer assets are packaged under the Worker asset prefix with recorded sou
 test('legacy landing and download links redirect to the corrected domain without counting', async () => {
  for (const [path,target] of [['/storagedaddy','/'],['/storagedaddy/','/'],['/storagedaddy/download','/download'],['/storagedaddy/assets/StorageDaddy.png','/assets/StorageDaddy.png']]) {
   const e=env(); const response=await worker.fetch(new Request('https://significanthobbies.com'+path),e);
-  assert.equal(response.status,308); assert.equal(response.headers.get('location'),'https://storage.daddyrad.com'+target);
+  assert.equal(response.status,308); assert.equal(response.headers.get('location'),target === '/' ? 'https://daddyrad.com/storage/' : 'https://storage.daddyrad.com'+target);
   assert.equal(e.requested.length,0); assert.equal(e.events.length,0);
  }
 });
 test('retired subdomain redirects every path to storage.daddyrad.com', async () => {
  for (const path of ['/', '/download', '/updates/appcast.xml', '/index.md?x=1']) {
   const e=env(); const response=await worker.fetch(new Request('https://storagedaddy.significanthobbies.com'+path),e);
-  assert.equal(response.status,308); assert.equal(response.headers.get('location'),'https://storage.daddyrad.com'+path);
+  assert.equal(response.status,308); assert.equal(response.headers.get('location'),path === '/' || path.startsWith('/index.md') ? 'https://daddyrad.com/storage'+path : 'https://storage.daddyrad.com'+path);
   assert.equal(e.requested.length,0); assert.equal(e.events.length,0);
  }
 });
@@ -107,10 +109,7 @@ test('updater feed is RSS with bounded caching and does not inflate download met
 test('agent endpoints keep GET and HEAD types and routes without download events', async () => {
  for (const [path, target, type] of [
   ['/api/ai', '/api/ai.json', 'application/json'],
-  ['/index.md', '/index.md', 'text/markdown'],
-  ['/llms.txt', '/llms.txt', 'text/plain'],
   ['/robots.txt', '/robots.txt', 'text/plain'],
-  ['/sitemap.xml', '/sitemap.xml', 'application/xml'],
  ]) {
   for (const method of ['GET', 'HEAD']) {
    const e=env(); const response=await worker.fetch(new Request('https://storage.daddyrad.com'+path,{method}),e);
@@ -124,4 +123,90 @@ test('agent endpoints keep GET and HEAD types and routes without download events
  const e=env(404); const response=await worker.fetch(new Request('https://storage.daddyrad.com/unknown.md'),e);
  assert.equal(response.status,404);
  assert.equal(response.headers.get('content-type'),'text/markdown; charset=utf-8');
+});
+
+
+test('known web routes redirect directly to the mounted family website with exact queries', async () => {
+ const routes = [
+  ['/', '/'], ['/index.html', '/'], ['/index.md', '/index.md'],
+  ['/llms.txt', '/llms.txt'], ['/llms-full.txt', '/llms-full.txt'],
+  ['/ai.txt', '/ai.txt'], ['/sitemap.xml', '/sitemap.xml'],
+  ['/blog/rss.xml', '/blog/rss.xml'],
+ ];
+ for (const section of ['privacy', 'terms', 'support', 'accessibility', 'release', 'testflight', 'blog']) {
+  routes.push([`/${section}`, `/${section}/`], [`/${section}/`, `/${section}/`],
+   [`/${section}/index.html`, `/${section}/`], [`/${section}/index.md`, `/${section}/index.md`],
+   [`/${section}.md`, `/${section}/index.md`]);
+ }
+ const query = '?utm_source=old&keep=a%2Fb&keep=%25';
+ for (const base of ['https://storage.daddyrad.com', 'https://storagedaddy.significanthobbies.com', 'https://significanthobbies.com/storagedaddy']) {
+  for (const method of ['GET', 'HEAD']) for (const [path, target] of routes) {
+   const e = env();
+   const response = await worker.fetch(new Request(base + path + query, { method }), e);
+   assert.equal(response.status, 308, `${method} ${base}${path}`);
+   assert.equal(response.headers.get('location'), 'https://daddyrad.com/storage' + target + query);
+   assert.equal(await response.text(), '');
+   assert.deepEqual(e.requested, []);
+   assert.deepEqual(e.events, []);
+  }
+ }
+ const prefixRoot = await worker.fetch(new Request('https://significanthobbies.com/storagedaddy' + query), env());
+ assert.equal(prefixRoot.headers.get('location'), 'https://daddyrad.com/storage/' + query);
+});
+
+test('unknown, API and resource paths retain unavailable responses instead of marketing redirects', async () => {
+ for (const path of ['/missing', '/blog/missing/', '/assets/missing.png', '/download/', '/updates/missing.dmg', '/releases/missing.dmg', '/api/missing', '/api/ai.json', '/openapi.json']) {
+  for (const method of ['GET', 'HEAD']) {
+   const e = env(404);
+   const response = await worker.fetch(new Request('https://storage.daddyrad.com' + path + '?keep=1', { method }), e);
+   assert.equal(response.status, 404, `${method} ${path}`);
+   assert.equal(response.headers.get('location'), null);
+  }
+ }
+ const metadata = await worker.fetch(new Request('https://storage.daddyrad.com/release.json'), env(404));
+ assert.equal(metadata.status, 200);
+ assert.equal((await metadata.json()).downloadUrl, 'https://storage.daddyrad.com/download');
+});
+
+test('protected legacy redirects and API preflight retain their original destination and methods', async () => {
+ const query = '?keep=a%2Fb';
+ for (const base of ['https://storagedaddy.significanthobbies.com', 'https://significanthobbies.com/storagedaddy']) {
+  for (const path of ['/download', '/updates/appcast.xml', '/release.json', '/robots.txt', '/releases/missing.dmg', '/api/ai', '/api/md']) {
+   for (const method of ['GET', 'HEAD', 'OPTIONS']) {
+    const response = await worker.fetch(new Request(base + path + query, { method }), env());
+    assert.equal(response.status, 308);
+    assert.equal(response.headers.get('location'), 'https://storage.daddyrad.com' + path + query);
+   }
+  }
+ }
+ for (const path of ['/api/md', '/api/md/_catalog']) {
+  const response = await worker.fetch(new Request('https://storage.daddyrad.com' + path, { method: 'OPTIONS' }), env());
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get('access-control-allow-methods'), 'GET, HEAD, OPTIONS');
+ }
+ for (const path of ['/', '/release', '/release.json', '/api/ai']) {
+  for (const method of ['POST', 'PUT', 'DELETE', 'OPTIONS']) {
+   const response = await worker.fetch(new Request('https://storage.daddyrad.com' + path, { method }), env());
+   assert.equal(response.status, 405, `${method} ${path}`);
+   assert.equal(response.headers.get('allow'), 'GET, HEAD');
+   assert.equal(response.headers.get('location'), null);
+  }
+ }
+});
+
+
+test('native host robots policy remains readable for downloads and retained APIs', async () => {
+ for (const method of ['GET', 'HEAD']) {
+  const response = await worker.fetch(new Request('https://storage.daddyrad.com/robots.txt', { method }), env());
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('location'), null);
+  assert.equal(response.headers.get('content-type'), 'text/plain; charset=utf-8');
+  const text = await response.text();
+  if (method === 'GET') {
+   assert.match(text, /User-agent: \*\nAllow: \//);
+   assert.ok(text.includes('Allow: /api/ai$'));
+   assert.ok(text.includes('Allow: /api/md$'));
+   assert.ok(text.includes('Sitemap: https://storage.daddyrad.com/sitemap.xml'));
+  } else assert.equal(text, '');
+ }
 });

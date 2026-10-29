@@ -1,3 +1,4 @@
+import { marketingLocation } from './marketing-redirect.mjs';
 import { handleReadability, advertiseMarkdown } from './agent-readability.mjs';
 import release from './release.json' with { type: 'json' };
 
@@ -27,6 +28,12 @@ export default {
     const url = new URL(request.url);
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
     const legacyPath = url.pathname === base || url.pathname.startsWith(base + '/');
+    const webPath = legacyPath ? (url.pathname.slice(base.length) || '/') : url.pathname;
+    const marketing = marketingLocation(webPath, url.search, 'storage');
+    if (marketing && ['GET', 'HEAD'].includes(request.method) &&
+        (url.hostname === 'storage.daddyrad.com' || url.hostname === legacyOrigin || legacyPath)) {
+      return Response.redirect(marketing, 308);
+    }
     if (legacyPath) return Response.redirect(canonicalOrigin + (url.pathname.slice(base.length) || '/') + url.search, 308);
     if (url.hostname === legacyOrigin) return Response.redirect(canonicalOrigin + url.pathname + url.search, 308);
     if (url.hostname === 'significanthobbies.com') return new Response('Not found', { status: 404 });
