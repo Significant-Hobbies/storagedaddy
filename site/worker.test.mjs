@@ -109,6 +109,7 @@ test('updater feed is RSS with bounded caching and does not inflate download met
 test('agent endpoints keep GET and HEAD types and routes without download events', async () => {
  for (const [path, target, type] of [
   ['/api/ai', '/api/ai.json', 'application/json'],
+  ['/robots.txt', '/robots.txt', 'text/plain'],
  ]) {
   for (const method of ['GET', 'HEAD']) {
    const e=env(); const response=await worker.fetch(new Request('https://storage.daddyrad.com'+path,{method}),e);
@@ -129,7 +130,7 @@ test('known web routes redirect directly to the mounted family website with exac
  const routes = [
   ['/', '/'], ['/index.html', '/'], ['/index.md', '/index.md'],
   ['/llms.txt', '/llms.txt'], ['/llms-full.txt', '/llms-full.txt'],
-  ['/ai.txt', '/ai.txt'], ['/robots.txt', '/robots.txt'], ['/sitemap.xml', '/sitemap.xml'],
+  ['/ai.txt', '/ai.txt'], ['/sitemap.xml', '/sitemap.xml'],
   ['/blog/rss.xml', '/blog/rss.xml'],
  ];
  for (const section of ['privacy', 'terms', 'support', 'accessibility', 'release', 'testflight', 'blog']) {
@@ -170,7 +171,7 @@ test('unknown, API and resource paths retain unavailable responses instead of ma
 test('protected legacy redirects and API preflight retain their original destination and methods', async () => {
  const query = '?keep=a%2Fb';
  for (const base of ['https://storagedaddy.significanthobbies.com', 'https://significanthobbies.com/storagedaddy']) {
-  for (const path of ['/download', '/updates/appcast.xml', '/release.json', '/releases/missing.dmg', '/api/ai', '/api/md']) {
+  for (const path of ['/download', '/updates/appcast.xml', '/release.json', '/robots.txt', '/releases/missing.dmg', '/api/ai', '/api/md']) {
    for (const method of ['GET', 'HEAD', 'OPTIONS']) {
     const response = await worker.fetch(new Request(base + path + query, { method }), env());
     assert.equal(response.status, 308);
@@ -190,5 +191,22 @@ test('protected legacy redirects and API preflight retain their original destina
    assert.equal(response.headers.get('allow'), 'GET, HEAD');
    assert.equal(response.headers.get('location'), null);
   }
+ }
+});
+
+
+test('native host robots policy remains readable for downloads and retained APIs', async () => {
+ for (const method of ['GET', 'HEAD']) {
+  const response = await worker.fetch(new Request('https://storage.daddyrad.com/robots.txt', { method }), env());
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('location'), null);
+  assert.equal(response.headers.get('content-type'), 'text/plain; charset=utf-8');
+  const text = await response.text();
+  if (method === 'GET') {
+   assert.match(text, /User-agent: \*\nAllow: \//);
+   assert.ok(text.includes('Allow: /api/ai$'));
+   assert.ok(text.includes('Allow: /api/md$'));
+   assert.ok(text.includes('Sitemap: https://storage.daddyrad.com/sitemap.xml'));
+  } else assert.equal(text, '');
  }
 });

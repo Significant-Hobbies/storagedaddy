@@ -5,7 +5,6 @@ const routes = new Map([
   ['/llms.txt', '/llms.txt'],
   ['/llms-full.txt', '/llms-full.txt'],
   ['/ai.txt', '/ai.txt'],
-  ['/robots.txt', '/robots.txt'],
   ['/sitemap.xml', '/sitemap.xml'],
   ['/blog/rss.xml', '/blog/rss.xml'],
 ]);
