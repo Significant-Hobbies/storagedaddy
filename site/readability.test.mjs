@@ -4,14 +4,14 @@ import worker from './worker.mjs';
 const origin = 'https://storage.daddyrad.com';
 const env = { ASSETS: { fetch: async () => new Response('<main>Existing site</main>', { headers: { 'Content-Type': 'text/html' } }) }, DOWNLOADS: { writeDataPoint() {} } };
 const fetch = (path, options) => worker.fetch(new Request(origin + path, options), env);
-test('public homepage has one complete canonical mirror and source-backed discovery', async () => {
-  const suffix = await fetch('/index.md');
+test('retained Markdown API has its complete canonical mirror and source-backed discovery', async () => {
+  const suffix = await fetch('/api/md');
   const body = await suffix.text();
   assert.equal(suffix.headers.get('content-location'), origin + '/');
   assert.match(body, /Canonical HTML: https:\/\/storage.daddyrad.com\//);
   assert.match(body, /https:\/\/storage.daddyrad.com\/download/);
   assert.match(body, /## /);
-  for (const [path, headers] of [['/api/md', {}], ['/', { accept: 'text/markdown' }]]) {
+  for (const [path, headers] of [['/api/md', {}], ['/api/md/', { accept: 'text/markdown' }]]) {
     const response = await fetch(path, { headers });
     assert.equal(await response.text(), body);
     assert.equal(response.headers.get('x-robots-tag'), 'noindex, follow');
@@ -19,16 +19,14 @@ test('public homepage has one complete canonical mirror and source-backed discov
     assert.match(response.headers.get('link'), /canonical/);
   }
   const catalog = await (await fetch('/api/md/_catalog')).json(); assert.equal(catalog.length, 1);
-  const full = await (await fetch('/llms-full.txt')).text(); assert.match(full, /Included 1 of 1/);
-  for (const name of ['GPTBot', 'ClaudeBot', 'Google-Extended', 'Applebot-Extended', 'CCBot', 'Bytespider']) assert.ok((await (await fetch('/robots.txt')).text()).includes(`User-agent: ${name}\nAllow: /`));
 });
-test('HTML, cache negotiation, HEAD and private route recovery preserve boundaries', async () => {
+test('marketing negotiation redirects while API HEAD and private-route recovery retain boundaries', async () => {
   for (const accept of ['*/*', 'text/markdown;q=0', 'text/markdown, text/html']) {
     const response = await fetch('/', { headers: { accept } });
-    assert.equal(await response.text(), '<main>Existing site</main>');
-    assert.match(response.headers.get('vary'), /Accept/);
+    assert.equal(response.status, 308);
+    assert.equal(response.headers.get('location'), 'https://daddyrad.com/storage/');
   }
-  const head = await fetch('/index.md', { method: 'HEAD' }); assert.equal(await head.text(), '');
+  const head = await fetch('/api/md', { method: 'HEAD' }); assert.equal(await head.text(), '');
   const options = await fetch('/api/md', { method: 'OPTIONS' }); assert.equal(options.status, 204);
   for (const path of ['/unknown.md', '/api/md/admin', '/api/md/dashboard']) assert.equal((await fetch(path)).status, 404);
 });
@@ -51,10 +49,8 @@ test('unknown Markdown paths cannot advertise off-origin canonicals', async () =
 
 test('authored FAQ links and legacy agent actions remain discoverable', async () => {
   const { default: compat } = await import('./landing/src/content/head-compat.json', { with: { type: 'json' } });
-  const body = await (await fetch('/index.md')).text();
+  const body = await (await fetch('/api/md')).text();
   for (const { text, href } of compat.faqLinks) assert.ok(body.includes(`[${text}](${new URL(href, origin).href})`), href);
-  const index = await (await fetch('/llms.txt')).text();
-  assert.ok(index.includes(origin + '/download'));
-  assert.ok(index.includes('https://github.com/sarthakagrawal927/storagedaddy'));
-  assert.equal((await fetch('/robots.txt')).headers.get('cache-control'), 'public, max-age=300');
+  assert.ok(body.includes(origin + '/download'));
+  assert.ok(body.includes('https://github.com/sarthakagrawal927/storagedaddy'));
 });
