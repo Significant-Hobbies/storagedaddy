@@ -17,10 +17,9 @@ struct ExplorerView: View {
         _inspector = State(initialValue: inspector)
     }
     var body: some View {
-        NavigationSplitView {
+        HSplitView {
             ScrollView { sidebar }
-                .background(AppColors.canvas).navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
-        } detail: {
+                .background(AppColors.canvas).frame(minWidth: 180, idealWidth: 200, maxWidth: 240)
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     if m.busy { HStack { ProgressView().controlSize(.small); Text(m.progress).lineLimit(1); Spacer(); Button("cancel") { m.cancel() }.accessibilityLabel("Cancel") }.padding(12).background(AppColors.canvas) }
