@@ -74,6 +74,10 @@ func cleanupScrollWithLargeSelection() async throws {
         ordinaryScrollMilliseconds.append(Double(duration.seconds) * 1000 + Double(duration.attoseconds) / 1e15)
         try await Task.sleep(for: .milliseconds(20))
     }
+    // Generous opt-in regression budgets for this bounded local workload;
+    // these synchronous layout timings do not claim display frame pacing.
+    #expect(milliseconds.sorted()[milliseconds.count / 2] < 200)
+    #expect((ordinaryScrollMilliseconds.max() ?? .infinity) < 50)
     #expect(model.staged == selected, "Scrolling must not alter the reviewed selection")
     #expect(model.permanentCleanupIDs.count == 55)
     model.deleteNodeCachesPermanently = false

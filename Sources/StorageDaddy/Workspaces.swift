@@ -298,7 +298,8 @@ struct CleanupView: View {
         let easyIDs = m.easyCleanupIDs
         GeometryReader { geometry in
         ScrollView {
-        LazyVStack(alignment: .leading, spacing: 16) {
+        // Keep async panels mounted while the rows scroll out of view.
+        VStack(alignment: .leading, spacing: 16) {
             HStack { SMSectionHeader("Quick Cleanup", size: 26).accessibilityLabel("Quick Cleanup"); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") } }
             Text(m.scan == nil ? "Review Trash, or scan a folder to find cleanup candidates." : m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders and choose how to clean up. Items with issues are kept.").foregroundStyle(Tints.secondaryText)
             TrashInventoryView()
@@ -346,6 +347,7 @@ struct CleanupView: View {
             }
             else if !m.staged.isEmpty, let scan = m.scan {
                 RemovalMeasurementView(scan: scan, ids: stagedIDs).id("\(scan.started):\(stagedIDs)")
+                LazyVStack(alignment: .leading, spacing: 16) {
                 ForEach(stagedIDs, id: \.self) { id in
                     let node = scan.nodes[id]
                     let path = scan.url(for: id).path
@@ -393,6 +395,7 @@ struct CleanupView: View {
                         }.accessibilityElement(children: .contain)
                         Divider()
                     }
+                }
                 }
                 if m.staged.contains(where: { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory && m.incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) }) {
                     Toggle("Delete Node dependencies and package caches permanently", isOn: $m.deleteNodeCachesPermanently).disabled(m.busy)
