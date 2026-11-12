@@ -80,7 +80,7 @@ struct StorageSettingsView: View {
                 }
                 HStack {
                     Button("Add Folder…", systemImage: "plus", action: chooseFolders)
-                        .buttonStyle(StorageButtonStyle(prominent: true)).disabled(model.busy)
+                        .buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(model.busy).opacity((model.busy) ? 0.4 : 1)
                     Spacer()
                     Text("\(model.excludedFolders.count) excluded").foregroundStyle(Tints.secondaryText)
                 }
@@ -108,7 +108,7 @@ struct StorageSettingsView: View {
         .background(AppColors.canvas)
         .storageTheme(DaddyTheme.palette)
         .tint(Tints.mint)
-        .buttonStyle(StorageButtonStyle())
+        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
     }
 
     private func chooseFolders() {

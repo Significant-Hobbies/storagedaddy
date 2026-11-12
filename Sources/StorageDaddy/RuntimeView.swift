@@ -235,13 +235,13 @@ struct RuntimeView: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    SMSectionHeader("Processes", size: 28)
+                    SMSectionHeader("Processes", size: 26)
                     Text("Live CPU and memory on this Mac. " + model.cpuScale.explanation)
                         .foregroundStyle(Tints.secondaryText)
                 }
                 Spacer()
                 Button("System Widget", systemImage: "macwindow", action: model.showWidget)
-                    .buttonStyle(StorageButtonStyle())
+                    .buttonStyle(StorageButtonStyle(.outline, size: .compact))
             }
             RuntimeSummary(model: model)
             ViewThatFits(in: .horizontal) {
@@ -277,7 +277,7 @@ struct RuntimeView: View {
             Text("GPU / VRAM and per-process disk I/O are unavailable in this view. Disk I/O above covers physical storage drivers.")
                 .font(.caption).foregroundStyle(Tints.secondaryText)
         }
-        .padding(24).background(AppColors.canvas).foregroundStyle(AppColors.ink).tint(Tints.mint)
+        .padding(28).background(AppColors.canvas).foregroundStyle(AppColors.ink).tint(Tints.mint)
         .background(RuntimeVisibilityObserver(model: model).frame(width: 0, height: 0))
         .onChange(of: model.grouping) { _, _ in expandedGroups.removeAll() }
         .confirmationDialog(pendingAction.map { "\($0.force ? "Force quit" : "End") \($0.process.name) (PID \($0.process.id.pid))?" } ?? "End process?",
@@ -310,7 +310,7 @@ struct RuntimeView: View {
                 ForEach(RuntimeSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }.frame(width: 120)
             Button(model.paused ? "Resume" : "Pause", systemImage: model.paused ? "play.fill" : "pause.fill") { model.paused.toggle() }
-                .buttonStyle(StorageButtonStyle())
+                .buttonStyle(StorageButtonStyle(.outline, size: .compact))
         }
     }
     private var groupingPicker: some View {
@@ -444,12 +444,12 @@ struct RuntimeView: View {
                         HStack(spacing: 12) {
                             if let path = process.executablePath {
                                 Button("Reveal Executable", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
-                                    .buttonStyle(StorageButtonStyle())
+                                    .buttonStyle(StorageButtonStyle(.outline, size: .compact))
                             }
                             Button("End Process…") { pendingAction = RuntimePendingAction(process: process, force: false) }
-                                .buttonStyle(StorageButtonStyle()).disabled(!process.mayTerminate)
+                                .buttonStyle(StorageButtonStyle(.outline, size: .compact)).disabled(!process.mayTerminate)
                             Button("Force Quit…") { pendingAction = RuntimePendingAction(process: process, force: true) }
-                                .buttonStyle(StorageButtonStyle()).disabled(!process.mayTerminate)
+                                .buttonStyle(StorageButtonStyle(.outline, size: .compact)).disabled(!process.mayTerminate)
                         }
                         if !process.mayTerminate { Text("System processes, other users' processes and StorageDaddy itself cannot be ended here.").font(.caption).foregroundStyle(Tints.secondaryText) }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
@@ -458,7 +458,7 @@ struct RuntimeView: View {
                 VStack(spacing: 14) {
                     Image(systemName: "app.dashed").font(.largeTitle).foregroundStyle(Tints.mint)
                     Text(model.selectedID == nil ? "Choose a process from the list or memory map." : "This process has exited. Choose another process.")
-                    Button("Show Process List") { model.presentation = .list }.buttonStyle(StorageButtonStyle())
+                    Button("Show Process List") { model.presentation = .list }.buttonStyle(StorageButtonStyle(.outline, size: .compact))
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -674,7 +674,7 @@ struct DriveMonitoringView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                SMSectionHeader("Drive Monitoring", size: 28)
+                SMSectionHeader("Drive Monitoring", size: 26)
                 Text("Watch free space across local drives without scanning file contents. Events stay on this Mac.")
                     .foregroundStyle(Tints.secondaryText)
                 Toggle("Monitor free space", isOn: $model.monitoringEnabled).tint(Tints.mint)
@@ -716,7 +716,7 @@ struct DriveMonitoringView: View {
                         })).fixedSize().disabled(!model.monitoringEnabled || !drive.monitoringIdentityVerified)
                     }.padding(.vertical, 8)
                 }
-                HStack { Text("Recent events").font(.title3.weight(.semibold)); Spacer(); Button("Refresh") { Task { await model.refreshDrives() } }.buttonStyle(StorageButtonStyle()) }
+                HStack { Text("Recent events").font(.title3.weight(.semibold)); Spacer(); Button("Refresh") { Task { await model.refreshDrives() } }.buttonStyle(StorageButtonStyle(.outline, size: .compact)) }
                 if model.driveHistory.events.isEmpty { Text("No space-drop events recorded yet.").foregroundStyle(Tints.secondaryText) }
                 ForEach(model.driveHistory.events.reversed()) { event in
                     HStack(alignment: .top) {
@@ -778,7 +778,7 @@ private struct RuntimeWidgetView: View {
                 Text("System").font(.headline)
                 Spacer()
                 Button(model.widgetPinned ? "Unpin" : "Pin", systemImage: model.widgetPinned ? "pin.fill" : "pin") { model.widgetPinned.toggle() }
-                    .buttonStyle(StorageButtonStyle())
+                    .buttonStyle(StorageButtonStyle(.outline, size: .compact))
             }
             HStack(spacing: 30) {
                 runtimeMetric("CPU", value: runtimePercent(model.snapshot?.cpuPercent), hint: "Overall")

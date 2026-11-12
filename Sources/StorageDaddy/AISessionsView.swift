@@ -70,7 +70,7 @@ struct AISessionsView: View {
             HStack(spacing: 10) {
                 ForEach(AISessionsSection.allCases, id: \.self) { section in
                     Button(section.rawValue.lowercased()) { m.aiSessionsSection = section }.accessibilityLabel(section.rawValue)
-                        .buttonStyle(StorageButtonStyle(prominent: m.aiSessionsSection == section))
+                        .buttonStyle(StorageButtonStyle((m.aiSessionsSection == section) ? .brand : .outline, size: .compact))
                 }
                 Spacer()
             }
@@ -80,9 +80,9 @@ struct AISessionsView: View {
                 sessions
             }
         }
-        .padding(24)
+        .padding(28)
         .background(AppColors.canvas)
-        .buttonStyle(StorageButtonStyle())
+        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
         .task(id: m.aiSessionsRefreshID) { await model.load() }
         .sheet(isPresented: $showCoverage) { coverageSheet }
     }
@@ -94,7 +94,7 @@ struct AISessionsView: View {
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .tracking(2)
                     .foregroundStyle(Tints.mint)
-                SMSectionHeader("AI Sessions", size: 28).accessibilityLabel("AI Sessions")
+                SMSectionHeader("AI Sessions", size: 26).accessibilityLabel("AI Sessions")
                 Text("See how much space Claude and Codex history files use, without running a disk scan.")
                     .foregroundStyle(Tints.secondaryText)
             }
@@ -113,7 +113,7 @@ struct AISessionsView: View {
             VStack(spacing: 14) {
                 StorageEmptyView("Session inventory needs attention", systemImage: "exclamationmark.bubble", description: Text(error))
                 Button("try again", systemImage: "arrow.clockwise") { m.requestAISessionsRefresh() }.accessibilityLabel("Try Again")
-                    .buttonStyle(StorageButtonStyle(prominent: true))
+                    .buttonStyle(StorageButtonStyle(.brand, size: .compact))
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let report = model.report {
             let matchingRows = rows(in: report.sessions)
@@ -136,7 +136,7 @@ struct AISessionsView: View {
                     )
                     if !report.sessions.isEmpty, hasFilters {
                         Button("clear filters", systemImage: "xmark.circle") { clearFilters() }.accessibilityLabel("Clear filters")
-                            .buttonStyle(StorageButtonStyle(prominent: true))
+                            .buttonStyle(StorageButtonStyle(.brand, size: .compact))
                     }
                 } else {
                     ScrollView {
@@ -187,7 +187,7 @@ struct AISessionsView: View {
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Tints.mint.opacity(0.38)))
                     .accessibilityLabel("Search AI sessions by project, provider, session ID or filename")
                 Text("Provider").font(.caption).foregroundStyle(Tints.secondaryText)
-                Button("all") { provider = nil }.accessibilityLabel("All").buttonStyle(StorageButtonStyle(prominent: provider == nil))
+                Button("all") { provider = nil }.accessibilityLabel("All").buttonStyle(StorageButtonStyle((provider == nil) ? .brand : .outline, size: .compact))
                 ForEach(AISessionProvider.allCases, id: \.self) { item in
                     Button { provider = item } label: {
                         HStack(spacing: 6) {
@@ -195,11 +195,11 @@ struct AISessionsView: View {
                             Text(item.rawValue)
                         }
                     }
-                        .buttonStyle(StorageButtonStyle(prominent: provider == item))
+                        .buttonStyle(StorageButtonStyle((provider == item) ? .brand : .outline, size: .compact))
                 }
                 if hasFilters {
                     Button("clear filters", systemImage: "xmark.circle") { clearFilters() }.accessibilityLabel("Clear filters")
-                        .buttonStyle(StorageButtonStyle())
+                        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
                 }
                 Spacer()
             }
@@ -207,13 +207,13 @@ struct AISessionsView: View {
                 Text("Sort by").font(.caption).foregroundStyle(Tints.secondaryText)
                 ForEach(AISessionSort.allCases, id: \.self) { item in
                     Button(item.rawValue.lowercased()) { sort = item }.accessibilityLabel(item.rawValue)
-                        .buttonStyle(StorageButtonStyle(prominent: sort == item))
+                        .buttonStyle(StorageButtonStyle((sort == item) ? .brand : .outline, size: .compact))
                 }
                 Spacer()
                 Text("Showing \(matchingRows.count.formatted()) · \(DiskFormat.bytes(matchingRows.reduce(0) { $0 + $1.allocatedBytes }))")
                     .foregroundStyle(Tints.secondaryText)
                 Button("archive older…", systemImage: "archivebox") { m.openConversationArchive() }.accessibilityLabel("Archive Older…")
-                    .buttonStyle(StorageButtonStyle(prominent: true))
+                    .buttonStyle(StorageButtonStyle(.brand, size: .compact))
             }
         }
     }
@@ -382,9 +382,9 @@ struct AISessionsView: View {
                 .font(.caption).foregroundStyle(Tints.secondaryText)
             Spacer()
         }
-        .padding(24)
+        .padding(28)
         .frame(width: 680, height: 470)
         .background(AppColors.canvas)
-        .buttonStyle(StorageButtonStyle())
+        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
     }
 }

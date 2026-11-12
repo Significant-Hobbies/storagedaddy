@@ -53,10 +53,10 @@ struct DeveloperReportView: View {
     private var modePicker: some View {
         HStack(spacing: 0) {
             Button("Projects") { mode = .projects }
-                .buttonStyle(StorageButtonStyle(prominent: mode == .projects))
+                .buttonStyle(StorageButtonStyle((mode == .projects) ? .brand : .outline, size: .compact))
                 .accessibilityAddTraits(mode == .projects ? .isSelected : [])
             Button("Tools") { mode = .tools }
-                .buttonStyle(StorageButtonStyle(prominent: mode == .tools))
+                .buttonStyle(StorageButtonStyle((mode == .tools) ? .brand : .outline, size: .compact))
                 .accessibilityAddTraits(mode == .tools ? .isSelected : [])
         }
     }
@@ -260,12 +260,12 @@ struct DeveloperReportView: View {
                     .foregroundStyle(Tints.secondaryText)
                     HStack(spacing: 9) {
                         Button("Inspect") { inspect(finding) }
-                            .buttonStyle(StorageButtonStyle())
+                            .buttonStyle(StorageButtonStyle(.outline, size: .compact))
                             .disabled(!canOpen(finding))
                         Button(m.staged.contains(finding.id) ? "Added to Cleanup" : "Add to Cleanup") { m.stage(finding.id) }
                             .disabled(m.busy || m.monitoring || m.staged.contains(finding.id))
                         Button("Reveal in Finder") { m.reveal(finding.id) }
-                            .buttonStyle(StorageButtonStyle())
+                            .buttonStyle(StorageButtonStyle(.outline, size: .compact))
                             .disabled(m.scan == nil)
                     }
                 }

@@ -8,10 +8,13 @@ struct StorageEmptyView: View {
         self.title = title; self.systemImage = systemImage; self.description = description
     }
     var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: systemImage).font(.system(size: 42, weight: .light)).foregroundStyle(Tints.mint)
-            Text(title).font(.title2.weight(.semibold)).foregroundStyle(AppColors.ink)
-            if let description { description.foregroundStyle(Tints.secondaryText).multilineTextAlignment(.center).frame(maxWidth: 420) }
+        VStack(spacing: 16) {
+            Image(systemName: systemImage)
+                .font(.system(size: 28, weight: .regular)).foregroundStyle(Tints.mint)
+                .frame(width: 64, height: 64)
+                .background(DaddyTheme.palette.brandSoft, in: RoundedRectangle(cornerRadius: 18))
+            Text(title).font(.system(size: 22, weight: .semibold)).foregroundStyle(AppColors.ink)
+            if let description { description.font(.callout).foregroundStyle(Tints.secondaryText).multilineTextAlignment(.center).frame(maxWidth: 420) }
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity).background(AppColors.canvas)
     }
 }

@@ -63,9 +63,9 @@ struct PackageCacheCleanersView: View {
                                 m.cleanPackageCache(location.tool, executable: executable, cache: cache)
                             }
                             review = nil
-                        }.disabled(!confirmed || m.busy).buttonStyle(StorageButtonStyle(prominent: true))
+                        }.disabled(!confirmed || m.busy).buttonStyle(StorageButtonStyle(.brand, size: .compact)).opacity(!confirmed || m.busy ? 0.4 : 1)
                     }
-                }.padding(28).frame(width: 540).background(AppColors.canvas).buttonStyle(StorageButtonStyle())
+                }.padding(28).frame(width: 540).background(AppColors.canvas).buttonStyle(StorageButtonStyle(.outline, size: .compact))
             }
     }
 

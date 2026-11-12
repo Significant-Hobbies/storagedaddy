@@ -152,7 +152,7 @@ struct DeveloperView: View {
                 DeveloperReportView()
                 Button { showsCategories.toggle() } label: {
                     Label(showsCategories ? "Hide category breakdown" : "Show category breakdown", systemImage: showsCategories ? "chevron.up" : "chevron.down")
-                }.buttonStyle(StorageButtonStyle())
+                }.buttonStyle(StorageButtonStyle(.outline, size: .compact))
                 if showsCategories {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                         ForEach(m.developerGroups, id: \.category) { item in categoryButton(item) }
@@ -162,7 +162,7 @@ struct DeveloperView: View {
                 Text("Matches cover only the selected folder. Zero means no recognized files here, not zero usage across your Mac. Skipped items are excluded. Session counts describe files, not active contexts or tokens.")
                     .font(.callout).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
             }.padding(28)
-        }.background(AppColors.canvas).buttonStyle(StorageButtonStyle())
+        }.background(AppColors.canvas).buttonStyle(StorageButtonStyle(.outline, size: .compact))
     }
     private var storageFamilyGrid: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -214,13 +214,13 @@ struct DeveloperView: View {
                                 Spacer()
                                 Image(systemName: "arrow.up.right")
                             }
-                        }.buttonStyle(StorageButtonStyle())
+                        }.buttonStyle(StorageButtonStyle(.outline, size: .compact))
                     }
                 }
                 if result.paths.count > 8 {
                     Button(showsAllProjectDependencies ? "Show fewer" : "Show all \(result.paths.count) folders") {
                         showsAllProjectDependencies.toggle()
-                    }.buttonStyle(StorageButtonStyle())
+                    }.buttonStyle(StorageButtonStyle(.outline, size: .compact))
                 }
                 Text("Paths only. These folders are outside the cache total and cleanup list. Open one to measure its size. Library, excluded folders, links and hidden build output are not searched; project worktrees are included.")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
@@ -228,7 +228,7 @@ struct DeveloperView: View {
                 Text("Automatic project search is paused to avoid macOS permission prompts. Choose a project folder to measure its node_modules and other build output.")
                     .font(.callout).foregroundStyle(Tints.secondaryText)
                 Button("scan a project folder…", action: m.chooseFolder).accessibilityLabel("Scan a Project Folder…")
-                    .buttonStyle(StorageButtonStyle())
+                    .buttonStyle(StorageButtonStyle(.outline, size: .compact))
             } else {
                 Text("Looking for project node_modules folders…")
                     .font(.callout).foregroundStyle(Tints.secondaryText)
@@ -242,17 +242,17 @@ struct DeveloperView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 7) {
                 Text("scan results").font(.system(size: 11, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(Tints.secondaryText)
-                SMSectionHeader("Developer Insights", size: 31).accessibilityLabel("Developer Insights")
+                SMSectionHeader("Developer Insights", size: 26).accessibilityLabel("Developer Insights")
                 Text("Know what belongs to each project—and what removing it would change.").foregroundStyle(Tints.secondaryText)
             }
             DoodleArt(topic: .overview).frame(width: 90, height: 90)
             Spacer(minLength: 16)
             VStack(alignment: .trailing, spacing: 8) {
-            Button("rescan", action: m.rescan).accessibilityLabel("Rescan").buttonStyle(StorageButtonStyle()).disabled(m.busy)
+            Button("rescan", action: m.rescan).accessibilityLabel("Rescan").buttonStyle(StorageButtonStyle(.outline, size: .compact)).disabled(m.busy)
             Button("scan home") { m.start(FileManager.default.homeDirectoryForCurrentUser) }.accessibilityLabel("Scan Home")
-                .buttonStyle(StorageButtonStyle()).disabled(m.busy)
+                .buttonStyle(StorageButtonStyle(.outline, size: .compact)).disabled(m.busy)
                 .help("Scan your home folder to include hidden Claude and Codex storage. Sensitive paths remain excluded.")
-            Button("scan temp") { m.start(FileManager.default.temporaryDirectory) }.accessibilityLabel("Scan Temp").buttonStyle(StorageButtonStyle()).disabled(m.busy)
+            Button("scan temp") { m.start(FileManager.default.temporaryDirectory) }.accessibilityLabel("Scan Temp").buttonStyle(StorageButtonStyle(.outline, size: .compact)).disabled(m.busy)
                 .help("Scan the current user’s macOS temporary directory. This replaces the current scope.")
             }
         }

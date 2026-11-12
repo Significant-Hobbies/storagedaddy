@@ -8,7 +8,7 @@ let package = Package(name: "StorageDaddy", platforms: [.macOS(.v14)], products:
     .executable(name: "StorageDaddy", targets: ["StorageDaddy"]),
     .executable(name: "storagedaddy-mcp", targets: ["StorageDaddyMCP"]),
     .executable(name: "StorageBench", targets: ["StorageBench"])
-], dependencies: [.package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6"), .package(url: "https://github.com/sass-maker/app-health", exact: "0.1.0"), .package(url: "https://github.com/sass-maker/ui-library", from: "0.1.14")], targets: [
+], dependencies: [.package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6"), .package(url: "https://github.com/sass-maker/app-health", exact: "0.1.0"), .package(url: "https://github.com/sass-maker/ui-library", exact: "0.1.33")], targets: [
     .target(name: "UAF", path: "Vendor/RemoveMacAI/Sources/UAF", cSettings: [.unsafeFlags(["-fobjc-arc"])]),
     .target(name: "MacTools", dependencies: ["UAF", .product(name: "SaaSMakerUI", package: "ui-library")], path: "Vendor/RemoveMacAI/Sources/removemacai", swiftSettings: [.swiftLanguageMode(.v5)]),
     .target(name: "DiskCore"),
