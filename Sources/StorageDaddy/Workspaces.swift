@@ -289,14 +289,21 @@ private struct InstalledAppIcon: View {
 struct CleanupView: View {
     @EnvironmentObject var m: ExplorerModel
     var body: some View {
+        // These depend on the selection, not on an individual visible row.
+        // In particular, permanentCleanupIDs validates every staged path. Doing
+        // that inside ForEach makes scrolling quadratic during cleanup updates.
+        let stagedIDs = m.staged.sorted()
+        let permanentIDs = m.permanentCleanupIDs
+        let quickCandidateIDs = Set(m.quickCleanupCandidateIDs)
+        let easyIDs = m.easyCleanupIDs
         GeometryReader { geometry in
         ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
+        LazyVStack(alignment: .leading, spacing: 16) {
             HStack { SMSectionHeader("Quick Cleanup", size: 26).accessibilityLabel("Quick Cleanup"); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") } }
             Text(m.scan == nil ? "Review Trash, or scan a folder to find cleanup candidates." : m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders and choose how to clean up. Items with issues are kept.").foregroundStyle(Tints.secondaryText)
             TrashInventoryView()
-            if let scan = m.scan, !m.easyCleanupIDs.isEmpty {
-                AutoCleanerCard(scan: scan)
+            if let scan = m.scan, !easyIDs.isEmpty {
+                AutoCleanerCard(scan: scan, ids: easyIDs)
             }
             if let scan = m.scan, !m.quickCleanupFailures.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
@@ -333,55 +340,59 @@ struct CleanupView: View {
                 }.padding(.vertical, 24)
                 Spacer()
             } else if m.staged.isEmpty && m.lastPermanentlyDeletedCount == 0 {
-                if m.easyCleanupIDs.isEmpty {
+                if easyIDs.isEmpty {
                     StorageEmptyView(m.scan == nil ? "Scan to find rebuildable items" : "No rebuildable items found in this scan", systemImage: "tray", description: Text("Scan a folder, or add an item from Storage for individual review."))
                 }
             }
             else if !m.staged.isEmpty, let scan = m.scan {
-                RemovalMeasurementView(scan: scan, ids: m.staged.sorted()).id("\(scan.started):\(m.staged.sorted())")
-                LazyVStack(alignment: .leading, spacing: 16) {
-                ForEach(m.staged.sorted(), id: \.self) { id in
-                    HStack(alignment: .top) {
-                        Image(systemName: scan.nodes[id].isDirectory ? "folder.fill" : "doc.fill")
-                            .foregroundStyle(Tints.forNode(scan.nodes[id])).font(.title3).frame(width: 32)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(StorageLabels.name(scan.nodes[id]))
-                            if ChromeSigningClones.location(path: scan.url(for: id).path) != nil {
-                                Label("Signing copy · Quit Chrome first", systemImage: "square.on.square").font(.caption).foregroundStyle(Tints.yellow)
-                            } else if m.quickCleanupCandidateIDs.contains(id) {
-                                Label("Rebuildable · Downloads or rebuilds may be needed", systemImage: "arrow.clockwise").font(.caption).foregroundStyle(Tints.mint)
-                            } else { CleanupFlag(category: m.cleanupCategory(id)) }
-                            Text(StorageLabels.location(scan.url(for: id).path)).help(scan.url(for: id).path).font(.caption).foregroundStyle(Tints.secondaryText).lineLimit(1).truncationMode(.middle)
-                            if m.permanentCleanupIDs.contains(id) {
-                                Label("Permanently delete · Bypasses Trash", systemImage: "trash.slash").font(.caption).foregroundStyle(Tints.coral)
+                RemovalMeasurementView(scan: scan, ids: stagedIDs).id("\(scan.started):\(stagedIDs)")
+                ForEach(stagedIDs, id: \.self) { id in
+                    let node = scan.nodes[id]
+                    let path = scan.url(for: id).path
+                    let signingCopy = ChromeSigningClones.location(path: path) != nil
+                    let dependencies = CleanupGuidance.isProjectDependencies(path: path)
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack(alignment: .top) {
+                            Image(systemName: node.isDirectory ? "folder.fill" : "doc.fill")
+                                .foregroundStyle(Tints.forNode(node)).font(.title3).frame(width: 32)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(StorageLabels.name(node))
+                                if signingCopy {
+                                    Label("Signing copy · Quit Chrome first", systemImage: "square.on.square").font(.caption).foregroundStyle(Tints.yellow)
+                                } else if quickCandidateIDs.contains(id) {
+                                    Label("Rebuildable · Downloads or rebuilds may be needed", systemImage: "arrow.clockwise").font(.caption).foregroundStyle(Tints.mint)
+                                } else { CleanupFlag(category: m.cleanupCategory(id)) }
+                                Text(StorageLabels.location(path)).help(path).font(.caption).foregroundStyle(Tints.secondaryText).lineLimit(1).truncationMode(.middle)
+                                if permanentIDs.contains(id) {
+                                    Label("Permanently delete · Bypasses Trash", systemImage: "trash.slash").font(.caption).foregroundStyle(Tints.coral)
+                                }
+                                if let note = CleanupGuidance.chromeCacheNote(path: path) {
+                                    Text(note).font(.caption).foregroundStyle(Tints.yellow)
+                                }
+                                if signingCopy {
+                                    Text(ChromeSigningClones.cleanupExplanation).font(.caption).foregroundStyle(Tints.yellow)
+                                }
+                                if !dependencies {
+                                    StorageAllocationDetailsView(node: node)
+                                }
+                                if let review = m.incompleteCleanup[id] {
+                                    Label("Added anyway · \(review.skipped) \(review.skipped == 1 ? "item" : "items") not checked", systemImage: "exclamationmark.triangle")
+                                        .font(.caption).foregroundStyle(Tints.coral)
+                                    Button("review warning") { m.reviewIncompleteCleanup(id) }.accessibilityLabel("Review warning").font(.caption).disabled(m.busy)
+                                }
+                                if node.isDirectory && !dependencies {
+                                    FolderSymlinksView(scan: scan, folderID: id, cleanupReview: true)
+                                        .id("\(scan.started.timeIntervalSince1970):\(scan.rootPath):\(id)")
+                                        .frame(maxWidth: 540, alignment: .leading)
+                                }
                             }
-                            if let note = CleanupGuidance.chromeCacheNote(path: scan.url(for: id).path) {
-                                Text(note).font(.caption).foregroundStyle(Tints.yellow)
-                            }
-                            if ChromeSigningClones.location(path: scan.url(for: id).path) != nil {
-                                Text(ChromeSigningClones.cleanupExplanation).font(.caption).foregroundStyle(Tints.yellow)
-                            }
-                            if !CleanupGuidance.isProjectDependencies(path: scan.url(for: id).path) {
-                                StorageAllocationDetailsView(node: scan.nodes[id])
-                            }
-                            if let review = m.incompleteCleanup[id] {
-                                Label("Added anyway · \(review.skipped) \(review.skipped == 1 ? "item" : "items") not checked", systemImage: "exclamationmark.triangle")
-                                    .font(.caption).foregroundStyle(Tints.coral)
-                                Button("review warning") { m.reviewIncompleteCleanup(id) }.accessibilityLabel("Review warning").font(.caption).disabled(m.busy)
-                            }
-                            if scan.nodes[id].isDirectory && !CleanupGuidance.isProjectDependencies(path: scan.url(for: id).path) {
-                                FolderSymlinksView(scan: scan, folderID: id, cleanupReview: true)
-                                    .id("\(scan.started.timeIntervalSince1970):\(scan.rootPath):\(id)")
-                                    .frame(maxWidth: 540, alignment: .leading)
-                            }
-                        }
-                        Spacer()
-                        Text(scan.nodes[id].allocatedBytes == 0 && (m.allocationSummary(scan.nodes[id])?.sharedFiles ?? 0) > 0 ? "Shared" : DiskFormat.bytes(scan.nodes[id].allocatedBytes)).monospacedDigit()
-                            .foregroundStyle(Tints.forNode(scan.nodes[id])).frame(width: 104, alignment: .trailing)
-                        Button("remove") { m.unstage(id) }.accessibilityLabel("Remove").disabled(m.busy)
-                    }.accessibilityElement(children: .contain)
-                    Divider()
-                }
+                            Spacer()
+                            Text(node.allocatedBytes == 0 && (m.allocationSummary(node)?.sharedFiles ?? 0) > 0 ? "Shared" : DiskFormat.bytes(node.allocatedBytes)).monospacedDigit()
+                                .foregroundStyle(Tints.forNode(node)).frame(width: 104, alignment: .trailing)
+                            Button("remove") { m.unstage(id) }.accessibilityLabel("Remove").disabled(m.busy)
+                        }.accessibilityElement(children: .contain)
+                        Divider()
+                    }
                 }
                 if m.staged.contains(where: { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory && m.incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) }) {
                     Toggle("Delete Node dependencies and package caches permanently", isOn: $m.deleteNodeCachesPermanently).disabled(m.busy)
@@ -390,11 +401,11 @@ struct CleanupView: View {
                 HStack(alignment: .top) {
                     Text("\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") · \(m.stagedExclusiveBytes.map(DiskFormat.bytes) ?? "Unknown") exclusive allocation").fontWeight(.medium)
                     Spacer()
-                    Button(m.permanentCleanupIDs.isEmpty ? "move to trash…" : "clean up…", action: m.trashStaged)
-                        .accessibilityLabel(m.permanentCleanupIDs.isEmpty ? "Move to Trash…" : "Clean Up…")
+                    Button(permanentIDs.isEmpty ? "move to trash…" : "clean up…", action: m.trashStaged)
+                        .accessibilityLabel(permanentIDs.isEmpty ? "Move to Trash…" : "Clean Up…")
                         .buttonStyle(StorageButtonStyle(.brand, size: .compact)).tint(Tints.coral).disabled(m.busy || m.monitoring).opacity((m.busy || m.monitoring) ? 0.4 : 1)
                 }
-                Text(m.permanentCleanupIDs.isEmpty ? "Trash still uses disk space until it is emptied." : "\(m.permanentCleanupIDs.count) to delete permanently · \(m.staged.count - m.permanentCleanupIDs.count) to Trash after confirmation.").font(.caption).foregroundStyle(Tints.secondaryText)
+                Text(permanentIDs.isEmpty ? "Trash still uses disk space until it is emptied." : "\(permanentIDs.count) to delete permanently · \(m.staged.count - permanentIDs.count) to Trash after confirmation.").font(.caption).foregroundStyle(Tints.secondaryText)
                 if m.monitoring { Text("Stop monitoring before cleanup.").font(.caption).foregroundStyle(Tints.secondaryText) }
             }
         }.padding(24)
@@ -409,8 +420,9 @@ struct CleanupView: View {
 /// preflight and review list as a manual pick.
 private struct AutoCleanerCard: View {
     let scan: ScanResult
+    let ids: [Int]
     @EnvironmentObject var m: ExplorerModel
-    private var suggestions: [Int] { Array(m.easyCleanupIDs.prefix(8)) }
+    private var suggestions: [Int] { Array(ids.prefix(8)) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -420,7 +432,7 @@ private struct AutoCleanerCard: View {
             }
             Text("Caches, project dependencies and build outputs. Apps may need to download or rebuild them afterward. Nothing moves automatically.")
                 .font(.caption).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
-            Button("Review \(m.easyCleanupIDs.count) \(m.easyCleanupIDs.count == 1 ? "item" : "items") (\(DiskFormat.bytes(m.easyCleanupBytes)))…", action: m.stageEasyCleanup)
+            Button("Review \(ids.count) \(ids.count == 1 ? "item" : "items") (\(DiskFormat.bytes(totalBytes)))…", action: m.stageEasyCleanup)
                 .buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(m.busy || m.monitoring).opacity((m.busy || m.monitoring) ? 0.4 : 1)
             ForEach(suggestions, id: \.self) { id in
                 let category = m.cleanupCategory(id) ?? .packageCaches
@@ -443,14 +455,16 @@ private struct AutoCleanerCard: View {
                     Divider()
                 }
             }
-            if m.easyCleanupIDs.count > suggestions.count {
-                Text("+ \(m.easyCleanupIDs.count - suggestions.count) more included in Review items")
+            if ids.count > suggestions.count {
+                Text("+ \(ids.count - suggestions.count) more included in Review items")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
             }
         }.padding(16).storagePanel()
     }
+    private var totalBytes: Int64 { ids.reduce(0) { $0 + scan.nodes[$1].allocatedBytes } }
+
     private var summary: some View {
-        Text("\(m.easyCleanupIDs.count) \(m.easyCleanupIDs.count == 1 ? "folder" : "folders") · \(DiskFormat.bytes(m.easyCleanupBytes))")
+        Text("\(ids.count) \(ids.count == 1 ? "folder" : "folders") · \(DiskFormat.bytes(totalBytes))")
             .font(.caption).foregroundStyle(Tints.secondaryText)
     }
 }
