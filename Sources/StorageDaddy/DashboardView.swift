@@ -109,14 +109,14 @@ struct DashboardView: View {
                         StorageEmptyView("Reading system storage…", systemImage: "internaldrive", description: Text("Collecting capacity and device information."))
                     }
                 }
-                .padding(24)
+                .padding(28)
                 .frame(maxWidth: 1320, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
             .scrollIndicators(.visible)
         }
         .background(AppColors.canvas)
-        .buttonStyle(StorageButtonStyle())
+        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
         .background(DashboardSamplingObserver(dashboard: dashboard).frame(width: 0, height: 0))
         .task {
             dashboard.loadIfNeeded()
@@ -133,7 +133,7 @@ struct DashboardView: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
                 Text("your mac").font(.system(size: 11, weight: .bold)).tracking(1.5).foregroundStyle(Tints.mint)
-                SMSectionHeader("Storage dashboard", size: 32).accessibilityLabel("Storage dashboard")
+                SMSectionHeader("Storage dashboard", size: 26).accessibilityLabel("Storage dashboard")
                 Text("Space, the latest scan, and what is worth reviewing.")
                     .font(.callout).foregroundStyle(Tints.secondaryText)
             }

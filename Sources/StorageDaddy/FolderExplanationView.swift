@@ -33,7 +33,7 @@ struct FolderExplanationView: View {
         }
         .frame(width: 640, height: 520)
         .background(AppColors.canvas)
-        .buttonStyle(StorageButtonStyle())
+        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
     }
 
     @ViewBuilder private var content: some View {

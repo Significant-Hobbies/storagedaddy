@@ -26,7 +26,7 @@ private struct StorageAppearance: ViewModifier {
 /// Fleet typography and components with the Daddy-series canvas and evidence colors.
 enum DaddyTheme {
     static let palette: SMPalette = {
-        var palette = SMPalette.ink.brand(
+        var palette = SMPalette.ink.dark.brand(
             Color(red: 107 / 255, green: 201 / 255, blue: 158 / 255), foreground: .black
         )
         palette.background = AppColors.canvas
@@ -39,13 +39,16 @@ enum DaddyTheme {
         palette.brandForeground = AppColors.canvas
         palette.mutedForeground = AppColors.secondary
         palette.accent = DaddyPalette.mint.opacity(0.11)
-        palette.border = DaddyPalette.mint.opacity(0.28)
-        palette.hairline = DaddyPalette.mint.opacity(0.22)
+        palette.border = AppColors.secondary.opacity(0.18)
+        palette.hairline = palette.border
+        palette.input = palette.border
         palette.success = DaddyPalette.mint
         palette.warning = DaddyPalette.amber
         palette.destructive = DaddyPalette.coral
-        palette.displayWeight = 650
-        palette.displayTracking = -0.02
+        palette.radius = 10
+        palette.displayFont = palette.sansFont
+        palette.displayWeight = 600
+        palette.displayTracking = -0.025
         return palette
     }()
 }
@@ -63,7 +66,7 @@ extension View {
         return environment(\.smPalette, palette)
             .tint(palette.brand)
             .foregroundStyle(palette.foreground)
-            .font(.custom(palette.sansFont, size: 16, relativeTo: .body))
+            .font(.custom(palette.sansFont, size: 14, relativeTo: .body))
             .background(palette.background.ignoresSafeArea())
             .modifier(StorageAppearance(override: appearance))
     }

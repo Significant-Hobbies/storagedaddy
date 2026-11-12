@@ -41,8 +41,8 @@ struct ChromeSigningCopiesView: View {
                         Text("\(ChromeSigningClones.copyIDs(in: scan, storeID: nodeID).count.formatted()) signing copies found").font(.caption)
                         Spacer()
                         Button("review signing copies", systemImage: "tray.and.arrow.down") { m.stageChromeSigningCopies(nodeID) }
-                            .accessibilityLabel("Review signing copies").buttonStyle(StorageButtonStyle(prominent: true))
-                            .disabled(m.busy || m.monitoring)
+                            .accessibilityLabel("Review signing copies").buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                            .disabled(m.busy || m.monitoring).opacity((m.busy || m.monitoring) ? 0.4 : 1)
                     }
                 } else {
                     Text("Review a whole signing copy from the inspector. Individual bundle files are protected from cleanup.")

@@ -54,14 +54,14 @@ struct ApplicationRemovalSheet: View {
                     guard !m.busy, !m.monitoring else { return }
                     applications.confirmRemoval(review, onRemoved: onRemoved)
                 }
-                    .buttonStyle(StorageButtonStyle(prominent: true))
-                    .disabled(applications.movingApplication || applications.removalError != nil || m.busy || m.monitoring)
+                    .buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                    .disabled(applications.movingApplication || applications.removalError != nil || m.busy || m.monitoring).opacity((applications.movingApplication || applications.removalError != nil || m.busy || m.monitoring) ? 0.4 : 1)
             }
         }
         .padding(28).frame(width: 520)
         .background(AppColors.canvas)
         .foregroundStyle(AppColors.ink)
-        .buttonStyle(StorageButtonStyle())
+        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
         .interactiveDismissDisabled(applications.movingApplication)
     }
 }

@@ -37,7 +37,7 @@ struct ApplicationsView: View {
         GeometryReader { geometry in
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                SMSectionHeader("Applications", size: 28).accessibilityLabel("Applications")
+                SMSectionHeader("Applications", size: 26).accessibilityLabel("Applications")
                 DoodleArt(topic: .applications).frame(width: 72, height: 72)
                 Spacer()
                 if applications.loading { Button("cancel", action: applications.cancel).accessibilityLabel("Cancel") }
@@ -71,7 +71,7 @@ struct ApplicationsView: View {
                     .help("Group installed apps by category. Turn off to compare all apps in one list.")
                 if !searchText.isEmpty {
                     Button("clear") { searchText = "" }.accessibilityLabel("Clear")
-                        .buttonStyle(StorageButtonStyle())
+                        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
                         .accessibilityLabel("Clear application search")
                 }
             }
@@ -83,7 +83,7 @@ struct ApplicationsView: View {
                 StorageEmptyView("No installed apps found", systemImage: "app.dashed", description: Text("Refresh to search standard application folders."))
             } else if visibleApps.isEmpty {
                 StorageEmptyView("No matching applications", systemImage: "magnifyingglass", description: Text("Try a different name, path or category, or clear the search to show all installed apps."))
-                Button("clear search") { searchText = "" }.accessibilityLabel("Clear search").buttonStyle(StorageButtonStyle(prominent: true))
+                Button("clear search") { searchText = "" }.accessibilityLabel("Clear search").buttonStyle(StorageButtonStyle(.brand, size: .compact))
             } else {
                 applicationColumnHeader
                 ScrollView {
@@ -124,17 +124,17 @@ struct ApplicationsView: View {
                         }
                         }.frame(width: 96, alignment: .trailing)
                         Button("analyze") { m.openStorage(.explore); m.start(app.url) }.accessibilityLabel("Analyze")
-                            .buttonStyle(StorageButtonStyle())
+                            .buttonStyle(StorageButtonStyle(.outline, size: .compact))
                             .frame(width: 80)
                         Button { NSWorkspace.shared.activateFileViewerSelecting([app.url]) } label: { Image(systemName: "arrow.up.forward.square") }
-                            .buttonStyle(StorageButtonStyle())
+                            .buttonStyle(StorageButtonStyle(.outline, size: .compact))
                             .frame(width: 32)
                             .help("Reveal in Finder")
                             .accessibilityLabel("Reveal \(app.name) in Finder")
                         Button { applications.reviewRemoval(of: app) } label: {
                             Image(systemName: removalBlock == nil ? "trash" : "lock")
                         }
-                        .buttonStyle(StorageButtonStyle())
+                        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
                         .frame(width: 32)
                         .disabled(applications.removalBusy || m.busy || m.monitoring || removalBlock != nil)
                         .help(removalBlock ?? "Review and remove \(app.name)…")
@@ -155,11 +155,11 @@ struct ApplicationsView: View {
                 }
             }
         }
-        .padding(24)
+        .padding(28)
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .background(AppColors.canvas)
-        .buttonStyle(StorageButtonStyle())
+        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
         .task { await applications.loadIfNeeded() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
             applications.objectWillChange.send()
@@ -292,7 +292,7 @@ struct CleanupView: View {
         GeometryReader { geometry in
         ScrollView {
         VStack(alignment: .leading, spacing: 16) {
-            HStack { SMSectionHeader("Quick Cleanup", size: 28).accessibilityLabel("Quick Cleanup"); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") } }
+            HStack { SMSectionHeader("Quick Cleanup", size: 26).accessibilityLabel("Quick Cleanup"); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") } }
             Text(m.scan == nil ? "Review Trash, or scan a folder to find cleanup candidates." : m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders and choose how to clean up. Items with issues are kept.").foregroundStyle(Tints.secondaryText)
             TrashInventoryView()
             if let scan = m.scan, !m.easyCleanupIDs.isEmpty {
@@ -319,7 +319,7 @@ struct CleanupView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("\(m.lastPermanentlyDeletedCount) permanently deleted", systemImage: "checkmark.circle.fill").font(.title2).foregroundStyle(Tints.mint)
                     Text("These folders bypassed Trash. Refresh to see current storage totals.").foregroundStyle(Tints.secondaryText)
-                    Button("refresh scan results", action: m.rescan).accessibilityLabel("Refresh scan results").buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy)
+                    Button("refresh scan results", action: m.rescan).accessibilityLabel("Refresh scan results").buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(m.busy).opacity((m.busy) ? 0.4 : 1)
                 }.padding(16).storagePanel()
             }
             if m.staged.isEmpty, !m.lastTrashedURLs.isEmpty {
@@ -328,7 +328,7 @@ struct CleanupView: View {
                     Text("You can review or restore these items from Trash. Trash still uses disk space until emptied.").foregroundStyle(Tints.secondaryText)
                     HStack {
                         Button("show in trash") { NSWorkspace.shared.activateFileViewerSelecting(m.lastTrashedURLs) }.accessibilityLabel("Show in Trash")
-                        Button("refresh scan results", action: m.rescan).accessibilityLabel("Refresh scan results").buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy)
+                        Button("refresh scan results", action: m.rescan).accessibilityLabel("Refresh scan results").buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(m.busy).opacity((m.busy) ? 0.4 : 1)
                     }
                 }.padding(.vertical, 24)
                 Spacer()
@@ -392,7 +392,7 @@ struct CleanupView: View {
                     Spacer()
                     Button(m.permanentCleanupIDs.isEmpty ? "move to trash…" : "clean up…", action: m.trashStaged)
                         .accessibilityLabel(m.permanentCleanupIDs.isEmpty ? "Move to Trash…" : "Clean Up…")
-                        .buttonStyle(StorageButtonStyle(prominent: true)).tint(Tints.coral).disabled(m.busy || m.monitoring)
+                        .buttonStyle(StorageButtonStyle(.brand, size: .compact)).tint(Tints.coral).disabled(m.busy || m.monitoring).opacity((m.busy || m.monitoring) ? 0.4 : 1)
                 }
                 Text(m.permanentCleanupIDs.isEmpty ? "Trash still uses disk space until it is emptied." : "\(m.permanentCleanupIDs.count) to delete permanently · \(m.staged.count - m.permanentCleanupIDs.count) to Trash after confirmation.").font(.caption).foregroundStyle(Tints.secondaryText)
                 if m.monitoring { Text("Stop monitoring before cleanup.").font(.caption).foregroundStyle(Tints.secondaryText) }
@@ -400,7 +400,7 @@ struct CleanupView: View {
         }.padding(24)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
-        }.background(AppColors.canvas).buttonStyle(StorageButtonStyle())
+        }.background(AppColors.canvas).buttonStyle(StorageButtonStyle(.outline, size: .compact))
     }
 }
 
@@ -421,7 +421,7 @@ private struct AutoCleanerCard: View {
             Text("Caches, project dependencies and build outputs. Apps may need to download or rebuild them afterward. Nothing moves automatically.")
                 .font(.caption).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
             Button("Review \(m.easyCleanupIDs.count) \(m.easyCleanupIDs.count == 1 ? "item" : "items") (\(DiskFormat.bytes(m.easyCleanupBytes)))…", action: m.stageEasyCleanup)
-                .buttonStyle(StorageButtonStyle(prominent: true)).disabled(m.busy || m.monitoring)
+                .buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(m.busy || m.monitoring).opacity((m.busy || m.monitoring) ? 0.4 : 1)
             ForEach(suggestions, id: \.self) { id in
                 let category = m.cleanupCategory(id) ?? .packageCaches
                 VStack(alignment: .leading, spacing: 5) {

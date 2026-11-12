@@ -17,7 +17,7 @@ struct SavedHistoryView: View {
             VStack(alignment: .leading, spacing: 20) {
                 HStack {
                     VStack(alignment: .leading, spacing: 6) {
-                        SMSectionHeader("History", size: 28).accessibilityLabel("History")
+                        SMSectionHeader("History", size: 26).accessibilityLabel("History")
                         Text("Local scan history and changes over time.").foregroundStyle(Tints.secondaryText)
                     }
                     DoodleArt(topic: .snapshots).frame(width: 80, height: 80)
@@ -54,7 +54,7 @@ struct SavedHistoryView: View {
                             .foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
                         Button(m.scan == nil ? "Go to Storage" : "Back to scan results", systemImage: "internaldrive") {
                             m.openStorage(.explore)
-                        }.buttonStyle(StorageButtonStyle(prominent: true))
+                        }.buttonStyle(StorageButtonStyle(.brand, size: .compact))
                     }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
                         .storagePanel()
                 } else if let selected, let snapshot = m.savedSnapshots.first(where: { $0.id == selected }) {
@@ -86,9 +86,9 @@ struct SavedHistoryView: View {
                     }
                     ListPagination(page: $page, total: m.savedSnapshots.count, pageSize: 12, noun: "snapshots")
                 }
-            }.padding(24).frame(maxWidth: .infinity, alignment: .topLeading)
+            }.padding(28).frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .background(AppColors.canvas).buttonStyle(StorageButtonStyle())
+        .background(AppColors.canvas).buttonStyle(StorageButtonStyle(.outline, size: .compact))
         .task { await m.refreshSnapshotHistory() }
         .onChange(of: m.savedSnapshots.map(\.id)) { _, _ in page = 0 }
         .confirmationDialog("Automatically move older saved scans to Trash?", isPresented: Binding(get: { proposedRetention != nil }, set: { if !$0 { proposedRetention = nil } }), titleVisibility: .visible) {
