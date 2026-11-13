@@ -1,5 +1,5 @@
 {
-  "originHash" : "4b8ce6c52ab46514f2250098b27d6023ac0a23067cc6d8e13aede4c7d0da5d41",
+  "originHash" : "2192326d201793ef1df1dd457703bf9d476a497de5e959e2681ff6be5c52cce3",
   "pins" : [
     {
       "identity" : "app-health",
@@ -24,7 +24,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/sass-maker/ui-library",
       "state" : {
-        "revision" : "85254355023513a71848a328a294c075aa6aab36"
+        "revision" : "f45faf3eb04af08cff2022710c8b8157a60bf5fa"
       }
     }
   ],

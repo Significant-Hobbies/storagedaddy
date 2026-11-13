@@ -80,7 +80,7 @@ struct ExplorerView: View {
             }.background(AppColors.canvas)
         }
         .font(.custom(DaddyTheme.palette.sansFont, size: 14))
-        .background(SMWorkspaceWindowChrome())
+        .smWorkspaceWindowChrome()
         .storageTheme(DaddyTheme.palette)
         .buttonStyle(SMMacButtonStyle(.secondary))
         .toolbar(.hidden, for: .windowToolbar)
@@ -232,7 +232,7 @@ struct ExplorerView: View {
     }
 
     private var scopeBar: some View {
-        SMWorkspaceScopeBar(m.workspace == .explore ? "Storage" : m.workspace.title,
+        SMWorkspaceScopeBar(m.workspace == .explore ? "Storage" : m.workspace == .dashboard ? "Overview" : m.workspace.title,
                             systemImage: m.workspace.icon,
                             detail: m.scan.map { StorageLabels.location($0.rootPath) }) {
             HStack(spacing: 8) {

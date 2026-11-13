@@ -132,17 +132,20 @@ struct DashboardView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("your mac").font(.system(size: 11, weight: .bold)).tracking(1.5).foregroundStyle(Tints.mint)
+                Text("YOUR MAC").font(.custom(DaddyTheme.palette.sansFont, size: 10).weight(.medium)).tracking(1.2).foregroundStyle(Tints.mint)
                 SMSectionHeader("Storage dashboard", size: 26).accessibilityLabel("Storage dashboard")
                 Text("Space, the latest scan, and what is worth reviewing.")
                     .font(.callout).foregroundStyle(Tints.secondaryText)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 8) {
-                Button("refresh", action: dashboard.refresh).accessibilityLabel("Refresh").disabled(dashboard.loading || m.busy)
-                if let report = dashboard.report {
-                    Text("Checked \(report.collectedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption).foregroundStyle(Tints.secondaryText)
+            HStack(spacing: 16) {
+                DoodleArt(topic: .overview).frame(width: 72, height: 72)
+                VStack(alignment: .trailing, spacing: 8) {
+                    Button("Refresh", action: dashboard.refresh).disabled(dashboard.loading || m.busy)
+                    if let report = dashboard.report {
+                        Text("Checked \(report.collectedAt.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption).foregroundStyle(Tints.secondaryText)
+                    }
                 }
             }
             if dashboard.loading { ProgressView().controlSize(.small) }

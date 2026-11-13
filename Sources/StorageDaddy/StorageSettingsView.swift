@@ -107,6 +107,7 @@ struct StorageSettingsView: View {
         }
         .frame(width: 620, height: 520)
         .background(AppColors.canvas)
+        .smWorkspaceWindowChrome()
         .storageTheme(DaddyTheme.palette)
         .tint(Tints.mint)
         .buttonStyle(SMMacButtonStyle(.secondary))
