@@ -13,23 +13,23 @@ struct AcknowledgmentsView: View {
                 credit("Apple platform frameworks", "SwiftUI and AppKit power the native interface. Foundation and Darwin provide filesystem access; Quick Look provides previews. These are Apple platform SDKs.", "https://developer.apple.com/documentation/")
                 credit("Memory Pack · Memory Map", "The bundled local conversation archiver extracts prompts, replies and session metadata from Claude Code and Codex transcripts. Memory Pack is MIT-licensed; its Rust dependencies are credited in the bundled license notices.", "https://github.com/Significant-Hobbies/chatgpt-memory-insights/tree/main/packer")
                 if let notices = Bundle.main.url(forResource: "MemoryPack-THIRD_PARTY_NOTICES", withExtension: "txt") {
-                    Button("open memory pack license notices") { NSWorkspace.shared.open(notices) }.accessibilityLabel("Open Memory Pack license notices").buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                    Button("open memory pack license notices") { NSWorkspace.shared.open(notices) }.accessibilityLabel("Open Memory Pack license notices").buttonStyle(SMMacButtonStyle(.secondary))
                 }
                 credit("FinderSearch & fsearch", "FinderSearch by zeusinsight provides the Swift transport pattern. Its MIT-licensed fsearch engine by Noah Dunnagan powers local fuzzy filename search over StorageDaddy scan metadata; it does not run a separate whole-disk daemon.", "https://github.com/zeusinsight/FinderSearch")
                 if let notices = Bundle.main.url(forResource: "FinderSearch-THIRD_PARTY_NOTICES", withExtension: "txt") {
-                    Button("Open FinderSearch license notices") { NSWorkspace.shared.open(notices) }.buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                    Button("Open FinderSearch license notices") { NSWorkspace.shared.open(notices) }.buttonStyle(SMMacButtonStyle(.secondary))
                 }
                 credit("RemoveMacAI & pared", "RemoveMacAI by omlahore supplies the native Mac controls, reviewed settings changes, storage candidates and undo journal. Its Apple Intelligence asset integration builds on pared by 4evy. Both are MIT-licensed; StorageDaddy uses its own profile and undo history.", "https://github.com/omlahore/RemoveMacAI")
                 if let notices = Bundle.main.url(forResource: "RemoveMacAI-THIRD_PARTY_NOTICES", withExtension: "txt") {
-                    Button("Open RemoveMacAI license notices") { NSWorkspace.shared.open(notices) }.buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                    Button("Open RemoveMacAI license notices") { NSWorkspace.shared.open(notices) }.buttonStyle(SMMacButtonStyle(.secondary))
                 }
                 credit("Sparkle", "The open-source macOS updater checks for new versions and verifies signed downloads before installation. Sparkle uses a permissive license; its notices are bundled with the framework.", "https://sparkle-project.org/")
                 if let license = Bundle.main.url(forResource: "Sparkle-LICENSE", withExtension: "txt") {
-                    Button("open sparkle license") { NSWorkspace.shared.open(license) }.accessibilityLabel("Open Sparkle license").buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                    Button("open sparkle license") { NSWorkspace.shared.open(license) }.accessibilityLabel("Open Sparkle license").buttonStyle(SMMacButtonStyle(.secondary))
                 }
                 credit("App Health Swift SDK", "The MIT-licensed Foundation SDK supports optional foreground-session heartbeats. Reporting is disabled unless a per-user native public key is configured; it receives no file or scan details.", "https://github.com/sass-maker/app-health")
                 if let license = Bundle.main.url(forResource: "AppHealth-LICENSE", withExtension: "txt") {
-                    Button("open app health license") { NSWorkspace.shared.open(license) }.accessibilityLabel("Open App Health license").buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                    Button("open app health license") { NSWorkspace.shared.open(license) }.accessibilityLabel("Open App Health license").buttonStyle(SMMacButtonStyle(.secondary))
                 }
                 credit("Mole", "An inspiration and comparison tool for Mac storage workflows. No Mole code is included in this app. Mole is licensed under GPL-3.0.", "https://github.com/tw93/Mole")
                 credit("dua & Dust", "Open-source disk analyzers evaluated for scan performance. The dua adapter is an isolated experiment; neither analyzer is bundled in this app.", "https://github.com/Byron/dua-cli")

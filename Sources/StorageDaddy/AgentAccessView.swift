@@ -103,7 +103,7 @@ struct AgentAccessView: View {
                     }
                 }
             }.padding(24).frame(maxWidth: .infinity, alignment: .topLeading)
-        }.background(AppColors.canvas).buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        }.background(AppColors.canvas).buttonStyle(SMMacButtonStyle(.secondary))
     }
 }
 
@@ -128,7 +128,7 @@ private struct AgentApprovalCard: View {
             HStack {
                 Button("Deny") { agents.deny(request.id) }
                 Spacer()
-                Button("Approve \(role.title)") { agents.approve(request.id, role: role, name: name) }.buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                Button("Approve \(role.title)") { agents.approve(request.id, role: role, name: name) }.buttonStyle(SMMacButtonStyle(.primary))
             }
         }.padding(20).storagePanel().onAppear { name = request.client }
     }

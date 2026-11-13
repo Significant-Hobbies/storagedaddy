@@ -80,7 +80,7 @@ struct ExplorerView: View {
         }
         .font(.custom(DaddyTheme.palette.sansFont, size: 14))
         .storageTheme(DaddyTheme.palette)
-        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        .buttonStyle(SMMacButtonStyle(.secondary))
         .toolbar(.hidden, for: .windowToolbar)
         .sheet(isPresented: $choosingDisk) { DiskPickerView(isPresented: $choosingDisk).environmentObject(m).frame(width: 620, height: 560) }
         .sheet(isPresented: $m.showAbout) {
@@ -93,7 +93,7 @@ struct ExplorerView: View {
                 Text("Yours free forever, including all future versions.").font(.callout).foregroundStyle(Tints.mint)
                 Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
-                Button("done") { m.showAbout = false }.accessibilityLabel("Done").buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                Button("done") { m.showAbout = false }.accessibilityLabel("Done").buttonStyle(SMMacButtonStyle(.primary))
             }.padding(32).frame(width: 340).background(AppColors.canvas)
         }
         .sheet(isPresented: Binding(get: { m.message != nil }, set: { if !$0 { m.message = nil } })) { StorageMessageSheet(message: m.message ?? "") }
@@ -170,8 +170,8 @@ struct ExplorerView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 9) { BrandMark().frame(width: 24, height: 24); Text("storagedaddy").font(.custom(DaddyTheme.palette.sansFont, size: 17).weight(.semibold)).tracking(-0.4).lineLimit(1).minimumScaleFactor(0.8) }.padding(.top, 20).padding(.bottom, 10)
             VStack(spacing: 8) {
-                Button { choosingDisk = true } label: { Label(m.scan == nil ? "start scan…" : "new scan…", systemImage: "internaldrive.fill").frame(maxWidth: .infinity).frame(height: 28) }.buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(m.busy).opacity((m.busy) ? 0.4 : 1).accessibilityLabel(m.scan == nil ? "Start Scan…" : "New Scan…")
-                Button(action: m.chooseFolder) { Label("scan folder…", systemImage: "folder.badge.plus").frame(maxWidth: .infinity).frame(height: 28) }.buttonStyle(StorageButtonStyle(.outline, size: .compact)).disabled(m.busy).accessibilityLabel("Scan Folder…")
+                Button { choosingDisk = true } label: { Label(m.scan == nil ? "start scan…" : "new scan…", systemImage: "internaldrive.fill").frame(maxWidth: .infinity).frame(height: 28) }.buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy).accessibilityLabel(m.scan == nil ? "Start Scan…" : "New Scan…")
+                Button(action: m.chooseFolder) { Label("scan folder…", systemImage: "folder.badge.plus").frame(maxWidth: .infinity).frame(height: 28) }.buttonStyle(SMMacButtonStyle(.secondary)).disabled(m.busy).accessibilityLabel("Scan Folder…")
             }
             VStack(alignment: .leading, spacing: 5) {
                 navigationItem(.dashboard)
@@ -211,7 +211,7 @@ struct ExplorerView: View {
                 Label("settings", systemImage: "gearshape").accessibilityLabel("Settings")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+            .buttonStyle(SMMacButtonStyle(.secondary))
             .accessibilityIdentifier("open-settings")
             .help("Open Settings to manage excluded folders and update preferences (⌘,)")
             Text("Nothing is removed until you review it.").font(.caption).foregroundStyle(Tints.secondaryText)
@@ -296,9 +296,9 @@ struct ExplorerView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Button("refresh project evidence", action: m.reviewProjects).accessibilityLabel("Refresh project evidence")
-                        .buttonStyle(StorageButtonStyle(.outline, size: .compact)).disabled(m.busy || m.projectReviewStatus == .loading)
+                        .buttonStyle(SMMacButtonStyle(.secondary)).disabled(m.busy || m.projectReviewStatus == .loading)
                     if m.projectReviewStatus == .loading {
-                        Button("cancel review", action: m.cancelProjectReview).accessibilityLabel("Cancel review").buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                        Button("cancel review", action: m.cancelProjectReview).accessibilityLabel("Cancel review").buttonStyle(SMMacButtonStyle(.secondary))
                     }
                     ProjectPurgeView(records: m.projectReviewRecords, scan: m.scan, status: m.projectReviewStatus,
                         onRecoveryPlan: m.recordProjectRecoveryPlan, onRetry: m.reviewProjects, onStageArtifactIDs: m.stageProjectArtifacts)
@@ -309,10 +309,10 @@ struct ExplorerView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
                         Button("refresh app reference", action: m.refreshAppDataReview).accessibilityLabel("Refresh app reference")
-                            .buttonStyle(StorageButtonStyle(.outline, size: .compact)).disabled(m.busy || m.appDataReviewLoading)
+                            .buttonStyle(SMMacButtonStyle(.secondary)).disabled(m.busy || m.appDataReviewLoading)
                         if m.appDataReviewLoading {
                             ProgressView().controlSize(.small); Text("Reviewing app metadata…")
-                            Button("cancel", action: m.cancelAppDataReview).accessibilityLabel("Cancel").buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                            Button("cancel", action: m.cancelAppDataReview).accessibilityLabel("Cancel").buttonStyle(SMMacButtonStyle(.secondary))
                         }
                     }
                     Text("Reference covers visible apps in standard application folders. Apps installed elsewhere, ownership and removal safety remain unknown.")
@@ -344,7 +344,7 @@ struct ExplorerView: View {
                             }
                         }.fixedSize(horizontal: true, vertical: false)
                     }
-                    .buttonStyle(StorageButtonStyle((m.storageSection == section) ? .brand : .outline, size: .compact))
+                    .buttonStyle(SMMacButtonStyle((m.storageSection == section) ? .primary : .secondary))
                     .accessibilityIdentifier("storage-section-\(section.rawValue)")
                     .accessibilityAddTraits(m.storageSection == section ? .isSelected : [])
                 }
@@ -377,7 +377,7 @@ struct ExplorerView: View {
                         m.saveSnapshot()
                     }
                     .accessibilityLabel(m.snapshotAlreadySaved ? "Snapshot Saved" : "Save Snapshot")
-                    .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                    .buttonStyle(SMMacButtonStyle(.secondary))
                     .disabled(m.busy || m.snapshotBusy || m.snapshotAlreadySaved)
                     .help("Save this scan’s location and top-level sizes to History on this Mac. File contents are not copied.")
                 }.padding(.horizontal, 24).padding(.bottom, 10)
@@ -427,10 +427,10 @@ struct StorageExplorePanel: View {
                 if !compact { Spacer() }
               HStack {
                 Button(action: m.rescan) { Label("rescan", systemImage: "arrow.clockwise").accessibilityLabel("Rescan") }
-                    .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                    .buttonStyle(SMMacButtonStyle(.secondary))
                     .disabled(m.scan == nil || m.busy)
                 Button { inspector.toggle() } label: { Label("inspector", systemImage: "sidebar.right").accessibilityLabel("Inspector") }
-                    .buttonStyle(StorageButtonStyle((inspector) ? .brand : .outline, size: .compact))
+                    .buttonStyle(SMMacButtonStyle((inspector) ? .primary : .secondary))
                     .help(inspector ? "Hide Inspector" : "Show Inspector")
                     .accessibilityAddTraits(inspector ? .isSelected : [])
               }.fixedSize()
@@ -467,10 +467,10 @@ struct StorageExplorePanel: View {
                         .accessibilityLabel("Explain disk usage, scan coverage and file sizes")
                         .popover(isPresented: $explainingSizes) { ScrollView { SizeExplanationView(accounting: m.scanStorageAccounting, scan: m.scan).padding(22) }.frame(width: 420, height: 480).background(AppColors.canvas) }
                     Button("on disk") { m.allocated = true }.accessibilityLabel("On disk")
-                        .buttonStyle(StorageButtonStyle((m.allocated) ? .brand : .outline, size: .compact))
+                        .buttonStyle(SMMacButtonStyle((m.allocated) ? .primary : .secondary))
                         .accessibilityAddTraits(m.allocated ? .isSelected : [])
                     Button("logical") { m.allocated = false }.accessibilityLabel("Logical")
-                        .buttonStyle(StorageButtonStyle((!m.allocated) ? .brand : .outline, size: .compact))
+                        .buttonStyle(SMMacButtonStyle((!m.allocated) ? .primary : .secondary))
                         .accessibilityAddTraits(!m.allocated ? .isSelected : [])
                 }
                 .fixedSize(horizontal: true, vertical: false)
@@ -645,9 +645,9 @@ struct InspectorView: View {
                     }
                     if ChromeSigningClones.location(path: scan.url(for: n.id).path) == .store {
                         Button("Review signing copies", systemImage: "tray.and.arrow.down") { m.stageChromeSigningCopies(n.id) }
-                            .buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(m.busy || m.monitoring).opacity((m.busy || m.monitoring) ? 0.4 : 1)
+                            .buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy || m.monitoring)
                     } else {
-                        Button(m.staged.contains(n.id) ? "Staged for Cleanup" : "Add to Cleanup", systemImage: "tray.and.arrow.down") { m.stage(n.id) }.buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(m.staged.contains(n.id) || m.busy || m.monitoring || n.parent == nil).opacity((m.staged.contains(n.id) || m.busy || m.monitoring || n.parent == nil) ? 0.4 : 1)
+                        Button(m.staged.contains(n.id) ? "Staged for Cleanup" : "Add to Cleanup", systemImage: "tray.and.arrow.down") { m.stage(n.id) }.buttonStyle(SMMacButtonStyle(.primary)).disabled(m.staged.contains(n.id) || m.busy || m.monitoring || n.parent == nil)
                     }
                     if scan.skipped > 0 {
                         Text("Some locations were skipped. Add to Cleanup checks this item separately and asks you to review any contents it cannot verify.")
@@ -687,7 +687,7 @@ struct InspectorView: View {
             }
             .frame(width: 700, height: 540)
             .background(AppColors.canvas)
-            .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+            .buttonStyle(SMMacButtonStyle(.secondary))
         }
     }
 

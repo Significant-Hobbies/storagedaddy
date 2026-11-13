@@ -1,3 +1,4 @@
+import SaaSMakerUI
 import AppKit
 import Darwin
 import DiskCore
@@ -261,7 +262,7 @@ struct ScanScheduleSettingsView: View {
                 } else { Text("No folder approved yet").foregroundStyle(Tints.secondaryText) }
                 HStack {
                     Button("Use Current Scan Folder", action: schedule.approveCurrentFolder)
-                        .buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                        .buttonStyle(SMMacButtonStyle(.primary))
                     if schedule.approvedPath != nil { Button("Forget Folder", action: schedule.forgetFolder) }
                 }
                 Toggle("Enable recurring full scans", isOn: Binding(get: { schedule.enabled }, set: { schedule.setEnabled($0) }))
@@ -281,6 +282,6 @@ struct ScanScheduleSettingsView: View {
                     .font(.caption).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }.padding(28)
-        }.tint(Tints.mint).buttonStyle(StorageButtonStyle(.outline, size: .compact)).background(AppColors.canvas).foregroundStyle(AppColors.ink)
+        }.tint(Tints.mint).buttonStyle(SMMacButtonStyle(.secondary)).background(AppColors.canvas).foregroundStyle(AppColors.ink)
     }
 }

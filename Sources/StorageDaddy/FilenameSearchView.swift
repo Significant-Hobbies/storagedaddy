@@ -75,16 +75,12 @@ struct FilenameSearchView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SMSectionHeader("Find Files", size: 28).accessibilityLabel("Find Files")
-            Text("Fuzzy filename search across your scan, powered by FinderSearch. Results use scan metadata; rescan to include changes.")
-                .font(.callout).foregroundStyle(Tints.secondaryText)
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Tints.mint)
-                TextField("Filename or filters, e.g. report ext:pdf", text: $query)
-                    .textFieldStyle(.plain).focused($searchFocused)
-                    .accessibilityLabel("Search scanned filenames").accessibilityIdentifier("filename-search")
-                if !query.isEmpty { Button("Clear") { query = "" } }
-            }.padding(12).overlay(RoundedRectangle(cornerRadius: 8).stroke(Tints.mint.opacity(0.28)))
+            SMWorkspaceHeader("Find Files", subtitle: "Fuzzy filename search across your scan, powered by FinderSearch. Results use scan metadata; rescan to include changes.") {
+                EmptyView()
+            }.accessibilityLabel("Find Files")
+            SMSearchField("Filename or filters, e.g. report ext:pdf", text: $query,
+                          focus: $searchFocused, accessibilityLabel: "Search scanned filenames")
+                .accessibilityIdentifier("filename-search")
             ViewThatFits(in: .horizontal) {
                 HStack { scopeToggle; Spacer(); filterHint }
                 VStack(alignment: .leading, spacing: 8) { scopeToggle; filterHint }
@@ -117,8 +113,8 @@ struct FilenameSearchView: View {
                     }
                 }
             }
-        }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(AppColors.canvas).buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(AppColors.canvas).buttonStyle(SMMacButtonStyle(.secondary))
             .task(id: key) {
                 let request = key
                 await searchModel.update(scan: m.scan, identity: request.identity, query: request.query, scope: request.scope)

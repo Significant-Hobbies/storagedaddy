@@ -1,3 +1,4 @@
+import SaaSMakerUI
 import SwiftUI
 import AppKit
 import DiskCore
@@ -80,7 +81,7 @@ struct DiskPickerView: View {
         .background(AppColors.canvas)
         .storageTheme(DaddyTheme.palette)
         .tint(Tints.mint)
-        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        .buttonStyle(SMMacButtonStyle(.secondary))
         .onAppear { volumes = discoverVolumes() }
     }
 
@@ -185,7 +186,7 @@ struct StorageMessageSheet: View {
         .frame(width: 620, height: message.count < 500 ? 230 : 420)
         .background(AppColors.canvas)
         .storageTheme(DaddyTheme.palette)
-        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        .buttonStyle(SMMacButtonStyle(.secondary))
     }
 
     private var displayMessage: String {

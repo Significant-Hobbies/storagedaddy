@@ -116,7 +116,7 @@ struct DashboardView: View {
             .scrollIndicators(.visible)
         }
         .background(AppColors.canvas)
-        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        .buttonStyle(SMMacButtonStyle(.secondary))
         .background(DashboardSamplingObserver(dashboard: dashboard).frame(width: 0, height: 0))
         .task {
             dashboard.loadIfNeeded()

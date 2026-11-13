@@ -1,3 +1,4 @@
+import SaaSMakerUI
 import DiskCore
 import SwiftUI
 
@@ -82,10 +83,10 @@ struct AppLeftoverReviewView: View {
                         }
                         HStack {
                             Button("Inspect in scan") { onInspect(record) }
-                                .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                                .buttonStyle(SMMacButtonStyle(.secondary))
                             if record.status == .unattributedCandidate && result.absenceEvidenceAvailable {
                                 Button("Request cleanup review") { onReview(record) }
-                                    .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                                    .buttonStyle(SMMacButtonStyle(.secondary))
                                     .disabled(!reviewEnabled)
                             }
                         }

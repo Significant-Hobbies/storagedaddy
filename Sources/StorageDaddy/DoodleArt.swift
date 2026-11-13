@@ -20,7 +20,7 @@ struct DoodleArt: View {
                     .offset(x: -CGFloat(topic.rawValue % 3) * g.size.width,
                             y: -CGFloat(topic.rawValue / 3) * g.size.height)
             }
-        }.clipped().allowsHitTesting(false).accessibilityHidden(true)
+        }.environment(\.layoutDirection, .leftToRight).clipped().allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
@@ -67,7 +67,7 @@ struct ScanWelcomeView: View {
                 capacitySummary
                 HStack(spacing: 12) {
                     Button("scan a disk…", systemImage: "internaldrive.fill", action: scanDisk).accessibilityLabel("Scan a Disk…")
-                        .buttonStyle(StorageButtonStyle(.brand, size: .compact)).controlSize(.large)
+                        .buttonStyle(SMMacButtonStyle(.primary)).controlSize(.large)
                     Button("scan home folder", systemImage: "house", action: scanHome).accessibilityLabel("Scan Home Folder").controlSize(.large)
                     Button("scan a folder…", systemImage: "folder.badge.plus", action: scanFolder).accessibilityLabel("Scan a Folder…")
                         .controlSize(.large)
@@ -118,7 +118,7 @@ struct ScanWelcomeView: View {
             .padding(32)
             .frame(maxWidth: .infinity, alignment: .center)
         }
-        .background(AppColors.canvas).buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        .background(AppColors.canvas).buttonStyle(SMMacButtonStyle(.secondary))
         .onAppear { accessStatus = FullDiskAccessProbe.status() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { accessStatus = FullDiskAccessProbe.status() }

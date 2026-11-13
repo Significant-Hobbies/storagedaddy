@@ -70,7 +70,7 @@ struct AISessionsView: View {
             HStack(spacing: 10) {
                 ForEach(AISessionsSection.allCases, id: \.self) { section in
                     Button(section.rawValue.lowercased()) { m.aiSessionsSection = section }.accessibilityLabel(section.rawValue)
-                        .buttonStyle(StorageButtonStyle((m.aiSessionsSection == section) ? .brand : .outline, size: .compact))
+                        .buttonStyle(SMMacButtonStyle((m.aiSessionsSection == section) ? .primary : .secondary))
                 }
                 Spacer()
             }
@@ -82,7 +82,7 @@ struct AISessionsView: View {
         }
         .padding(28)
         .background(AppColors.canvas)
-        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        .buttonStyle(SMMacButtonStyle(.secondary))
         .task(id: m.aiSessionsRefreshID) { await model.load() }
         .sheet(isPresented: $showCoverage) { coverageSheet }
     }
@@ -113,7 +113,7 @@ struct AISessionsView: View {
             VStack(spacing: 14) {
                 StorageEmptyView("Session inventory needs attention", systemImage: "exclamationmark.bubble", description: Text(error))
                 Button("try again", systemImage: "arrow.clockwise") { m.requestAISessionsRefresh() }.accessibilityLabel("Try Again")
-                    .buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                    .buttonStyle(SMMacButtonStyle(.primary))
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let report = model.report {
             let matchingRows = rows(in: report.sessions)
@@ -136,7 +136,7 @@ struct AISessionsView: View {
                     )
                     if !report.sessions.isEmpty, hasFilters {
                         Button("clear filters", systemImage: "xmark.circle") { clearFilters() }.accessibilityLabel("Clear filters")
-                            .buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                            .buttonStyle(SMMacButtonStyle(.primary))
                     }
                 } else {
                     ScrollView {
@@ -187,7 +187,7 @@ struct AISessionsView: View {
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Tints.mint.opacity(0.38)))
                     .accessibilityLabel("Search AI sessions by project, provider, session ID or filename")
                 Text("Provider").font(.caption).foregroundStyle(Tints.secondaryText)
-                Button("all") { provider = nil }.accessibilityLabel("All").buttonStyle(StorageButtonStyle((provider == nil) ? .brand : .outline, size: .compact))
+                Button("all") { provider = nil }.accessibilityLabel("All").buttonStyle(SMMacButtonStyle((provider == nil) ? .primary : .secondary))
                 ForEach(AISessionProvider.allCases, id: \.self) { item in
                     Button { provider = item } label: {
                         HStack(spacing: 6) {
@@ -195,11 +195,11 @@ struct AISessionsView: View {
                             Text(item.rawValue)
                         }
                     }
-                        .buttonStyle(StorageButtonStyle((provider == item) ? .brand : .outline, size: .compact))
+                        .buttonStyle(SMMacButtonStyle((provider == item) ? .primary : .secondary))
                 }
                 if hasFilters {
                     Button("clear filters", systemImage: "xmark.circle") { clearFilters() }.accessibilityLabel("Clear filters")
-                        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                        .buttonStyle(SMMacButtonStyle(.secondary))
                 }
                 Spacer()
             }
@@ -207,13 +207,13 @@ struct AISessionsView: View {
                 Text("Sort by").font(.caption).foregroundStyle(Tints.secondaryText)
                 ForEach(AISessionSort.allCases, id: \.self) { item in
                     Button(item.rawValue.lowercased()) { sort = item }.accessibilityLabel(item.rawValue)
-                        .buttonStyle(StorageButtonStyle((sort == item) ? .brand : .outline, size: .compact))
+                        .buttonStyle(SMMacButtonStyle((sort == item) ? .primary : .secondary))
                 }
                 Spacer()
                 Text("Showing \(matchingRows.count.formatted()) · \(DiskFormat.bytes(matchingRows.reduce(0) { $0 + $1.allocatedBytes }))")
                     .foregroundStyle(Tints.secondaryText)
                 Button("archive older…", systemImage: "archivebox") { m.openConversationArchive() }.accessibilityLabel("Archive Older…")
-                    .buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                    .buttonStyle(SMMacButtonStyle(.primary))
             }
         }
     }
@@ -385,6 +385,6 @@ struct AISessionsView: View {
         .padding(28)
         .frame(width: 680, height: 470)
         .background(AppColors.canvas)
-        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        .buttonStyle(SMMacButtonStyle(.secondary))
     }
 }
