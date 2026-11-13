@@ -127,7 +127,7 @@ private struct GitWorktreeReviewSheet: View {
             if let message = model.message { Text(message).textSelection(.enabled).font(.callout) }
             HStack { Spacer(); Button("Done", action: model.close).disabled(model.working) }
         }.padding(28).frame(width: 620).fixedSize(horizontal: false, vertical: true)
-            .background(AppColors.canvas).foregroundStyle(AppColors.ink).buttonStyle(StorageButtonStyle(.outline, size: .compact))
+            .background(AppColors.canvas).foregroundStyle(AppColors.ink).buttonStyle(SMMacButtonStyle(.secondary))
             .interactiveDismissDisabled(true)
             .confirmationDialog("Permanently remove this Git worktree?", isPresented: $confirming, titleVisibility: .visible) {
                 Button("Remove with Git", role: .destructive, action: model.remove)

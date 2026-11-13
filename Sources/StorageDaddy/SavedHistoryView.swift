@@ -54,7 +54,7 @@ struct SavedHistoryView: View {
                             .foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
                         Button(m.scan == nil ? "Go to Storage" : "Back to scan results", systemImage: "internaldrive") {
                             m.openStorage(.explore)
-                        }.buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                        }.buttonStyle(SMMacButtonStyle(.primary))
                     }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
                         .storagePanel()
                 } else if let selected, let snapshot = m.savedSnapshots.first(where: { $0.id == selected }) {
@@ -88,7 +88,7 @@ struct SavedHistoryView: View {
                 }
             }.padding(28).frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .background(AppColors.canvas).buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        .background(AppColors.canvas).buttonStyle(SMMacButtonStyle(.secondary))
         .task { await m.refreshSnapshotHistory() }
         .onChange(of: m.savedSnapshots.map(\.id)) { _, _ in page = 0 }
         .confirmationDialog("Automatically move older saved scans to Trash?", isPresented: Binding(get: { proposedRetention != nil }, set: { if !$0 { proposedRetention = nil } }), titleVisibility: .visible) {

@@ -71,7 +71,7 @@ struct ApplicationsView: View {
                     .help("Group installed apps by category. Turn off to compare all apps in one list.")
                 if !searchText.isEmpty {
                     Button("clear") { searchText = "" }.accessibilityLabel("Clear")
-                        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                        .buttonStyle(SMMacButtonStyle(.secondary))
                         .accessibilityLabel("Clear application search")
                 }
             }
@@ -83,7 +83,7 @@ struct ApplicationsView: View {
                 StorageEmptyView("No installed apps found", systemImage: "app.dashed", description: Text("Refresh to search standard application folders."))
             } else if visibleApps.isEmpty {
                 StorageEmptyView("No matching applications", systemImage: "magnifyingglass", description: Text("Try a different name, path or category, or clear the search to show all installed apps."))
-                Button("clear search") { searchText = "" }.accessibilityLabel("Clear search").buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                Button("clear search") { searchText = "" }.accessibilityLabel("Clear search").buttonStyle(SMMacButtonStyle(.primary))
             } else {
                 applicationColumnHeader
                 ScrollView {
@@ -124,17 +124,17 @@ struct ApplicationsView: View {
                         }
                         }.frame(width: 96, alignment: .trailing)
                         Button("analyze") { m.openStorage(.explore); m.start(app.url) }.accessibilityLabel("Analyze")
-                            .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                            .buttonStyle(SMMacButtonStyle(.secondary))
                             .frame(width: 80)
                         Button { NSWorkspace.shared.activateFileViewerSelecting([app.url]) } label: { Image(systemName: "arrow.up.forward.square") }
-                            .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                            .buttonStyle(SMMacButtonStyle(.secondary))
                             .frame(width: 32)
                             .help("Reveal in Finder")
                             .accessibilityLabel("Reveal \(app.name) in Finder")
                         Button { applications.reviewRemoval(of: app) } label: {
                             Image(systemName: removalBlock == nil ? "trash" : "lock")
                         }
-                        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                        .buttonStyle(SMMacButtonStyle(.secondary))
                         .frame(width: 32)
                         .disabled(applications.removalBusy || m.busy || m.monitoring || removalBlock != nil)
                         .help(removalBlock ?? "Review and remove \(app.name)…")
@@ -159,7 +159,7 @@ struct ApplicationsView: View {
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .background(AppColors.canvas)
-        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        .buttonStyle(SMMacButtonStyle(.secondary))
         .task { await applications.loadIfNeeded() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
             applications.objectWillChange.send()
@@ -288,6 +288,7 @@ private struct InstalledAppIcon: View {
 
 struct CleanupView: View {
     @EnvironmentObject var m: ExplorerModel
+    @State private var expandedStorageDetails: Set<Int> = []
     var body: some View {
         // These depend on the selection, not on an individual visible row.
         // In particular, permanentCleanupIDs validates every staged path. Doing
@@ -300,10 +301,13 @@ struct CleanupView: View {
         ScrollView {
         // Keep async panels mounted while the rows scroll out of view.
         VStack(alignment: .leading, spacing: 16) {
-            HStack { SMSectionHeader("Quick Cleanup", size: 26).accessibilityLabel("Quick Cleanup"); DoodleArt(topic: .cleanup).frame(width: 72, height: 72); Spacer(); if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") } }
-            Text(m.scan == nil ? "Review Trash, or scan a folder to find cleanup candidates." : m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders and choose how to clean up. Items with issues are kept.").foregroundStyle(Tints.secondaryText)
-            TrashInventoryView()
-            if let scan = m.scan, !easyIDs.isEmpty {
+            HStack(alignment: .center, spacing: 24) {
+                SMWorkspaceHeader("Quick Cleanup", subtitle: m.scan == nil ? "Review Trash, or scan a folder to find cleanup candidates." : m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders and choose how to clean up. Items with issues are kept.") {
+                    if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") }
+                }
+                DoodleArt(topic: .cleanup).frame(width: 72, height: 72)
+            }
+            if m.staged.isEmpty, let scan = m.scan, !easyIDs.isEmpty {
                 AutoCleanerCard(scan: scan, ids: easyIDs)
             }
             if let scan = m.scan, !m.quickCleanupFailures.isEmpty {
@@ -327,7 +331,7 @@ struct CleanupView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("\(m.lastPermanentlyDeletedCount) permanently deleted", systemImage: "checkmark.circle.fill").font(.title2).foregroundStyle(Tints.mint)
                     Text("These folders bypassed Trash. Refresh to see current storage totals.").foregroundStyle(Tints.secondaryText)
-                    Button("refresh scan results", action: m.rescan).accessibilityLabel("Refresh scan results").buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(m.busy).opacity((m.busy) ? 0.4 : 1)
+                    Button("refresh scan results", action: m.rescan).accessibilityLabel("Refresh scan results").buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy)
                 }.padding(16).storagePanel()
             }
             if m.staged.isEmpty, !m.lastTrashedURLs.isEmpty {
@@ -336,7 +340,7 @@ struct CleanupView: View {
                     Text("You can review or restore these items from Trash. Trash still uses disk space until emptied.").foregroundStyle(Tints.secondaryText)
                     HStack {
                         Button("show in trash") { NSWorkspace.shared.activateFileViewerSelecting(m.lastTrashedURLs) }.accessibilityLabel("Show in Trash")
-                        Button("refresh scan results", action: m.rescan).accessibilityLabel("Refresh scan results").buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(m.busy).opacity((m.busy) ? 0.4 : 1)
+                        Button("refresh scan results", action: m.rescan).accessibilityLabel("Refresh scan results").buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy)
                     }
                 }.padding(.vertical, 24)
                 Spacer()
@@ -347,74 +351,106 @@ struct CleanupView: View {
             }
             else if !m.staged.isEmpty, let scan = m.scan {
                 RemovalMeasurementView(scan: scan, ids: stagedIDs).id("\(scan.started):\(stagedIDs)")
-                LazyVStack(alignment: .leading, spacing: 16) {
-                ForEach(stagedIDs, id: \.self) { id in
-                    let node = scan.nodes[id]
-                    let path = scan.url(for: id).path
-                    let signingCopy = ChromeSigningClones.location(path: path) != nil
-                    let dependencies = CleanupGuidance.isProjectDependencies(path: path)
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack(alignment: .top) {
-                            Image(systemName: node.isDirectory ? "folder.fill" : "doc.fill")
-                                .foregroundStyle(Tints.forNode(node)).font(.title3).frame(width: 32)
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(StorageLabels.name(node))
-                                if signingCopy {
-                                    Label("Signing copy · Quit Chrome first", systemImage: "square.on.square").font(.caption).foregroundStyle(Tints.yellow)
-                                } else if quickCandidateIDs.contains(id) {
-                                    Label("Rebuildable · Downloads or rebuilds may be needed", systemImage: "arrow.clockwise").font(.caption).foregroundStyle(Tints.mint)
-                                } else { CleanupFlag(category: m.cleanupCategory(id)) }
-                                Text(StorageLabels.location(path)).help(path).font(.caption).foregroundStyle(Tints.secondaryText).lineLimit(1).truncationMode(.middle)
-                                if permanentIDs.contains(id) {
-                                    Label("Permanently delete · Bypasses Trash", systemImage: "trash.slash").font(.caption).foregroundStyle(Tints.coral)
-                                }
-                                if let note = CleanupGuidance.chromeCacheNote(path: path) {
-                                    Text(note).font(.caption).foregroundStyle(Tints.yellow)
-                                }
-                                if signingCopy {
-                                    Text(ChromeSigningClones.cleanupExplanation).font(.caption).foregroundStyle(Tints.yellow)
-                                }
-                                if !dependencies {
-                                    StorageAllocationDetailsView(node: node)
-                                }
-                                if let review = m.incompleteCleanup[id] {
-                                    Label("Added anyway · \(review.skipped) \(review.skipped == 1 ? "item" : "items") not checked", systemImage: "exclamationmark.triangle")
-                                        .font(.caption).foregroundStyle(Tints.coral)
-                                    Button("review warning") { m.reviewIncompleteCleanup(id) }.accessibilityLabel("Review warning").font(.caption).disabled(m.busy)
-                                }
-                                if node.isDirectory && !dependencies {
+                SMSettingsGroup {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(stagedIDs, id: \.self) { id in
+                            cleanupRow(id: id, scan: scan, permanentIDs: permanentIDs,
+                                       quickCandidateIDs: quickCandidateIDs)
+                            if id != stagedIDs.last { Divider().padding(.horizontal, 16) }
+                        }
+                    }
+                }
+            }
+            if !m.staged.isEmpty, let scan = m.scan, !easyIDs.isEmpty {
+                DisclosureGroup("More rebuildable items (\(easyIDs.count))") {
+                    AutoCleanerCard(scan: scan, ids: easyIDs).padding(.top, 12)
+                }
+            }
+            TrashInventoryView()
+        }.padding(32)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !stagedIDs.isEmpty { cleanupControls(permanentIDs: permanentIDs) }
+        }
+        .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+        }.background(AppColors.canvas).buttonStyle(SMMacButtonStyle(.secondary))
+            .onChange(of: m.scan?.started) { _, _ in expandedStorageDetails = [] }
+    }
+
+    private func cleanupRow(id: Int, scan: ScanResult, permanentIDs: Set<Int>, quickCandidateIDs: Set<Int>) -> some View {
+        let node = scan.nodes[id]
+        let path = scan.url(for: id).path
+        let signingCopy = ChromeSigningClones.location(path: path) != nil
+        let dependencies = CleanupGuidance.isProjectDependencies(path: path)
+        return VStack(alignment: .leading, spacing: 0) {
+            SMResourceRow(StorageLabels.name(node), subtitle: StorageLabels.location(path),
+                          systemImage: node.isDirectory ? "folder" : "doc") {
+                EmptyView()
+            } trailing: {
+                HStack(spacing: 16) {
+                    VStack(alignment: .trailing, spacing: 5) {
+                        Text(node.allocatedBytes == 0 && (m.allocationSummary(node)?.sharedFiles ?? 0) > 0 ? "Shared" : DiskFormat.bytes(node.allocatedBytes))
+                            .font(.custom(DaddyTheme.palette.sansFont, size: 14).weight(.medium)).monospacedDigit()
+                        Label(permanentIDs.contains(id) ? "Permanently delete · Bypasses Trash" : "Move to Trash",
+                              systemImage: permanentIDs.contains(id) ? "trash.slash" : "trash")
+                            .font(.caption).foregroundStyle(permanentIDs.contains(id) ? Tints.coral : Tints.secondaryText)
+                    }
+                    Button("remove") { m.unstage(id) }.accessibilityLabel("Remove").disabled(m.busy)
+                        .buttonStyle(SMMacButtonStyle(.quiet))
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                if signingCopy {
+                    Label("Signing copy · Quit Chrome first", systemImage: "square.on.square").foregroundStyle(Tints.yellow)
+                    Text(ChromeSigningClones.cleanupExplanation).foregroundStyle(Tints.yellow)
+                } else if quickCandidateIDs.contains(id) {
+                    Label("Rebuildable · Downloads or rebuilds may be needed", systemImage: "arrow.clockwise").foregroundStyle(Tints.mint)
+                } else { CleanupFlag(category: m.cleanupCategory(id)) }
+                if let note = CleanupGuidance.chromeCacheNote(path: path) { Text(note).foregroundStyle(Tints.yellow) }
+                if let review = m.incompleteCleanup[id] {
+                    Label("Added anyway · \(review.skipped) \(review.skipped == 1 ? "item" : "items") not checked", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(Tints.coral)
+                    Button("review warning") { m.reviewIncompleteCleanup(id) }.accessibilityLabel("Review warning").disabled(m.busy)
+                }
+                if !dependencies {
+                    DisclosureGroup("Storage details", isExpanded: Binding(
+                        get: { expandedStorageDetails.contains(id) },
+                        set: { if $0 { expandedStorageDetails.insert(id) } else { expandedStorageDetails.remove(id) } }
+                    )) {
+                        if expandedStorageDetails.contains(id) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                StorageAllocationDetailsView(node: node)
+                                if node.isDirectory {
                                     FolderSymlinksView(scan: scan, folderID: id, cleanupReview: true)
                                         .id("\(scan.started.timeIntervalSince1970):\(scan.rootPath):\(id)")
                                         .frame(maxWidth: 540, alignment: .leading)
                                 }
-                            }
-                            Spacer()
-                            Text(node.allocatedBytes == 0 && (m.allocationSummary(node)?.sharedFiles ?? 0) > 0 ? "Shared" : DiskFormat.bytes(node.allocatedBytes)).monospacedDigit()
-                                .foregroundStyle(Tints.forNode(node)).frame(width: 104, alignment: .trailing)
-                            Button("remove") { m.unstage(id) }.accessibilityLabel("Remove").disabled(m.busy)
-                        }.accessibilityElement(children: .contain)
-                        Divider()
+                            }.padding(.top, 6)
+                        }
                     }
                 }
-                }
-                if m.staged.contains(where: { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory && m.incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) }) {
+            }.font(.caption).padding(.horizontal, 16).padding(.bottom, 16)
+        }.accessibilityElement(children: .contain)
+    }
+
+    private func cleanupControls(permanentIDs: Set<Int>) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let scan = m.scan,
+               m.staged.contains(where: { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory && m.incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) }) {
+                VStack(alignment: .leading, spacing: 6) {
                     Toggle("Delete Node dependencies and package caches permanently", isOn: $m.deleteNodeCachesPermanently).disabled(m.busy)
                     Text("Bypasses Trash. Local changes in these folders cannot be restored.").font(.caption).foregroundStyle(Tints.secondaryText)
-                }
-                HStack(alignment: .top) {
-                    Text("\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") · \(m.stagedExclusiveBytes.map(DiskFormat.bytes) ?? "Unknown") exclusive allocation").fontWeight(.medium)
-                    Spacer()
-                    Button(permanentIDs.isEmpty ? "move to trash…" : "clean up…", action: m.trashStaged)
-                        .accessibilityLabel(permanentIDs.isEmpty ? "Move to Trash…" : "Clean Up…")
-                        .buttonStyle(StorageButtonStyle(.brand, size: .compact)).tint(Tints.coral).disabled(m.busy || m.monitoring).opacity((m.busy || m.monitoring) ? 0.4 : 1)
-                }
-                Text(permanentIDs.isEmpty ? "Trash still uses disk space until it is emptied." : "\(permanentIDs.count) to delete permanently · \(m.staged.count - permanentIDs.count) to Trash after confirmation.").font(.caption).foregroundStyle(Tints.secondaryText)
-                if m.monitoring { Text("Stop monitoring before cleanup.").font(.caption).foregroundStyle(Tints.secondaryText) }
+                }.padding(.horizontal, 32).padding(.vertical, 12)
             }
-        }.padding(24)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
-        }.background(AppColors.canvas).buttonStyle(StorageButtonStyle(.outline, size: .compact))
+            SMSelectionBar("\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") · \(m.stagedExclusiveBytes.map(DiskFormat.bytes) ?? "Unknown") exclusive allocation",
+                           detail: m.monitoring ? "Stop monitoring before cleanup." : permanentIDs.isEmpty ? "Trash still uses disk space until it is emptied." : "\(permanentIDs.count) to delete permanently · \(m.staged.count - permanentIDs.count) to Trash after confirmation.",
+                           horizontalPadding: 32) {
+                Button(permanentIDs.isEmpty ? "move to trash…" : "clean up…", action: m.trashStaged)
+                    .accessibilityLabel(permanentIDs.isEmpty ? "Move to Trash…" : "Clean Up…")
+                    .buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy || m.monitoring)
+            }
+        }.background(AppColors.canvas)
     }
 }
 
@@ -428,41 +464,41 @@ private struct AutoCleanerCard: View {
     private var suggestions: [Int] { Array(ids.prefix(8)) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        SMSettingsGroup("Rebuildable items", footer: "Caches, project dependencies and build outputs. Apps may need to download or rebuild them afterward. Nothing moves automatically.") {
             ViewThatFits(in: .horizontal) {
-                HStack { Text("Rebuildable items").font(.headline); Spacer(); summary }
-                VStack(alignment: .leading) { Text("Rebuildable items").font(.headline); summary }
-            }
-            Text("Caches, project dependencies and build outputs. Apps may need to download or rebuild them afterward. Nothing moves automatically.")
-                .font(.caption).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
-            Button("Review \(ids.count) \(ids.count == 1 ? "item" : "items") (\(DiskFormat.bytes(totalBytes)))…", action: m.stageEasyCleanup)
-                .buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(m.busy || m.monitoring).opacity((m.busy || m.monitoring) ? 0.4 : 1)
+                HStack { summary; Spacer(minLength: 16); reviewButton }
+                VStack(alignment: .leading, spacing: 12) { summary; reviewButton }
+            }.padding(16)
+            Divider().padding(.horizontal, 16)
             ForEach(suggestions, id: \.self) { id in
                 let category = m.cleanupCategory(id) ?? .packageCaches
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 10) {
-                        Image(systemName: category.symbol).foregroundStyle(category.color).frame(width: 20)
-                        Text(StorageLabels.name(scan.nodes[id])).fontWeight(.medium)
-                        Spacer()
-                        Text(DiskFormat.bytes(scan.nodes[id].allocatedBytes)).monospacedDigit()
-                    }
-                    Text(StorageLabels.location(scan.url(for: id).path)).font(.caption)
-                        .foregroundStyle(Tints.secondaryText).lineLimit(2).help(scan.url(for: id).path)
-                    HStack {
-                        Text(category.title).font(.caption).foregroundStyle(Tints.secondaryText)
-                        Spacer()
+                SMResourceRow(StorageLabels.name(scan.nodes[id]),
+                              subtitle: StorageLabels.location(scan.url(for: id).path),
+                              systemImage: category.symbol) {
+                    EmptyView()
+                } trailing: {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text(DiskFormat.bytes(scan.nodes[id].allocatedBytes)).monospacedDigit()
+                            Text(category.title).font(.caption).foregroundStyle(Tints.secondaryText)
+                        }
                         Button("inspect") { m.showCleanup = false; m.openStorage(.explore); m.open(scan.nodes[id]) }
-                            .accessibilityLabel("Inspect").font(.caption)
-                        Button("add for review") { m.stage(id) }.accessibilityLabel("Add for Review").font(.caption).disabled(m.busy)
+                            .accessibilityLabel("Inspect").buttonStyle(SMMacButtonStyle(.quiet))
+                        Button("add for review") { m.stage(id) }.accessibilityLabel("Add for Review").disabled(m.busy)
                     }
-                    Divider()
                 }
+                if id != suggestions.last { Divider().padding(.horizontal, 16) }
             }
             if ids.count > suggestions.count {
                 Text("+ \(ids.count - suggestions.count) more included in Review items")
-                    .font(.caption).foregroundStyle(Tints.secondaryText)
+                    .font(.caption).foregroundStyle(Tints.secondaryText).padding(16)
             }
-        }.padding(16).storagePanel()
+        }
+    }
+
+    private var reviewButton: some View {
+        Button("Review \(ids.count) \(ids.count == 1 ? "item" : "items") (\(DiskFormat.bytes(totalBytes)))…", action: m.stageEasyCleanup)
+            .buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy || m.monitoring)
     }
     private var totalBytes: Int64 { ids.reduce(0) { $0 + scan.nodes[$1].allocatedBytes } }
 

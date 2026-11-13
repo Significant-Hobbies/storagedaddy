@@ -1,3 +1,4 @@
+import SaaSMakerUI
 import SwiftUI
 import DiskCore
 
@@ -41,8 +42,8 @@ struct ChromeSigningCopiesView: View {
                         Text("\(ChromeSigningClones.copyIDs(in: scan, storeID: nodeID).count.formatted()) signing copies found").font(.caption)
                         Spacer()
                         Button("review signing copies", systemImage: "tray.and.arrow.down") { m.stageChromeSigningCopies(nodeID) }
-                            .accessibilityLabel("Review signing copies").buttonStyle(StorageButtonStyle(.brand, size: .compact))
-                            .disabled(m.busy || m.monitoring).opacity((m.busy || m.monitoring) ? 0.4 : 1)
+                            .accessibilityLabel("Review signing copies").buttonStyle(SMMacButtonStyle(.primary))
+                            .disabled(m.busy || m.monitoring)
                     }
                 } else {
                     Text("Review a whole signing copy from the inspector. Individual bundle files are protected from cleanup.")

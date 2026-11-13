@@ -95,10 +95,10 @@ struct DuplicateReviewView: View {
                 }
                 Spacer(minLength: 8)
                 if isLoading {
-                    Button("cancel", action: onCancel).accessibilityLabel("Cancel").buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                    Button("cancel", action: onCancel).accessibilityLabel("Cancel").buttonStyle(SMMacButtonStyle(.secondary))
                 } else {
                     Button(hasSearched ? "Find again" : "Find duplicates", action: onFind)
-                        .buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                        .buttonStyle(SMMacButtonStyle(.primary))
                 }
             }
             HStack {
@@ -127,7 +127,7 @@ struct DuplicateReviewView: View {
             } else if let error {
                 statePanel("Duplicate check couldn’t finish", detail: error) {
                     Image(systemName: "exclamationmark.triangle").foregroundStyle(Tints.yellow)
-                    Button("try again", action: onFind).accessibilityLabel("Try again").buttonStyle(StorageButtonStyle(.brand, size: .compact))
+                    Button("try again", action: onFind).accessibilityLabel("Try again").buttonStyle(SMMacButtonStyle(.primary))
                 }
             } else if !hasSearched {
                 statePanel("Duplicates haven’t been checked", detail: "Run a content check for this scan. Nothing is selected for cleanup.") {
@@ -148,7 +148,7 @@ struct DuplicateReviewView: View {
                             Button("Keep oldest; review moves") { onMove(DuplicateRetention.removals(in: groups, scan: scan, keepNewest: false)) }
                         }
                     }
-                }.buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                }.buttonStyle(SMMacButtonStyle(.secondary))
                 GeometryReader { geometry in
                     if geometry.size.width >= 760 {
                         HStack(alignment: .top, spacing: 18) {
@@ -240,7 +240,7 @@ private struct DuplicateGroupInspector: View {
                 Button("Keep newest") { choose(keepNewest: true) }
                 Button("Keep oldest") { choose(keepNewest: false) }
                 Button("Keep all") { for id in group.nodeIDs { selection.setSurvivor(id, kept: true) } }
-            }.buttonStyle(StorageButtonStyle(.outline, size: .compact))
+            }.buttonStyle(SMMacButtonStyle(.secondary))
             Divider().overlay(Tints.mint.opacity(0.18))
             if selection.isValid {
                 ScrollView {
@@ -283,7 +283,7 @@ private struct DuplicateGroupInspector: View {
 
     private var stageButton: some View {
         Button("stage other copies") { selection.stage(using: onStage) }.accessibilityLabel("Stage other copies")
-            .buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(!selection.canStage).opacity((!selection.canStage) ? 0.4 : 1)
+            .buttonStyle(SMMacButtonStyle(.primary)).disabled(!selection.canStage)
             .help("Send only the selected copies to cleanup review. Files are not moved by this action.")
     }
 

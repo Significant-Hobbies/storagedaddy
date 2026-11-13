@@ -1,3 +1,4 @@
+import SaaSMakerUI
 import SwiftUI
 import DiskCore
 
@@ -54,14 +55,14 @@ struct ApplicationRemovalSheet: View {
                     guard !m.busy, !m.monitoring else { return }
                     applications.confirmRemoval(review, onRemoved: onRemoved)
                 }
-                    .buttonStyle(StorageButtonStyle(.brand, size: .compact))
-                    .disabled(applications.movingApplication || applications.removalError != nil || m.busy || m.monitoring).opacity((applications.movingApplication || applications.removalError != nil || m.busy || m.monitoring) ? 0.4 : 1)
+                    .buttonStyle(SMMacButtonStyle(.primary))
+                    .disabled(applications.movingApplication || applications.removalError != nil || m.busy || m.monitoring)
             }
         }
         .padding(28).frame(width: 520)
         .background(AppColors.canvas)
         .foregroundStyle(AppColors.ink)
-        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        .buttonStyle(SMMacButtonStyle(.secondary))
         .interactiveDismissDisabled(applications.movingApplication)
     }
 }

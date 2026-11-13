@@ -1,3 +1,4 @@
+import SaaSMakerUI
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -274,7 +275,7 @@ struct ConversationArchiveView: View {
                                 Text(provider.rawValue)
                             }
                         }
-                            .buttonStyle(StorageButtonStyle((model.provider == provider) ? .brand : .outline, size: .compact))
+                            .buttonStyle(SMMacButtonStyle((model.provider == provider) ? .primary : .secondary))
                     }
                 }
                 .disabled(model.busy)
@@ -308,8 +309,8 @@ struct ConversationArchiveView: View {
                         Label("Choose location and export", systemImage: "archivebox")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(StorageButtonStyle(.brand, size: .compact))
-                    .disabled(!exportEnabled).opacity((!exportEnabled) ? 0.4 : 1)
+                    .buttonStyle(SMMacButtonStyle(.primary))
+                    .disabled(!exportEnabled)
                     Text("Desktop is suggested. You can save the ZIP anywhere you choose.")
                         .font(.caption)
                         .foregroundStyle(Tints.secondaryText)
@@ -435,7 +436,7 @@ struct ConversationArchiveView: View {
 
     private func presetButton(_ title: String, days: Int) -> some View {
         Button(title) { model.before = presetDate(days: days) }
-            .buttonStyle(StorageButtonStyle((Calendar.current.isDate(model.before, inSameDayAs: presetDate(days: days))) ? .brand : .outline, size: .compact))
+            .buttonStyle(SMMacButtonStyle((Calendar.current.isDate(model.before, inSameDayAs: presetDate(days: days))) ? .primary : .secondary))
     }
 
     private func presetDate(days: Int) -> Date {
@@ -573,8 +574,8 @@ struct ConversationArchiveView: View {
                     }.frame(maxHeight: 180)
                     Toggle("I no longer need to resume these sessions, and accept the omitted data.", isOn: $model.cleanupAcknowledged)
                     Button("Move Verified Originals to Trash…", systemImage: "trash", action: model.trashVerifiedOriginals)
-                        .buttonStyle(StorageButtonStyle(.brand, size: .compact))
-                        .disabled(!model.cleanupAcknowledged || model.busy).opacity((!model.cleanupAcknowledged || model.busy) ? 0.4 : 1)
+                        .buttonStyle(SMMacButtonStyle(.primary))
+                        .disabled(!model.cleanupAcknowledged || model.busy)
                 }
             }
             if !model.trashedURLs.isEmpty {

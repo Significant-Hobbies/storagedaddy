@@ -92,15 +92,15 @@ struct ProjectPurgeRecoveryPlanSheet: View {
                 if draft.existingPlan != nil {
                     Button("clear saved plan") {
                         if draft.clear(callback: onRecoveryPlan) { dismiss() }
-                    }.accessibilityLabel("Clear saved plan").buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                    }.accessibilityLabel("Clear saved plan").buttonStyle(SMMacButtonStyle(.secondary))
                 }
                 Spacer()
-                Button("cancel") { dismiss() }.accessibilityLabel("Cancel").buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                Button("cancel") { dismiss() }.accessibilityLabel("Cancel").buttonStyle(SMMacButtonStyle(.secondary))
                 Button("save reviewed plan") {
                     if draft.submit(callback: onRecoveryPlan) { dismiss() }
                 }.accessibilityLabel("Save reviewed plan")
-                .buttonStyle(StorageButtonStyle(.brand, size: .compact))
-                .disabled(!draft.canSubmit).opacity((!draft.canSubmit) ? 0.4 : 1)
+                .buttonStyle(SMMacButtonStyle(.primary))
+                .disabled(!draft.canSubmit)
             }
         }
         .padding(24).frame(width: 520)
@@ -148,8 +148,8 @@ struct ProjectPurgeView: View {
                 Button("Stage \(selectedIDs.count) \(selectedIDs.count == 1 ? "artifact" : "artifacts")") {
                     selection.stage(records: records, status: status, callback: onStageArtifactIDs)
                 }
-                .buttonStyle(StorageButtonStyle(.brand, size: .compact))
-                .disabled(status != .ready || scan == nil || selectedIDs.isEmpty).opacity((status != .ready || scan == nil || selectedIDs.isEmpty) ? 0.4 : 1)
+                .buttonStyle(SMMacButtonStyle(.primary))
+                .disabled(status != .ready || scan == nil || selectedIDs.isEmpty)
                 .help("Send explicitly selected artifact IDs to the existing cleanup preflight. Nothing is deleted here.")
             }
             switch status {
@@ -298,7 +298,7 @@ struct ProjectPurgeView: View {
                 Button(artifact.userReviewedRecoveryPlan == nil ? "Add recovery plan" : "Edit recovery plan") {
                     recoveryDraft = ProjectPurgeRecoveryPlanState(artifactID: artifact.id, existingPlan: artifact.userReviewedRecoveryPlan)
                 }
-                .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+                .buttonStyle(SMMacButtonStyle(.secondary))
                 .disabled(status != .ready || scan == nil)
             }
             reasons(artifact.protections)

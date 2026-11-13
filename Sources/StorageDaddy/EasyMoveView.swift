@@ -1,3 +1,4 @@
+import SaaSMakerUI
 import AppKit
 import SwiftUI
 struct EasyMovePresentation: ViewModifier {
@@ -192,7 +193,7 @@ struct EasyMoveView: View {
         }
         .padding(28).frame(minWidth: 540, idealWidth: 640, maxWidth: 740, minHeight: 340, maxHeight: 700)
         .background(AppColors.canvas).foregroundStyle(AppColors.ink)
-        .buttonStyle(StorageButtonStyle(.outline, size: .compact)).interactiveDismissDisabled(model.busy)
+        .buttonStyle(SMMacButtonStyle(.secondary)).interactiveDismissDisabled(model.busy)
         .onChange(of: model.batchPlans.map(\.id)) { _, _ in acknowledged = false }
         .onChange(of: model.plan?.id) { _, _ in acknowledged = false }
         .task { await model.reload() }
@@ -229,7 +230,7 @@ struct EasyMoveView: View {
                 Button("Back to History", action: model.discardReview).disabled(model.busy)
                 Spacer()
                 Button("Move and Leave Link", action: model.confirmMove)
-                    .buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(!acknowledged || model.busy).opacity((!acknowledged || model.busy) ? 0.4 : 1)
+                    .buttonStyle(SMMacButtonStyle(.primary)).disabled(!acknowledged || model.busy)
             }
         }
     }

@@ -1,3 +1,4 @@
+import SaaSMakerUI
 import AppKit
 import SwiftUI
 import DiskCore
@@ -80,7 +81,7 @@ struct StorageSettingsView: View {
                 }
                 HStack {
                     Button("Add Folder…", systemImage: "plus", action: chooseFolders)
-                        .buttonStyle(StorageButtonStyle(.brand, size: .compact)).disabled(model.busy).opacity((model.busy) ? 0.4 : 1)
+                        .buttonStyle(SMMacButtonStyle(.primary)).disabled(model.busy)
                     Spacer()
                     Text("\(model.excludedFolders.count) excluded").foregroundStyle(Tints.secondaryText)
                 }
@@ -108,7 +109,7 @@ struct StorageSettingsView: View {
         .background(AppColors.canvas)
         .storageTheme(DaddyTheme.palette)
         .tint(Tints.mint)
-        .buttonStyle(StorageButtonStyle(.outline, size: .compact))
+        .buttonStyle(SMMacButtonStyle(.secondary))
     }
 
     private func chooseFolders() {
