@@ -8,13 +8,35 @@ enum DoodleTopic: Int {
     case overview, explore, applications, duplicates, snapshots, monitor, cleanup, thanks, agents
 }
 
+private struct StorageArtworkDirectory: EnvironmentKey {
+    static let defaultValue: URL? = Bundle.main.resourceURL
+}
+
+extension EnvironmentValues {
+    var storageArtworkDirectory: URL? {
+        get { self[StorageArtworkDirectory.self] }
+        set { self[StorageArtworkDirectory.self] = newValue }
+    }
+}
+
+@MainActor enum StorageArtwork {
+    private static var images: [URL: NSImage] = [:]
+    static func image(_ name: String, directory: URL?) -> NSImage? {
+        guard let url = directory?.appendingPathComponent(name).appendingPathExtension("png") else { return nil }
+        if let image = images[url] { return image }
+        guard let image = NSImage(contentsOf: url) else { return nil }
+        images[url] = image
+        return image
+    }
+}
+
 /// One cached sprite sheet supplies all decorative page artwork.
 struct DoodleArt: View {
     let topic: DoodleTopic
-    private static let image = Bundle.main.url(forResource: "PageDoodles", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+    @Environment(\.storageArtworkDirectory) private var artworkDirectory
     var body: some View {
         GeometryReader { g in
-            if let image = Self.image {
+            if let image = StorageArtwork.image("PageDoodles", directory: artworkDirectory) {
                 Image(nsImage: image).resizable().interpolation(.high)
                     .frame(width: g.size.width * 3, height: g.size.height * 3)
                     .offset(x: -CGFloat(topic.rawValue % 3) * g.size.width,
@@ -25,9 +47,9 @@ struct DoodleArt: View {
 }
 
 struct WelcomeIllustration: View {
-    private static let image = Bundle.main.url(forResource: "Welcome", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+    @Environment(\.storageArtworkDirectory) private var artworkDirectory
     var body: some View {
-        if let image = Self.image { Image(nsImage: image).resizable().scaledToFit().accessibilityHidden(true) }
+        if let image = StorageArtwork.image("Welcome", directory: artworkDirectory) { Image(nsImage: image).resizable().scaledToFit().accessibilityHidden(true) }
     }
 }
 

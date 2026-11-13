@@ -12,16 +12,17 @@ struct ExplorerView: View {
     @AppStorage("storageAccessIntroductionSeen") private var accessIntroductionSeen = false
     @State private var inspector = false
     @State private var choosingDisk = false
+    @State private var toolsExpanded = false
     init(runsLaunchActions: Bool = true, inspector: Bool = false) {
         self.runsLaunchActions = runsLaunchActions
         _inspector = State(initialValue: inspector)
     }
     var body: some View {
-        HSplitView {
-            ScrollView { sidebar }
-                .background(AppColors.canvas).frame(minWidth: 180, idealWidth: 200, maxWidth: 240)
+        HStack(spacing: 0) {
+            sidebar
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
+                    scopeBar
                     if m.busy { HStack { ProgressView().controlSize(.small); Text(m.progress).lineLimit(1); Spacer(); Button("cancel") { m.cancel() }.accessibilityLabel("Cancel") }.padding(12).background(AppColors.canvas) }
                     if !m.busy, m.exclusionResultsStale {
                         HStack {
@@ -71,7 +72,7 @@ struct ExplorerView: View {
                                 .help(processDiskReadRateHelp)
                         }
                         Text("On-device only").foregroundStyle(Tints.secondaryText)
-                    }.font(.caption).lineLimit(1).padding(10)
+                    }.font(.custom(DaddyTheme.palette.sansFont, size: 10)).lineLimit(1).padding(.horizontal, 24).frame(height: 30)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 if inspector, !m.busy, m.scan != nil, m.workspace == .explore, m.storageSection == .explore {
                     Divider().overlay(Tints.secondaryText.opacity(0.18)); InspectorView().frame(width: 250)
@@ -79,6 +80,7 @@ struct ExplorerView: View {
             }.background(AppColors.canvas)
         }
         .font(.custom(DaddyTheme.palette.sansFont, size: 14))
+        .background(SMWorkspaceWindowChrome())
         .storageTheme(DaddyTheme.palette)
         .buttonStyle(SMMacButtonStyle(.secondary))
         .toolbar(.hidden, for: .windowToolbar)
@@ -167,90 +169,101 @@ struct ExplorerView: View {
         )
     }
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 9) { BrandMark().frame(width: 24, height: 24); Text("storagedaddy").font(.custom(DaddyTheme.palette.sansFont, size: 17).weight(.semibold)).tracking(-0.4).lineLimit(1).minimumScaleFactor(0.8) }.padding(.top, 20).padding(.bottom, 10)
-            VStack(spacing: 8) {
-                Button { choosingDisk = true } label: { Label(m.scan == nil ? "start scan…" : "new scan…", systemImage: "internaldrive.fill").frame(maxWidth: .infinity).frame(height: 28) }.buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy).accessibilityLabel(m.scan == nil ? "Start Scan…" : "New Scan…")
-                Button(action: m.chooseFolder) { Label("scan folder…", systemImage: "folder.badge.plus").frame(maxWidth: .infinity).frame(height: 28) }.buttonStyle(SMMacButtonStyle(.secondary)).disabled(m.busy).accessibilityLabel("Scan Folder…")
+        SMWorkspaceSidebar {
+            HStack(spacing: 10) {
+                BrandMark().frame(width: 32, height: 32)
+                Text("storagedaddy").font(.custom(DaddyTheme.palette.displayFont, size: 18).weight(.semibold)).tracking(-0.5)
             }
-            VStack(alignment: .leading, spacing: 5) {
-                navigationItem(.dashboard)
-                navigationItem(.cleanup)
-                navigationItem(.explore)
-                navigationHeading("SCAN RESULTS")
-                navigationItem(.developer)
-                navigationItem(.findFiles)
-                navigationItem(.snapshots)
-                navigationItem(.duplicates)
-                navigationItem(.projects)
-                navigationItem(.appData)
-                navigationHeading("TOOLS").padding(.top, 9)
-                navigationItem(.processes)
-                navigationItem(.driveMonitoring)
-                navigationItem(.agents)
-                navigationItem(.applications)
-                navigationItem(.aiSessions)
-                navigationItem(.macControls)
+        } navigation: {
+            navigationItem(.dashboard, title: "Overview", symbol: "square.grid.2x2")
+            navigationItem(.explore, title: "Storage", symbol: "internaldrive")
+            navigationItem(.applications, symbol: "square.stack.3d.up")
+            navigationItem(.aiSessions, title: "AI sessions", symbol: "bubble.left.and.bubble.right")
+            navigationItem(.snapshots, symbol: "clock.arrow.circlepath")
+            if toolsExpanded {
+                Divider().padding(.vertical, 14)
+                ForEach([Workspace.findFiles, .duplicates, .projects, .appData, .processes, .driveMonitoring, .agents, .macControls, .acknowledgments]) { item in
+                    navigationItem(item)
+                }
             }
-            Spacer(minLength: 12)
-            if let scan = m.scan, let root = scan.nodes.first {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("current scan").accessibilityLabel("CURRENT SCAN").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
-                    Text(StorageLabels.name(root)).font(.callout).lineLimit(1).help(scan.rootPath)
-                    Text(m.scanStorageAccounting.map { "\(DiskFormat.bytes($0.capacity.used)) used of \(DiskFormat.bytes($0.capacity.total))" }
-                        ?? "\(DiskFormat.bytes(root.allocatedBytes)) attributed allocation").font(.callout).monospacedDigit()
-                    if scan.skipped > 0 {
-                        Button("\(scan.skipped.formatted()) skipped · Details") {
-                            m.message = [m.scanStorageAccounting?.measuredBreakdown, m.scanStorageAccounting?.explanation, scan.coverageExplanation]
-                                .compactMap { $0 }.joined(separator: "\n\n")
-                        }.font(.caption)
+        } footer: {
+            VStack(alignment: .leading, spacing: 22) {
+                if let scan = m.scan, let root = scan.nodes.first {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(StorageLabels.name(root), systemImage: "internaldrive")
+                            .font(.custom(DaddyTheme.palette.sansFont, size: 11).weight(.medium)).lineLimit(1).help(scan.rootPath)
+                        Text(m.scanStorageAccounting.map { "\(DiskFormat.bytes($0.capacity.available)) available" }
+                             ?? "\(DiskFormat.bytes(root.allocatedBytes)) on disk")
+                            .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.secondaryText)
+                        if scan.skipped > 0 {
+                            Button("\(scan.skipped.formatted()) skipped · Details") {
+                                m.message = [m.scanStorageAccounting?.measuredBreakdown, m.scanStorageAccounting?.explanation, scan.coverageExplanation]
+                                    .compactMap { $0 }.joined(separator: "\n\n")
+                            }.font(.caption).buttonStyle(.plain)
+                        }
+                    }.padding(.horizontal, 8)
+                }
+                HStack {
+                    Button { toolsExpanded.toggle() } label: {
+                        Label("Tools", systemImage: toolsExpanded ? "ellipsis.circle.fill" : "ellipsis.circle")
+                    }.accessibilityIdentifier("sidebar-tools").accessibilityValue(toolsExpanded ? "Expanded" : "Collapsed")
+                    Spacer()
+                    SettingsLink { Image(systemName: "gearshape") }
+                        .accessibilityLabel("Settings").accessibilityIdentifier("open-settings")
+                        .help("Settings (⌘,)")
+                }.font(.custom(DaddyTheme.palette.sansFont, size: 12)).buttonStyle(.plain)
+                    .foregroundStyle(Tints.secondaryText).padding(.horizontal, 8)
+            }
+        }
+    }
+
+    private func navigationItem(_ item: Workspace, title: String? = nil, symbol: String? = nil) -> some View {
+        let storageSelected = [.explore, .cleanup, .developer].contains(m.workspace)
+        return SMWorkspaceNavigationItem(title ?? item.title, systemImage: symbol ?? item.icon,
+            isSelected: item == .explore ? storageSelected : m.workspace == item) {
+                m.showWelcome = false
+                if item == .explore { m.openStorage(m.storageSection) }
+                else { m.workspace = item }
+            }
+            .accessibilityIdentifier("workspace-\(item.rawValue)")
+            .help(item.requiresScan && m.scan == nil ? "Scan a disk or folder to see these results." : title ?? item.title)
+    }
+
+    private var scopeBar: some View {
+        SMWorkspaceScopeBar(m.workspace == .explore ? "Storage" : m.workspace.title,
+                            systemImage: m.workspace.icon,
+                            detail: m.scan.map { StorageLabels.location($0.rootPath) }) {
+            HStack(spacing: 8) {
+                if m.workspace == .explore, m.scan != nil {
+                    HStack(spacing: 4) {
+                        ForEach(StorageSection.allCases) { section in
+                            Button { m.openStorage(section) } label: {
+                                Text(section == .developer ? "Developer" : section.rawValue)
+                            }
+                            .buttonStyle(SMMacButtonStyle(m.storageSection == section ? .primary : .quiet))
+                            .accessibilityIdentifier("storage-section-\(section.rawValue)")
+                            .accessibilityAddTraits(m.storageSection == section ? .isSelected : [])
+                        }
                     }
-                }.padding(.vertical, 12)
+                    Button { m.saveSnapshot() } label: {
+                        Image(systemName: m.snapshotAlreadySaved ? "checkmark" : "square.and.arrow.down")
+                    }.buttonStyle(SMMacButtonStyle(.quiet))
+                        .accessibilityLabel(m.snapshotAlreadySaved ? "Snapshot Saved" : "Save Snapshot")
+                        .disabled(m.busy || m.snapshotBusy || m.snapshotAlreadySaved)
+                        .help(m.snapshotNotice ?? "Save this scan to local History. File contents are not copied.")
+                }
+                if m.workspace == .explore {
+                    Menu {
+                        Button("Scan a disk…") { choosingDisk = true }
+                        Button("Scan a folder…", action: m.chooseFolder)
+                        Button("Scan Home", action: m.scanHomeFolder)
+                        Button("Scan caches", action: m.scanUserCaches)
+                    } label: { Label(m.scan == nil ? "Scan…" : "New scan…", systemImage: "plus") }
+                        .menuStyle(.borderlessButton).fixedSize().disabled(m.busy)
+                        .accessibilityLabel(m.scan == nil ? "Start Scan…" : "New Scan…")
+                }
             }
-            SettingsLink {
-                Label("settings", systemImage: "gearshape").accessibilityLabel("Settings")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(SMMacButtonStyle(.secondary))
-            .accessibilityIdentifier("open-settings")
-            .help("Open Settings to manage excluded folders and update preferences (⌘,)")
-            Text("Nothing is removed until you review it.").font(.caption).foregroundStyle(Tints.secondaryText)
         }
-        .padding(.horizontal, 15)
-        .padding(.bottom, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(AppColors.canvas)
-    }
-    private func navigationHeading(_ title: String) -> some View {
-        Text(title.lowercased()).font(.custom(DaddyTheme.palette.sansFont, size: 10).weight(.semibold))
-            .foregroundStyle(Tints.secondaryText).padding(.horizontal, 10).padding(.vertical, 4)
-    }
-    private func navigationItem(_ item: Workspace) -> some View {
-        let needsScan = m.scan == nil && item.requiresScan
-        let destination = m.workspace == .explore && m.storageSection == .cleanup ? Workspace.cleanup
-            : m.workspace == .explore && m.storageSection == .developer ? .developer : m.workspace
-        return Button {
-            m.showWelcome = false
-            if item == .explore { m.openStorage(.explore) }
-            else if item == .cleanup { m.openStorage(.cleanup) }
-            else if item == .developer { m.openStorage(.developer) }
-            else { m.workspace = item }
-        } label: {
-            HStack {
-                Image(systemName: item.icon).font(.system(size: 15, weight: .medium)).frame(width: 20)
-                Text(item.title.lowercased()).font(.system(size: 14, weight: destination == item ? .semibold : .regular)).accessibilityLabel(item.title)
-                Spacer()
-                if item == .cleanup, !m.staged.isEmpty { Text("\(m.staged.count)").monospacedDigit() }
-            }
-            .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 38, alignment: .leading).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(destination == item ? Tints.mint.opacity(0.11) : .clear, in: RoundedRectangle(cornerRadius: 7))
-        .foregroundStyle(needsScan ? Tints.secondaryText : AppColors.ink)
-        .help(item == .snapshots ? "Browse snapshots saved from your scan results."
-              : needsScan ? "Scan a disk or folder to see these results." : item.title)
-        .accessibilityIdentifier("workspace-\(item.rawValue)")
-        .accessibilityAddTraits(destination == item ? .isSelected : [])
     }
     private var emptyState: some View {
         ScanWelcomeView(
@@ -302,7 +315,7 @@ struct ExplorerView: View {
                     }
                     ProjectPurgeView(records: m.projectReviewRecords, scan: m.scan, status: m.projectReviewStatus,
                         onRecoveryPlan: m.recordProjectRecoveryPlan, onRetry: m.reviewProjects, onStageArtifactIDs: m.stageProjectArtifacts)
-                }.padding(20)
+                }.padding(30)
             }
         case .appData:
             ScrollView {
@@ -324,74 +337,19 @@ struct ExplorerView: View {
                     } else if !m.appDataReviewLoading {
                         Text("Refresh the app reference to review direct Library data roots in this scan.").foregroundStyle(Tints.secondaryText)
                     }
-                }.padding(20)
+                }.padding(30)
             }
         case .acknowledgments: AcknowledgmentsView()
         }
     }
     private var storageWorkspace: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                ForEach(StorageSection.allCases) { section in
-                    Button {
-                        m.openStorage(section)
-                    } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: section.icon)
-                            Text(section.rawValue.lowercased()).accessibilityLabel(section.rawValue)
-                            if section == .cleanup, !m.staged.isEmpty {
-                                Text(m.staged.count.formatted()).monospacedDigit()
-                            }
-                        }.fixedSize(horizontal: true, vertical: false)
-                    }
-                    .buttonStyle(SMMacButtonStyle((m.storageSection == section) ? .primary : .secondary))
-                    .accessibilityIdentifier("storage-section-\(section.rawValue)")
-                    .accessibilityAddTraits(m.storageSection == section ? .isSelected : [])
-                }
-                Spacer()
-                if let scan = m.scan {
-                  ViewThatFits(in: .horizontal) {
-                    Text(StorageLabels.location(scan.rootPath))
-                        .font(.caption)
-                        .foregroundStyle(Tints.secondaryText)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(scan.rootPath)
-                        .fixedSize()
-                    Color.clear.frame(width: 0, height: 0)
-                  }
-                }
+        Group {
+            switch m.storageSection {
+            case .explore: explorer
+            case .developer: DeveloperView()
+            case .cleanup: CleanupView()
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            if m.scan != nil {
-                HStack(spacing: 10) {
-                    if let notice = m.snapshotNotice {
-                        Text(notice).font(.caption).foregroundStyle(Tints.secondaryText)
-                    } else {
-                        Text("Keep a record of this scan.").font(.caption).foregroundStyle(Tints.secondaryText)
-                    }
-                    Spacer()
-                    if m.snapshotBusy { ProgressView().controlSize(.small) }
-                    Button(m.snapshotAlreadySaved ? "snapshot saved" : "save snapshot", systemImage: m.snapshotAlreadySaved ? "checkmark" : "square.and.arrow.down") {
-                        m.saveSnapshot()
-                    }
-                    .accessibilityLabel(m.snapshotAlreadySaved ? "Snapshot Saved" : "Save Snapshot")
-                    .buttonStyle(SMMacButtonStyle(.secondary))
-                    .disabled(m.busy || m.snapshotBusy || m.snapshotAlreadySaved)
-                    .help("Save this scan’s location and top-level sizes to History on this Mac. File contents are not copied.")
-                }.padding(.horizontal, 24).padding(.bottom, 10)
-            }
-            Divider().overlay(Tints.mint.opacity(0.18))
-            Group {
-                switch m.storageSection {
-                case .explore: explorer
-                case .developer: DeveloperView()
-                case .cleanup: CleanupView()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private var explorer: some View { StorageExplorePanel(inspector: $inspector) }
 }
@@ -666,7 +624,7 @@ struct InspectorView: View {
                             Button { m.selected = child.id } label: { HStack { Text(StorageLabels.name(child)).lineLimit(1); Spacer(); Text(StorageLabels.size(child, allocated: m.allocated)) }.font(.caption) }.buttonStyle(.plain).contextMenu { StorageItemMenu(node: child) }
                         }
                     }
-                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(30).frame(maxWidth: .infinity, alignment: .leading)
             } else { StorageEmptyView("Inspect an item", systemImage: "cursorarrow.click", description: Text("Select a file or folder to see its details.")).padding(.top, 70) }
         }.sheet(item: $m.folderExplanation) { state in
             FolderExplanationView(state: state)
@@ -712,9 +670,9 @@ private struct NativePreview: NSViewRepresentable {
 }
 
 struct BrandMark: View {
-    private static let image: NSImage? = Bundle.main.url(forResource: "StorageDaddy", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+    @Environment(\.storageArtworkDirectory) private var artworkDirectory
     var body: some View {
-        if let image = Self.image { Image(nsImage: image).resizable().scaledToFit().accessibilityHidden(true) }
+        if let image = StorageArtwork.image("StorageDaddy", directory: artworkDirectory) { Image(nsImage: image).resizable().scaledToFit().accessibilityHidden(true) }
         else { Image(systemName: "externaldrive.fill").resizable().scaledToFit().foregroundStyle(Tints.mint).accessibilityHidden(true) }
     }
 }

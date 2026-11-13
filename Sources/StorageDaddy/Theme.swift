@@ -4,8 +4,8 @@ import AppKit
 
 enum AppColors {
     static let canvas = adaptive(dark: .black, light: NSColor(white: 0.98, alpha: 1))
-    static let ink = adaptive(dark: .white, light: NSColor(white: 0.08, alpha: 1))
-    static let secondary = adaptive(dark: NSColor(red: 0.78, green: 0.90, blue: 0.86, alpha: 1), light: NSColor(white: 0.34, alpha: 1))
+    static let ink = adaptive(dark: NSColor(red: 0.94, green: 0.96, blue: 0.95, alpha: 1), light: NSColor(white: 0.08, alpha: 1))
+    static let secondary = adaptive(dark: NSColor(red: 0.59, green: 0.64, blue: 0.61, alpha: 1), light: NSColor(white: 0.34, alpha: 1))
     static let mint = adaptive(dark: NSColor(red: 0.42, green: 0.79, blue: 0.62, alpha: 1), light: NSColor(red: 0.08, green: 0.40, blue: 0.27, alpha: 1))
     private static func adaptive(dark: NSColor, light: NSColor) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
@@ -39,14 +39,16 @@ enum DaddyTheme {
         palette.brandForeground = AppColors.canvas
         palette.mutedForeground = AppColors.secondary
         palette.accent = DaddyPalette.mint.opacity(0.11)
-        palette.border = AppColors.secondary.opacity(0.18)
+        palette.border = AppColors.ink.opacity(0.10)
         palette.hairline = palette.border
         palette.input = palette.border
         palette.success = DaddyPalette.mint
         palette.warning = DaddyPalette.amber
         palette.destructive = DaddyPalette.coral
         palette.radius = 10
-        palette.displayFont = palette.sansFont
+        palette.displayFont = "Figtree"
+        palette.displayLowercase = false
+        palette.uiLowercase = false
         palette.displayWeight = 600
         palette.displayTracking = -0.025
         return palette

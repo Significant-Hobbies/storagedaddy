@@ -34,7 +34,7 @@ struct DiskBuddyApp: App {
             if !StorageStartupCheck.enabled { model.scanSchedule.start() }
         } }
             .defaultSize(width: 1320, height: 850)
-            .windowStyle(.hiddenTitleBar)
+            .windowStyle(.titleBar)
             .commands {
                 CommandGroup(replacing: .appInfo) {
                     Button("About storagedaddy") { model.showAbout = true }

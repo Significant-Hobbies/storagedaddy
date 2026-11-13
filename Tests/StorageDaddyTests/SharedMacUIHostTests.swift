@@ -30,6 +30,8 @@ func sharedMacUIReviewHost() async throws {
     #expect(ids.count == 2)
     let model = ExplorerModel()
     model.scan = scan
+    model.allocationIndex = StorageAllocationIndex(scan: scan)
+    model.progress = "Temporary folder scan complete · Nothing moved"
     model.developerGroups = DeveloperInsights.analyze(scan)
     model.developerReport = DeveloperReport.build(scan: scan, groups: model.developerGroups)
     model.quickCleanupCandidateIDs = ids
@@ -40,7 +42,9 @@ func sharedMacUIReviewHost() async throws {
     try #require((320...2400).contains(width) && (320...1800).contains(height))
     let host = NSHostingView(rootView: ExplorerView(runsLaunchActions: false)
         .environmentObject(model).storageTheme(DaddyTheme.palette, appearance: "dark")
+        .environment(\.storageArtworkDirectory, URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Assets"))
         .allowsHitTesting(false).accessibilityHidden(true))
+    host.sizingOptions = []
     let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: height),
                           styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
     window.title = "StorageDaddy UI review · temporary sample folders"
@@ -48,17 +52,34 @@ func sharedMacUIReviewHost() async throws {
     window.ignoresMouseEvents = true
     window.contentView = host
     NSApplication.shared.setActivationPolicy(.regular)
-    window.orderFront(nil)
+    window.makeKeyAndOrderFront(nil)
     defer { window.close() }
     try await Task.sleep(for: .milliseconds(300))
     host.layoutSubtreeIfNeeded()
     #expect(host.bounds.width > 0)
-    try Data("ready".utf8).write(to: URL(fileURLWithPath: ready))
-    for _ in 0..<1_200 {
-        if FileManager.default.fileExists(atPath: ready + ".done") { break }
-        try await Task.sleep(for: .milliseconds(100))
-    }
+    try JSONSerialization.data(withJSONObject: ["windowNumber": window.windowNumber,
+        "contentWidth": Double(host.bounds.width), "contentHeight": Double(host.bounds.height)])
+        .write(to: URL(fileURLWithPath: ready))
+    holdStorageReviewEventLoop(until: URL(fileURLWithPath: ready + ".done"))
     for folder in folders {
         #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).appendingPathComponent("sample.bin").path))
     }
+}
+
+@MainActor private func holdStorageReviewEventLoop(until done: URL) {
+    let deadline = Date().addingTimeInterval(120)
+    let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+        MainActor.assumeIsolated {
+            guard FileManager.default.fileExists(atPath: done.path) || Date() >= deadline else { return }
+            NSApplication.shared.stop(nil)
+            if let event = NSEvent.otherEvent(with: .applicationDefined, location: .zero,
+                modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0) {
+                NSApplication.shared.postEvent(event, atStart: false)
+            }
+        }
+    }
+    NSApplication.shared.activate(ignoringOtherApps: true)
+    NSApplication.shared.run()
+    timer.invalidate()
 }

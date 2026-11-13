@@ -55,7 +55,7 @@ struct SavedHistoryView: View {
                         Button(m.scan == nil ? "Go to Storage" : "Back to scan results", systemImage: "internaldrive") {
                             m.openStorage(.explore)
                         }.buttonStyle(SMMacButtonStyle(.primary))
-                    }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+                    }.padding(30).frame(maxWidth: .infinity, alignment: .leading)
                         .storagePanel()
                 } else if let selected, let snapshot = m.savedSnapshots.first(where: { $0.id == selected }) {
                     snapshotDetail(snapshot)
