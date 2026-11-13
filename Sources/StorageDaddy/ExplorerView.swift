@@ -227,7 +227,7 @@ struct ExplorerView: View {
                 else { m.workspace = item }
             }
             .accessibilityIdentifier("workspace-\(item.rawValue)")
-            .accessibilityLabel(item == .explore && !m.staged.isEmpty ? "Storage, \(m.staged.count) items waiting for cleanup review" : title ?? item.title)
+            .accessibilityLabel(item == .explore && !m.staged.isEmpty ? "Storage, \(m.staged.count) \(m.staged.count == 1 ? "item" : "items") waiting for cleanup review" : title ?? item.title)
             .help(item.requiresScan && m.scan == nil ? "Scan a disk or folder to see these results." : title ?? item.title)
     }
 
