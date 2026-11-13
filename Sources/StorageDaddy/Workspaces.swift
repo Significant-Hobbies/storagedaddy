@@ -289,24 +289,56 @@ private struct InstalledAppIcon: View {
 struct CleanupView: View {
     @EnvironmentObject var m: ExplorerModel
     @State private var expandedStorageDetails: Set<Int> = []
+    @State private var filter = CleanupReviewFilter()
+    @FocusState private var searching: Bool
     var body: some View {
-        // These depend on the selection, not on an individual visible row.
-        // In particular, permanentCleanupIDs validates every staged path. Doing
-        // that inside ForEach makes scrolling quadratic during cleanup updates.
         let stagedIDs = m.staged.sorted()
         let permanentIDs = m.permanentCleanupIDs
         let quickCandidateIDs = Set(m.quickCleanupCandidateIDs)
         let easyIDs = m.easyCleanupIDs
         GeometryReader { geometry in
-        ScrollView {
-        // Keep async panels mounted while the rows scroll out of view.
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center, spacing: 24) {
-                SMWorkspaceHeader("Quick Cleanup", subtitle: m.scan == nil ? "Review Trash, or scan a folder to find cleanup candidates." : m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders and choose how to clean up. Items with issues are kept.") {
-                    if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") }
+            if !stagedIDs.isEmpty, geometry.size.width >= 840, geometry.size.height >= 540 {
+                HStack(spacing: 0) {
+                    cleanupList(stagedIDs: stagedIDs, permanentIDs: permanentIDs, quickCandidateIDs: quickCandidateIDs, easyIDs: easyIDs, showsMeasurement: false)
+                    Rectangle().fill(DaddyTheme.palette.border).frame(width: 1)
+                    decision(stagedIDs: stagedIDs, permanentIDs: permanentIDs).frame(width: 262)
                 }
-                DoodleArt(topic: .cleanup).frame(width: 72, height: 72)
+            } else {
+                cleanupList(stagedIDs: stagedIDs, permanentIDs: permanentIDs, quickCandidateIDs: quickCandidateIDs, easyIDs: easyIDs)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        if !stagedIDs.isEmpty { cleanupControls(permanentIDs: permanentIDs) }
+                    }
             }
+        }.background(AppColors.canvas).buttonStyle(SMMacButtonStyle(.secondary))
+            .onChange(of: m.scan?.started) { _, _ in expandedStorageDetails = []; filter.query = "" }
+    }
+
+    private func cleanupList(stagedIDs: [Int], permanentIDs: Set<Int>, quickCandidateIDs: Set<Int>, easyIDs: [Int], showsMeasurement: Bool = true) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 24) {
+                SMWorkspaceHeader(stagedIDs.isEmpty ? "Quick Cleanup" : "Review cleanup",
+                    subtitle: m.scan == nil ? "Scan a folder to find cleanup candidates." : stagedIDs.isEmpty ? "Choose the folders your workspace can let go." : "Keep the work. Review what can leave.") {
+                    if m.showCleanup { Button("Done") { m.showCleanup = false } }
+                }
+                if stagedIDs.isEmpty { DoodleArt(topic: .cleanup).frame(width: 68, height: 68) }
+                else if showsMeasurement { WelcomeIllustration().frame(width: 92, height: 68) }
+            }.padding(.top, 28).padding(.bottom, 22)
+            if !stagedIDs.isEmpty {
+                SMSearchField("Find a project or folder", text: $filter.query, focus: $searching).padding(.bottom, 22)
+                if let scan = m.scan, filter.hiddenCount(stagedIDs, in: scan) > 0 {
+                    HStack(spacing: 8) {
+                        Label("\(filter.hiddenCount(stagedIDs, in: scan)) selected items hidden by search", systemImage: "eye.slash")
+                        Spacer(minLength: 8)
+                        Button("Show all") { filter.query = "" }.buttonStyle(SMMacButtonStyle(.quiet))
+                    }.font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.mint).padding(.bottom, 12)
+                }
+                HStack { Text("FOLDER / PROJECT"); Spacer(); Text("ON DISK") }
+                    .font(.custom(DaddyTheme.palette.sansFont, size: 10).weight(.medium)).tracking(1.1)
+                    .foregroundStyle(Tints.secondaryText).padding(.bottom, 12)
+                Divider()
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
             if m.staged.isEmpty, let scan = m.scan, !easyIDs.isEmpty {
                 AutoCleanerCard(scan: scan, ids: easyIDs)
             }
@@ -350,10 +382,9 @@ struct CleanupView: View {
                 }
             }
             else if !m.staged.isEmpty, let scan = m.scan {
-                RemovalMeasurementView(scan: scan, ids: stagedIDs).id("\(scan.started):\(stagedIDs)")
-                SMSettingsGroup {
+                VStack(alignment: .leading, spacing: 0) {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(stagedIDs, id: \.self) { id in
+                        ForEach(filter.matchingIDs(stagedIDs, in: scan), id: \.self) { id in
                             cleanupRow(id: id, scan: scan, permanentIDs: permanentIDs,
                                        quickCandidateIDs: quickCandidateIDs)
                             if id != stagedIDs.last { Divider().padding(.horizontal, 16) }
@@ -366,16 +397,106 @@ struct CleanupView: View {
                     AutoCleanerCard(scan: scan, ids: easyIDs).padding(.top, 12)
                 }
             }
+            if showsMeasurement, let scan = m.scan, !stagedIDs.isEmpty {
+                DisclosureGroup("Allocation details") {
+                    RemovalMeasurementView(scan: scan, ids: stagedIDs).id("\(scan.started):\(stagedIDs)")
+                }.font(.caption).foregroundStyle(Tints.secondaryText)
+            }
             TrashInventoryView()
-        }.padding(32)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    if let scan = m.scan, !stagedIDs.isEmpty, filter.matchingIDs(stagedIDs, in: scan).isEmpty {
+                        Text("No matching folders").foregroundStyle(Tints.secondaryText).padding(.vertical, 32)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .topLeading)
+            }.scrollIndicators(.hidden)
+            if !stagedIDs.isEmpty {
+                Label("Nothing is removed before confirmation.", systemImage: "lock.shield")
+                    .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.secondaryText).padding(.vertical, 18)
+            }
+        }.padding(.horizontal, 30)
+    }
+
+    private func decision(stagedIDs: [Int], permanentIDs: Set<Int>) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("YOUR SELECTION").font(.custom(DaddyTheme.palette.sansFont, size: 10).weight(.medium)).tracking(1.5).foregroundStyle(Tints.secondaryText)
+                    Text(m.stagedExclusiveBytes.map(DiskFormat.bytes) ?? String(stagedIDs.count))
+                        .font(.custom(DaddyTheme.palette.displayFont, size: 42).weight(.semibold)).tracking(-1.3).monospacedDigit().padding(.top, 14)
+                    Text(m.stagedExclusiveBytes == nil ? "\(stagedIDs.count == 1 ? "item" : "items") selected" : "Exclusive allocation · \(stagedIDs.count) selected")
+                        .font(.custom(DaddyTheme.palette.sansFont, size: 12)).foregroundStyle(Tints.secondaryText).padding(.top, 5)
+                    Text(m.stagedExclusiveBytes == nil ? "Exclusive allocation is unavailable." : "Shared allocation can overlap.")
+                        .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.secondaryText).padding(.top, 8)
+                    Divider().padding(.vertical, 24)
+                    methodControls(permanentIDs: permanentIDs)
+                    if let scan = m.scan {
+                        DisclosureGroup("Allocation details") {
+                            RemovalMeasurementView(scan: scan, ids: stagedIDs).id("\(scan.started):\(stagedIDs)")
+                        }.font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.secondaryText).padding(.top, 22)
+                    }
+                }
+            }.scrollIndicators(.hidden)
+            WelcomeIllustration().frame(height: 104).padding(.vertical, 18)
+            Text(m.monitoring ? "Stop monitoring before cleanup." : "Stop builds or installs using these folders before continuing.")
+                .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true).lineSpacing(3)
+            reviewButton(permanentIDs: permanentIDs).padding(.top, 18)
+            Text("Confirmation comes next").font(.custom(DaddyTheme.palette.sansFont, size: 10)).foregroundStyle(Tints.secondaryText)
+                .frame(maxWidth: .infinity).padding(.top, 12)
+        }.padding(.horizontal, 24).padding(.top, 32).padding(.bottom, 22)
+    }
+
+    @ViewBuilder private func methodControls(permanentIDs: Set<Int>) -> some View {
+        methodPicker(permanentIDs: permanentIDs)
+        Text(methodNotice(permanentIDs: permanentIDs))
+            .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(permanentIDs.isEmpty ? Tints.secondaryText : Tints.coral)
+            .fixedSize(horizontal: false, vertical: true).lineSpacing(3).padding(.top, 10)
+    }
+
+    @ViewBuilder private func methodPicker(permanentIDs: Set<Int>) -> some View {
+        let eligible = m.scan.map { scan in
+            m.staged.contains { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory && m.incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) }
+        } ?? false
+        if eligible {
+            Menu {
+                Picker("Cleanup method", selection: $m.deleteNodeCachesPermanently) {
+                    Text("Move everything to Trash").tag(false)
+                    Text("Delete eligible caches").tag(true)
+                }.pickerStyle(.inline)
+            } label: {
+                HStack {
+                    Label(permanentIDs.isEmpty ? "Move to Trash" : permanentIDs.count == m.staged.count ? "Permanently delete" : "Mixed cleanup",
+                          systemImage: permanentIDs.isEmpty ? "trash" : "trash.slash")
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.down").font(.system(size: 9))
+                }.font(.custom(DaddyTheme.palette.sansFont, size: 12).weight(.medium))
+                    .padding(10).background(AppColors.canvas)
+                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(DaddyTheme.palette.border))
+            }.menuStyle(.borderlessButton).disabled(m.busy)
+                .accessibilityLabel("Cleanup method")
+                .help("Permanent cleanup is limited to eligible Node dependencies and package caches. Other items go to Trash.")
+        } else {
+            Label("Move to Trash", systemImage: "trash").font(.custom(DaddyTheme.palette.sansFont, size: 13).weight(.medium))
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !stagedIDs.isEmpty { cleanupControls(permanentIDs: permanentIDs) }
-        }
-        .frame(width: geometry.size.width, height: geometry.size.height).clipped()
-        }.background(AppColors.canvas).buttonStyle(SMMacButtonStyle(.secondary))
-            .onChange(of: m.scan?.started) { _, _ in expandedStorageDetails = [] }
+    }
+
+    private func methodNotice(permanentIDs: Set<Int>) -> String {
+        if permanentIDs.isEmpty { return "Restore from Trash until it’s emptied. Trash still occupies disk space." }
+        let trashCount = m.staged.count - permanentIDs.count
+        return "\(permanentIDs.count) to delete permanently\(trashCount > 0 ? " · \(trashCount) to Trash" : ""). Permanent deletion bypasses Trash. Local changes cannot be restored."
+    }
+
+    private func reviewButton(permanentIDs: Set<Int>) -> some View {
+        let hiddenCount = m.scan.map { filter.hiddenCount(m.staged.sorted(), in: $0) } ?? 0
+        return Button {
+            if let scan = m.scan, filter.revealHiddenSelection(m.staged.sorted(), in: scan) { return }
+            m.trashStaged()
+        } label: {
+            HStack {
+                Text(hiddenCount > 0 ? "Show all \(m.staged.count) items…" : "Review \(m.staged.count) \(m.staged.count == 1 ? "item" : "items")…")
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
+            }
+        }.buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy || m.monitoring || m.staged.isEmpty)
+            .help(permanentIDs.isEmpty ? "Review the final Move to Trash confirmation." : "Review the final permanent-cleanup confirmation.")
     }
 
     private func cleanupRow(id: Int, scan: ScanResult, permanentIDs: Set<Int>, quickCandidateIDs: Set<Int>) -> some View {
@@ -384,9 +505,13 @@ struct CleanupView: View {
         let signingCopy = ChromeSigningClones.location(path: path) != nil
         let dependencies = CleanupGuidance.isProjectDependencies(path: path)
         return VStack(alignment: .leading, spacing: 0) {
-            SMResourceRow(StorageLabels.name(node), subtitle: StorageLabels.location(path),
+            SMResourceRow(CleanupReviewLabels.title(id, in: scan), subtitle: CleanupReviewLabels.subtitle(id, in: scan),
                           systemImage: node.isDirectory ? "folder" : "doc") {
-                EmptyView()
+                Toggle("Include \(StorageLabels.name(node)) in cleanup", isOn: Binding(
+                    get: { m.staged.contains(id) }, set: { if !$0 { m.unstage(id) } }))
+                    .toggleStyle(.checkbox).labelsHidden().disabled(m.busy)
+                    .accessibilityLabel("Include \(CleanupReviewLabels.title(id, in: scan)) \(StorageLabels.name(node)) in cleanup")
+                    .help("Uncheck to remove this item from the cleanup selection.")
             } trailing: {
                 HStack(spacing: 16) {
                     VStack(alignment: .trailing, spacing: 5) {
@@ -396,8 +521,6 @@ struct CleanupView: View {
                               systemImage: permanentIDs.contains(id) ? "trash.slash" : "trash")
                             .font(.caption).foregroundStyle(permanentIDs.contains(id) ? Tints.coral : Tints.secondaryText)
                     }
-                    Button("remove") { m.unstage(id) }.accessibilityLabel("Remove").disabled(m.busy)
-                        .buttonStyle(SMMacButtonStyle(.quiet))
                 }
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -430,27 +553,27 @@ struct CleanupView: View {
                         }
                     }
                 }
-            }.font(.caption).padding(.horizontal, 16).padding(.bottom, 16)
-        }.accessibilityElement(children: .contain)
+            }.font(.caption).padding(.leading, 72).padding(.trailing, 16).padding(.bottom, 14)
+        }.background(Tints.mint.opacity(0.045)).help(path).accessibilityElement(children: .contain)
     }
 
     private func cleanupControls(permanentIDs: Set<Int>) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let scan = m.scan,
-               m.staged.contains(where: { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory && m.incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) }) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle("Delete Node dependencies and package caches permanently", isOn: $m.deleteNodeCachesPermanently).disabled(m.busy)
-                    Text("Bypasses Trash. Local changes in these folders cannot be restored.").font(.caption).foregroundStyle(Tints.secondaryText)
-                }.padding(.horizontal, 32).padding(.vertical, 12)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 24) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(m.stagedExclusiveBytes.map { "\(DiskFormat.bytes($0)) exclusive allocation" }
+                         ?? "\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") selected · Allocation unavailable")
+                        .font(.custom(DaddyTheme.palette.sansFont, size: 18).weight(.semibold)).monospacedDigit()
+                    methodPicker(permanentIDs: permanentIDs)
+                }
+                Spacer(minLength: 12)
+                reviewButton(permanentIDs: permanentIDs).fixedSize(horizontal: true, vertical: false)
             }
-            SMSelectionBar("\(m.staged.count) \(m.staged.count == 1 ? "item" : "items") · \(m.stagedExclusiveBytes.map(DiskFormat.bytes) ?? "Unknown") exclusive allocation",
-                           detail: m.monitoring ? "Stop monitoring before cleanup." : permanentIDs.isEmpty ? "Trash still uses disk space until it is emptied." : "\(permanentIDs.count) to delete permanently · \(m.staged.count - permanentIDs.count) to Trash after confirmation.",
-                           horizontalPadding: 32) {
-                Button(permanentIDs.isEmpty ? "move to trash…" : "clean up…", action: m.trashStaged)
-                    .accessibilityLabel(permanentIDs.isEmpty ? "Move to Trash…" : "Clean Up…")
-                    .buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy || m.monitoring)
-            }
-        }.background(AppColors.canvas)
+            Text(m.monitoring ? "Stop monitoring before cleanup." : methodNotice(permanentIDs: permanentIDs))
+                .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(permanentIDs.isEmpty ? Tints.secondaryText : Tints.coral)
+                .fixedSize(horizontal: false, vertical: true)
+        }.padding(.horizontal, 30).padding(.vertical, 18).background(AppColors.canvas)
+            .overlay(alignment: .top) { Rectangle().fill(DaddyTheme.palette.border).frame(height: 1) }
     }
 }
 
@@ -472,8 +595,8 @@ private struct AutoCleanerCard: View {
             Divider().padding(.horizontal, 16)
             ForEach(suggestions, id: \.self) { id in
                 let category = m.cleanupCategory(id) ?? .packageCaches
-                SMResourceRow(StorageLabels.name(scan.nodes[id]),
-                              subtitle: StorageLabels.location(scan.url(for: id).path),
+                SMResourceRow(CleanupReviewLabels.title(id, in: scan),
+                              subtitle: CleanupReviewLabels.subtitle(id, in: scan),
                               systemImage: category.symbol) {
                     EmptyView()
                 } trailing: {
