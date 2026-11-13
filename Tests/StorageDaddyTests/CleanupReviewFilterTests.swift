@@ -59,4 +59,15 @@ import Testing
         #expect(CleanupReviewLabels.title(7, in: fixture()) == "build")
         #expect(!CleanupReviewLabels.subtitle(7, in: fixture()).contains("Build output"))
     }
+
+    @Test func deepLocationsRetainTheDifferingAncestor() {
+        let first = ScanResult(rootPath: "/workspace/clientA/repo/apps/web", nodes: [
+            DiskNode(id: 0, parent: nil, name: "web", isDirectory: true, children: [1]),
+            DiskNode(id: 1, parent: 0, name: "node_modules", isDirectory: true),
+        ])
+        let second = ScanResult(rootPath: "/workspace/clientB/repo/apps/web", nodes: first.nodes)
+        #expect(CleanupReviewLabels.subtitle(1, in: first).contains("clientA"))
+        #expect(CleanupReviewLabels.subtitle(1, in: second).contains("clientB"))
+        #expect(CleanupReviewLabels.subtitle(1, in: first) != CleanupReviewLabels.subtitle(1, in: second))
+    }
 }

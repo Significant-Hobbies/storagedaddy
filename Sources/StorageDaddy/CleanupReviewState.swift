@@ -35,8 +35,8 @@ enum CleanupReviewLabels {
         let node = scan.nodes[id]
         let url = scan.url(for: id)
         if title(id, in: scan) != StorageLabels.name(node) {
-            return "\(StorageLabels.name(node)) · \(StorageLabels.location(url.deletingLastPathComponent().path))"
+            return "\(StorageLabels.name(node)) · \((url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)"
         }
-        return StorageLabels.location(url.path)
+        return (url.path as NSString).abbreviatingWithTildeInPath
     }
 }

@@ -22,7 +22,7 @@ test('native cleanup safeguards, exclusions and packaged UI resources', { timeou
   const summary = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
     .match(/(\d+)\s+tests?\s+passed,\s*(\d+)\s+failed/);
   assert.ok(summary, 'XcodeBuildMCP did not report completed native checks');
-  assert.ok(Number(summary[1]) >= 15, 'Cleanup, exclusions and UI resource checks must execute');
+  assert.ok(Number(summary[1]) >= 16, 'Cleanup, exclusions and UI resource checks must execute');
   assert.equal(Number(summary[2]), 0);
   const logReference = output.match(/Build Logs:\s*(.+\.log)/)?.[1]?.trim();
   assert.ok(logReference, 'Expected the authoritative native test log');
