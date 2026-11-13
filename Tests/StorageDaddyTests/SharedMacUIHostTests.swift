@@ -10,11 +10,11 @@ func sharedMacUIReviewHost() async throws {
     let environment = ProcessInfo.processInfo.environment
     let ready = try #require(environment["STORAGEDADDY_MAC_UI_READY"])
     let defaults = UserDefaults.standard
-    let priorArguments = defaults.volatileDomain(forName: NSArgumentDomain)
+    let priorArguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
     var fixtureArguments = priorArguments
     fixtureArguments["cleanupRefreshPaths"] = [String]()
-    defaults.setVolatileDomain(fixtureArguments, forName: NSArgumentDomain)
-    defer { defaults.setVolatileDomain(priorArguments, forName: NSArgumentDomain) }
+    defaults.setVolatileDomain(fixtureArguments, forName: UserDefaults.argumentDomain)
+    defer { defaults.setVolatileDomain(priorArguments, forName: UserDefaults.argumentDomain) }
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("storage-ui-review-\(UUID())")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
