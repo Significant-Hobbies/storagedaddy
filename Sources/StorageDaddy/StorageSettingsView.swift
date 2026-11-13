@@ -17,31 +17,7 @@ struct StorageSettingsView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            ScrollView { VStack(alignment: .leading, spacing: 20) {
-                Text("General").font(.title2.weight(.semibold))
-                Picker("Appearance", selection: $appearance) {
-                    Text("System").tag("system"); Text("Dark").tag("dark"); Text("Light").tag("light")
-                }
-                Picker("Scan power", selection: $scanWorkerCount) {
-                    Text("Automatic").tag(0); Text("Efficient · 1 worker").tag(1); Text("Balanced · 4 workers").tag(4); Text("Fast · 8 workers").tag(8)
-                }.disabled(model.busy)
-                Toggle("Start minimized in the menu bar", isOn: $startMinimized)
-                Toggle("Color-blind map palette", isOn: $colorBlindMap)
-                Toggle("Binary storage units (KiB, MiB, GiB)", isOn: $binaryStorageUnits)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Yours free forever, including all future versions.").font(.headline).foregroundStyle(Tints.mint)
-                    Text("Everyone who downloads during early access gets every future version free. No trial expiry or subscription.")
-                        .foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
-                }
-                Toggle("Automatically check for updates", isOn: $updates.automaticallyChecks)
-                Toggle("Save completed scans to local history", isOn: $automaticallySaveScans)
-                Text("Keeps file paths, sizes and modification dates for comparisons. File contents stay out of history.").font(.caption).foregroundStyle(Tints.secondaryText)
-                Text("storagedaddy checks for new versions. Installation waits until scans, exports and cleanup review are finished.")
-                    .foregroundStyle(Tints.secondaryText)
-                Button("Check for Updates…", action: updates.check)
-                    .disabled(!updates.canCheck || !updates.isIdle)
-                Spacer()
-            }.padding(28) }
+            generalSettings
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(0)
 
             VStack(alignment: .leading, spacing: 16) {
@@ -111,6 +87,58 @@ struct StorageSettingsView: View {
         .storageTheme(DaddyTheme.palette)
         .tint(Tints.mint)
         .buttonStyle(SMMacButtonStyle(.secondary))
+    }
+
+    private var generalSettings: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("General").font(.custom(DaddyTheme.palette.displayFont, size: 26).weight(.semibold))
+                SMSettingsGroup("Appearance") {
+                    SMSettingsRow("Theme") {
+                        SMSegmentedControl("Appearance", selection: $appearance, segments: [
+                            SMSegment("system", title: "System"), SMSegment("dark", title: "Dark"), SMSegment("light", title: "Light")
+                        ])
+                    }
+                    Divider()
+                    SMSettingsRow("Color-blind map palette") {
+                        Toggle("Color-blind map palette", isOn: $colorBlindMap).labelsHidden().toggleStyle(.switch)
+                    }
+                    Divider()
+                    SMSettingsRow("Binary storage units", subtitle: "Show KiB, MiB and GiB") {
+                        Toggle("Binary storage units (KiB, MiB, GiB)", isOn: $binaryStorageUnits).labelsHidden().toggleStyle(.switch)
+                    }
+                }
+                SMSettingsGroup("Scanning", footer: "Keeps file paths, sizes and modification dates for comparisons. File contents stay out of history.") {
+                    SMSettingsRow("Scan workers") {
+                        SMSegmentedControl("Scan power", selection: $scanWorkerCount, segments: [
+                            SMSegment(0, title: "Automatic"), SMSegment(1, title: "1"), SMSegment(4, title: "4"), SMSegment(8, title: "8")
+                        ]).disabled(model.busy)
+                    }
+                    Divider()
+                    SMSettingsRow("Save scans to local history") {
+                        Toggle("Save completed scans to local history", isOn: $automaticallySaveScans).labelsHidden().toggleStyle(.switch)
+                    }
+                }
+                SMSettingsGroup("Startup & updates", footer: "Installation waits until scans, exports and cleanup review are finished.") {
+                    SMSettingsRow("Start in the menu bar", subtitle: "Keep the main window closed at launch") {
+                        Toggle("Start minimized in the menu bar", isOn: $startMinimized).labelsHidden().toggleStyle(.switch)
+                    }
+                    Divider()
+                    SMSettingsRow("Automatically check for updates") {
+                        Toggle("Automatically check for updates", isOn: $updates.automaticallyChecks).labelsHidden().toggleStyle(.switch)
+                    }
+                    Divider()
+                    SMSettingsRow("New versions") {
+                        Button("Check for Updates…", action: updates.check).disabled(!updates.canCheck || !updates.isIdle)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Yours free forever, including all future versions.").fontWeight(.medium)
+                    Text("Everyone who downloads during early access gets every future version free. No trial expiry or subscription.")
+                }.font(.custom(DaddyTheme.palette.sansFont, size: 12)).foregroundStyle(Tints.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }.padding(28)
+        }
     }
 
     private func chooseFolders() {
