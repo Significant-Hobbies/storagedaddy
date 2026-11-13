@@ -220,12 +220,14 @@ struct ExplorerView: View {
     private func navigationItem(_ item: Workspace, title: String? = nil, symbol: String? = nil) -> some View {
         let storageSelected = [.explore, .cleanup, .developer].contains(m.workspace)
         return SMWorkspaceNavigationItem(title ?? item.title, systemImage: symbol ?? item.icon,
-            isSelected: item == .explore ? storageSelected : m.workspace == item) {
+            isSelected: item == .explore ? storageSelected : m.workspace == item,
+            badge: item == .explore && !m.staged.isEmpty ? m.staged.count.formatted() : nil) {
                 m.showWelcome = false
                 if item == .explore { m.openStorage(m.storageSection) }
                 else { m.workspace = item }
             }
             .accessibilityIdentifier("workspace-\(item.rawValue)")
+            .accessibilityLabel(item == .explore && !m.staged.isEmpty ? "Storage, \(m.staged.count) items waiting for cleanup review" : title ?? item.title)
             .help(item.requiresScan && m.scan == nil ? "Scan a disk or folder to see these results." : title ?? item.title)
     }
 
@@ -238,7 +240,10 @@ struct ExplorerView: View {
                     HStack(spacing: 4) {
                         ForEach(StorageSection.allCases) { section in
                             Button { m.openStorage(section) } label: {
-                                Text(section == .developer ? "Developer" : section.rawValue)
+                                HStack(spacing: 6) {
+                                    Text(section == .developer ? "Developer" : section.rawValue)
+                                    if section == .cleanup, !m.staged.isEmpty { Text(m.staged.count.formatted()).monospacedDigit() }
+                                }
                             }
                             .buttonStyle(SMMacButtonStyle(m.storageSection == section ? .primary : .quiet))
                             .accessibilityIdentifier("storage-section-\(section.rawValue)")

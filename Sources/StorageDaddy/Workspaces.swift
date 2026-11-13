@@ -289,7 +289,7 @@ private struct InstalledAppIcon: View {
 struct CleanupView: View {
     @EnvironmentObject var m: ExplorerModel
     @State private var expandedStorageDetails: Set<Int> = []
-    @State private var search = ""
+    @State private var filter = CleanupReviewFilter()
     @FocusState private var searching: Bool
     var body: some View {
         let stagedIDs = m.staged.sorted()
@@ -310,7 +310,7 @@ struct CleanupView: View {
                     }
             }
         }.background(AppColors.canvas).buttonStyle(SMMacButtonStyle(.secondary))
-            .onChange(of: m.scan?.started) { _, _ in expandedStorageDetails = []; search = "" }
+            .onChange(of: m.scan?.started) { _, _ in expandedStorageDetails = []; filter.query = "" }
     }
 
     private func cleanupList(stagedIDs: [Int], permanentIDs: Set<Int>, quickCandidateIDs: Set<Int>, easyIDs: [Int], showsMeasurement: Bool = true) -> some View {
@@ -321,9 +321,17 @@ struct CleanupView: View {
                     if m.showCleanup { Button("Done") { m.showCleanup = false } }
                 }
                 if stagedIDs.isEmpty { DoodleArt(topic: .cleanup).frame(width: 68, height: 68) }
+                else if showsMeasurement { WelcomeIllustration().frame(width: 92, height: 68) }
             }.padding(.top, 28).padding(.bottom, 22)
             if !stagedIDs.isEmpty {
-                SMSearchField("Find a project or folder", text: $search, focus: $searching).padding(.bottom, 22)
+                SMSearchField("Find a project or folder", text: $filter.query, focus: $searching).padding(.bottom, 22)
+                if let scan = m.scan, filter.hiddenCount(stagedIDs, in: scan) > 0 {
+                    HStack(spacing: 8) {
+                        Label("\(filter.hiddenCount(stagedIDs, in: scan)) selected items hidden by search", systemImage: "eye.slash")
+                        Spacer(minLength: 8)
+                        Button("Show all") { filter.query = "" }.buttonStyle(SMMacButtonStyle(.quiet))
+                    }.font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.mint).padding(.bottom, 12)
+                }
                 HStack { Text("FOLDER / PROJECT"); Spacer(); Text("ON DISK") }
                     .font(.custom(DaddyTheme.palette.sansFont, size: 10).weight(.medium)).tracking(1.1)
                     .foregroundStyle(Tints.secondaryText).padding(.bottom, 12)
@@ -376,7 +384,7 @@ struct CleanupView: View {
             else if !m.staged.isEmpty, let scan = m.scan {
                 VStack(alignment: .leading, spacing: 0) {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(filteredIDs(stagedIDs, in: scan), id: \.self) { id in
+                        ForEach(filter.matchingIDs(stagedIDs, in: scan), id: \.self) { id in
                             cleanupRow(id: id, scan: scan, permanentIDs: permanentIDs,
                                        quickCandidateIDs: quickCandidateIDs)
                             if id != stagedIDs.last { Divider().padding(.horizontal, 16) }
@@ -395,7 +403,7 @@ struct CleanupView: View {
                 }.font(.caption).foregroundStyle(Tints.secondaryText)
             }
             TrashInventoryView()
-                    if let scan = m.scan, !stagedIDs.isEmpty, filteredIDs(stagedIDs, in: scan).isEmpty {
+                    if let scan = m.scan, !stagedIDs.isEmpty, filter.matchingIDs(stagedIDs, in: scan).isEmpty {
                         Text("No matching folders").foregroundStyle(Tints.secondaryText).padding(.vertical, 32)
                     }
                 }.frame(maxWidth: .infinity, alignment: .topLeading)
@@ -405,11 +413,6 @@ struct CleanupView: View {
                     .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.secondaryText).padding(.vertical, 18)
             }
         }.padding(.horizontal, 30)
-    }
-
-    private func filteredIDs(_ ids: [Int], in scan: ScanResult) -> [Int] {
-        guard !search.isEmpty else { return ids }
-        return ids.filter { scan.url(for: $0).path.localizedCaseInsensitiveContains(search) }
     }
 
     private func decision(stagedIDs: [Int], permanentIDs: Set<Int>) -> some View {
@@ -482,9 +485,13 @@ struct CleanupView: View {
     }
 
     private func reviewButton(permanentIDs: Set<Int>) -> some View {
-        Button(action: m.trashStaged) {
+        let hiddenCount = m.scan.map { filter.hiddenCount(m.staged.sorted(), in: $0) } ?? 0
+        return Button {
+            if let scan = m.scan, filter.revealHiddenSelection(m.staged.sorted(), in: scan) { return }
+            m.trashStaged()
+        } label: {
             HStack {
-                Text("Review \(m.staged.count) \(m.staged.count == 1 ? "item" : "items")…")
+                Text(hiddenCount > 0 ? "Show all \(m.staged.count) items…" : "Review \(m.staged.count) \(m.staged.count == 1 ? "item" : "items")…")
                 Spacer(minLength: 8)
                 Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
             }
@@ -498,12 +505,12 @@ struct CleanupView: View {
         let signingCopy = ChromeSigningClones.location(path: path) != nil
         let dependencies = CleanupGuidance.isProjectDependencies(path: path)
         return VStack(alignment: .leading, spacing: 0) {
-            SMResourceRow(cleanupProjectTitle(id, in: scan), subtitle: cleanupProjectSubtitle(id, in: scan),
+            SMResourceRow(CleanupReviewLabels.title(id, in: scan), subtitle: CleanupReviewLabels.subtitle(id, in: scan),
                           systemImage: node.isDirectory ? "folder" : "doc") {
                 Toggle("Include \(StorageLabels.name(node)) in cleanup", isOn: Binding(
                     get: { m.staged.contains(id) }, set: { if !$0 { m.unstage(id) } }))
                     .toggleStyle(.checkbox).labelsHidden().disabled(m.busy)
-                    .accessibilityLabel("Include \(cleanupProjectTitle(id, in: scan)) \(StorageLabels.name(node)) in cleanup")
+                    .accessibilityLabel("Include \(CleanupReviewLabels.title(id, in: scan)) \(StorageLabels.name(node)) in cleanup")
                     .help("Uncheck to remove this item from the cleanup selection.")
             } trailing: {
                 HStack(spacing: 16) {
@@ -570,25 +577,6 @@ struct CleanupView: View {
     }
 }
 
-private let cleanupProjectOutputs: [String: String] = [
-    "node_modules": "Node dependencies", ".build": "Swift build output", "__pycache__": "Python bytecode",
-    "target": "Build output", ".next": "Next.js output", ".nuxt": "Nuxt output", "dist": "Build output", "build": "Build output"
-]
-
-private func cleanupProjectTitle(_ id: Int, in scan: ScanResult) -> String {
-    let node = scan.nodes[id]
-    if cleanupProjectOutputs[node.name] != nil, let parent = node.parent, scan.nodes.indices.contains(parent) {
-        return StorageLabels.name(scan.nodes[parent])
-    }
-    return StorageLabels.name(node)
-}
-
-private func cleanupProjectSubtitle(_ id: Int, in scan: ScanResult) -> String {
-    let node = scan.nodes[id]
-    if let role = cleanupProjectOutputs[node.name] { return "\(StorageLabels.name(node)) · \(role)" }
-    return StorageLabels.location(scan.url(for: id).path)
-}
-
 /// Auto Cleaner card: stale, usually-regenerable folders surfaced for review.
 /// Suggestions never delete anything — each one stages through the same
 /// preflight and review list as a manual pick.
@@ -607,8 +595,8 @@ private struct AutoCleanerCard: View {
             Divider().padding(.horizontal, 16)
             ForEach(suggestions, id: \.self) { id in
                 let category = m.cleanupCategory(id) ?? .packageCaches
-                SMResourceRow(cleanupProjectTitle(id, in: scan),
-                              subtitle: cleanupProjectSubtitle(id, in: scan),
+                SMResourceRow(CleanupReviewLabels.title(id, in: scan),
+                              subtitle: CleanupReviewLabels.subtitle(id, in: scan),
                               systemImage: category.symbol) {
                     EmptyView()
                 } trailing: {
