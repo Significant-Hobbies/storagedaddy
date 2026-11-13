@@ -4,10 +4,11 @@ import SwiftUI
 import Testing
 @testable import StorageDaddy
 
-/// Capture-only production shell on temporary files. Drivers must only take screenshots.
+/// Production shell on temporary files; interaction is separately opt-in and must not confirm cleanup.
 @MainActor @Test(.enabled(if: ProcessInfo.processInfo.environment["STORAGEDADDY_MAC_UI_EVIDENCE"] == "1"))
 func sharedMacUIReviewHost() async throws {
     let environment = ProcessInfo.processInfo.environment
+    let interactive = environment["STORAGEDADDY_MAC_UI_INTERACTION_EVIDENCE"] == "1"
     let ready = try #require(environment["STORAGEDADDY_MAC_UI_READY"])
     let defaults = UserDefaults.standard
     let priorArguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
@@ -43,13 +44,13 @@ func sharedMacUIReviewHost() async throws {
     let host = NSHostingView(rootView: ExplorerView(runsLaunchActions: false)
         .environmentObject(model).storageTheme(DaddyTheme.palette, appearance: "dark")
         .environment(\.storageArtworkDirectory, URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Assets"))
-        .allowsHitTesting(false).accessibilityHidden(true))
+        .allowsHitTesting(interactive).accessibilityHidden(!interactive))
     host.sizingOptions = []
     let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: height),
                           styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
     window.title = "StorageDaddy UI review · temporary sample folders"
     window.isReleasedWhenClosed = false
-    window.ignoresMouseEvents = true
+    window.ignoresMouseEvents = !interactive
     window.contentView = host
     NSApplication.shared.setActivationPolicy(.regular)
     window.makeKeyAndOrderFront(nil)
