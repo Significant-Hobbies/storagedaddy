@@ -301,11 +301,11 @@ struct CleanupView: View {
         ScrollView {
         // Keep async panels mounted while the rows scroll out of view.
         VStack(alignment: .leading, spacing: 16) {
-            SMWorkspaceHeader("Quick Cleanup", subtitle: m.scan == nil ? "Review Trash, or scan a folder to find cleanup candidates." : m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders and choose how to clean up. Items with issues are kept.") {
-                HStack(spacing: 16) {
-                    DoodleArt(topic: .cleanup).frame(width: 72, height: 72)
+            HStack(alignment: .center, spacing: 24) {
+                SMWorkspaceHeader("Quick Cleanup", subtitle: m.scan == nil ? "Review Trash, or scan a folder to find cleanup candidates." : m.staged.isEmpty ? "Pick caches, dependencies and builds to clean up." : "Review your folders and choose how to clean up. Items with issues are kept.") {
                     if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") }
                 }
+                DoodleArt(topic: .cleanup).frame(width: 72, height: 72)
             }
             if m.staged.isEmpty, let scan = m.scan, !easyIDs.isEmpty {
                 AutoCleanerCard(scan: scan, ids: easyIDs)
