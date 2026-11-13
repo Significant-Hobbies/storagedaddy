@@ -306,7 +306,7 @@ struct CleanupView: View {
                     DoodleArt(topic: .cleanup).frame(width: 72, height: 72)
                     if m.showCleanup { Button("done") { m.showCleanup = false }.accessibilityLabel("Done") }
                 }
-            }.accessibilityLabel("Quick Cleanup")
+            }
             if m.staged.isEmpty, let scan = m.scan, !easyIDs.isEmpty {
                 AutoCleanerCard(scan: scan, ids: easyIDs)
             }
@@ -431,7 +431,7 @@ struct CleanupView: View {
                     }
                 }
             }.font(.caption).padding(.horizontal, 16).padding(.bottom, 16)
-        }
+        }.accessibilityElement(children: .contain)
     }
 
     private func cleanupControls(permanentIDs: Set<Int>) -> some View {

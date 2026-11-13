@@ -4,7 +4,7 @@ import SwiftUI
 import Testing
 @testable import StorageDaddy
 
-/// Hosts the production shell on temporary files; never invokes a cleanup action.
+/// Capture-only production shell on temporary files. Drivers must only take screenshots.
 @MainActor @Test(.enabled(if: ProcessInfo.processInfo.environment["STORAGEDADDY_MAC_UI_EVIDENCE"] == "1"))
 func sharedMacUIReviewHost() async throws {
     let environment = ProcessInfo.processInfo.environment
@@ -29,15 +29,21 @@ func sharedMacUIReviewHost() async throws {
     model.quickCleanupCandidateIDs = ids
     model.staged = Set(ids)
     model.openStorage(.cleanup)
-    let host = NSHostingView(rootView: ExplorerView(runsLaunchActions: false)
-        .environmentObject(model).storageTheme(DaddyTheme.palette, appearance: "dark"))
-    let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 1200, height: 850),
+    let sheet = environment["STORAGEDADDY_MAC_UI_SCENE"] == "sheet"
+    let width = Double(environment["STORAGEDADDY_MAC_UI_WIDTH"] ?? "") ?? (sheet ? 640 : 1200)
+    let height = Double(environment["STORAGEDADDY_MAC_UI_HEIGHT"] ?? "") ?? (sheet ? 490 : 850)
+    let host = NSHostingView(rootView: Group {
+        if sheet { CleanupView() } else { ExplorerView(runsLaunchActions: false) }
+    }.environmentObject(model).storageTheme(DaddyTheme.palette, appearance: "dark")
+        .allowsHitTesting(false).accessibilityHidden(true))
+    let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: height),
                           styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
     window.title = "StorageDaddy UI review · temporary sample folders"
     window.isReleasedWhenClosed = false
+    window.ignoresMouseEvents = true
     window.contentView = host
     NSApplication.shared.setActivationPolicy(.regular)
-    window.makeKeyAndOrderFront(nil)
+    window.orderFront(nil)
     defer { window.close() }
     try await Task.sleep(for: .milliseconds(300))
     host.layoutSubtreeIfNeeded()

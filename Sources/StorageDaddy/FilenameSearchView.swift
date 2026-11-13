@@ -77,7 +77,7 @@ struct FilenameSearchView: View {
         VStack(alignment: .leading, spacing: 16) {
             SMWorkspaceHeader("Find Files", subtitle: "Fuzzy filename search across your scan, powered by FinderSearch. Results use scan metadata; rescan to include changes.") {
                 EmptyView()
-            }.accessibilityLabel("Find Files")
+            }
             SMSearchField("Filename or filters, e.g. report ext:pdf", text: $query,
                           focus: $searchFocused, accessibilityLabel: "Search scanned filenames")
                 .accessibilityIdentifier("filename-search")
