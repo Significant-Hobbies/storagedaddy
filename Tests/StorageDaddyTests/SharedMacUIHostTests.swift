@@ -9,6 +9,12 @@ import Testing
 func sharedMacUIReviewHost() async throws {
     let environment = ProcessInfo.processInfo.environment
     let ready = try #require(environment["STORAGEDADDY_MAC_UI_READY"])
+    let defaults = UserDefaults.standard
+    let priorArguments = defaults.volatileDomain(forName: NSArgumentDomain)
+    var fixtureArguments = priorArguments
+    fixtureArguments["cleanupRefreshPaths"] = [String]()
+    defaults.setVolatileDomain(fixtureArguments, forName: NSArgumentDomain)
+    defer { defaults.setVolatileDomain(priorArguments, forName: NSArgumentDomain) }
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("storage-ui-review-\(UUID())")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -29,12 +35,11 @@ func sharedMacUIReviewHost() async throws {
     model.quickCleanupCandidateIDs = ids
     model.staged = Set(ids)
     model.openStorage(.cleanup)
-    let sheet = environment["STORAGEDADDY_MAC_UI_SCENE"] == "sheet"
-    let width = Double(environment["STORAGEDADDY_MAC_UI_WIDTH"] ?? "") ?? (sheet ? 640 : 1200)
-    let height = Double(environment["STORAGEDADDY_MAC_UI_HEIGHT"] ?? "") ?? (sheet ? 490 : 850)
-    let host = NSHostingView(rootView: Group {
-        if sheet { CleanupView() } else { ExplorerView(runsLaunchActions: false) }
-    }.environmentObject(model).storageTheme(DaddyTheme.palette, appearance: "dark")
+    let width = Double(environment["STORAGEDADDY_MAC_UI_WIDTH"] ?? "") ?? 1200
+    let height = Double(environment["STORAGEDADDY_MAC_UI_HEIGHT"] ?? "") ?? 850
+    try #require((320...2400).contains(width) && (320...1800).contains(height))
+    let host = NSHostingView(rootView: ExplorerView(runsLaunchActions: false)
+        .environmentObject(model).storageTheme(DaddyTheme.palette, appearance: "dark")
         .allowsHitTesting(false).accessibilityHidden(true))
     let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: height),
                           styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
