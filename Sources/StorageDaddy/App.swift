@@ -1351,6 +1351,7 @@ struct FileTypeStats: Sendable {
                                deletePermanently: deletePermanently, moveToTrash: moveToTrash)
     }
 
+    /// Legacy explicit-confirmation entry; the native Cleanup UI uses performNativeCleanup.
     func trashStaged() {
         guard agentAccess.validateStagedPermissions() else { return }
         guard let scan, !busy, !moves.busy, macTools?.isBusy != true, !monitoring, !staged.isEmpty else { return }
@@ -1379,8 +1380,8 @@ struct FileTypeStats: Sendable {
         performReviewedCleanup(ids, permanentlyDeleting: permanent)
     }
 
-    /// Called only for the list and destinations approved by the final confirmation.
-    /// A file-specific failure keeps that item and never aborts unrelated items.
+    /// Executes the explicit native selection and destinations through shared cleanup checks.
+    /// A file-specific failure never aborts unrelated items; removal failures may be partial.
     func performReviewedCleanup(_ ids: [Int], permanentlyDeleting permanent: Set<Int> = [],
                                 deletePermanently: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) },
                                 moveToTrash: @escaping (URL) throws -> URL? = { url in

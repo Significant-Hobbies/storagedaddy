@@ -224,8 +224,8 @@ private struct AgentPolicy: Codable {
             reviews[i].outcome = "Overlaps native Cleanup review. Existing staging is unchanged."
             save(); return
         }
-        // Native action only. The existing preflight and Cleanup confirmation
-        // remain authoritative. RPC has no route to trashStaged/deleteStaged.
+        // Native cleanup rechecks preflight, request grants and permanent eligibility.
+        // RPC only queues requests and never removes files.
         pendingStaging[node.id] = request.id
         m.stage(node.id, authorization: { [weak self] in
             guard let self else { return false }
