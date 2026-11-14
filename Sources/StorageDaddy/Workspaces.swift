@@ -316,8 +316,8 @@ struct CleanupView: View {
     private func cleanupList(stagedIDs: [Int], permanentIDs: Set<Int>, quickCandidateIDs: Set<Int>, easyIDs: [Int], showsMeasurement: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 24) {
-                SMWorkspaceHeader(stagedIDs.isEmpty ? "Quick Cleanup" : "Review cleanup",
-                    subtitle: m.scan == nil ? "Scan a folder to find cleanup candidates." : stagedIDs.isEmpty ? "Choose the folders your workspace can let go." : "Keep the work. Review what can leave.") {
+                SMWorkspaceHeader("Quick Cleanup",
+                    subtitle: m.scan == nil ? "Scan a folder to find cleanup candidates." : stagedIDs.isEmpty ? "Choose the folders your workspace can let go." : "Choose what to keep, then clean up your selection.") {
                     if m.showCleanup { Button("Done") { m.showCleanup = false } }
                 }
                 if stagedIDs.isEmpty { DoodleArt(topic: .cleanup).frame(width: 68, height: 68) }
@@ -414,7 +414,7 @@ struct CleanupView: View {
                 }.frame(maxWidth: .infinity, alignment: .topLeading)
             }.scrollIndicators(.hidden)
             if !stagedIDs.isEmpty {
-                Label("Nothing is removed before confirmation.", systemImage: "lock.shield")
+                Label("Cleanup checks run before removal. Items that fail checks are skipped.", systemImage: "lock.shield")
                     .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.secondaryText).padding(.vertical, 18)
             }
         }.padding(.horizontal, 30)
@@ -443,9 +443,7 @@ struct CleanupView: View {
             WelcomeIllustration().frame(height: 104).padding(.vertical, 18)
             Text(m.monitoring ? "Stop monitoring before cleanup." : "Stop builds or installs using these folders before continuing.")
                 .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true).lineSpacing(3)
-            reviewButton(permanentIDs: permanentIDs).padding(.top, 18)
-            Text("Confirmation comes next").font(.custom(DaddyTheme.palette.sansFont, size: 10)).foregroundStyle(Tints.secondaryText)
-                .frame(maxWidth: .infinity).padding(.top, 12)
+            cleanupButton(permanentIDs: permanentIDs).padding(.top, 18)
         }.padding(.horizontal, 24).padding(.top, 32).padding(.bottom, 22)
     }
 
@@ -458,7 +456,7 @@ struct CleanupView: View {
 
     @ViewBuilder private func methodPicker(permanentIDs: Set<Int>) -> some View {
         let eligible = m.scan.map { scan in
-            m.staged.contains { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory && m.incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) }
+            m.staged.contains { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory && m.incompleteCleanup[$0] == nil && m.agentAccess.allowsPermanentCleanup(of: $0) && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) }
         } ?? false
         if eligible {
             Menu {
@@ -484,24 +482,34 @@ struct CleanupView: View {
     }
 
     private func methodNotice(permanentIDs: Set<Int>) -> String {
-        if permanentIDs.isEmpty { return "Restore from Trash until it’s emptied. Trash still occupies disk space." }
+        if m.scanIsHistorical { return "Saved scan. Rescan for current files before cleanup." }
         let trashCount = m.staged.count - permanentIDs.count
-        return "\(permanentIDs.count) to delete permanently\(trashCount > 0 ? " · \(trashCount) to Trash" : ""). Permanent deletion bypasses Trash. Local changes cannot be restored."
+        var notice = permanentIDs.isEmpty
+            ? "Restore from Trash until it’s emptied. Trash still occupies disk space."
+            : "\(permanentIDs.count) to delete permanently\(trashCount > 0 ? " · \(trashCount) to Trash" : ""). Permanent deletion bypasses Trash. Local changes are lost; reinstalling may require downloads."
+        let incompleteCount = m.staged.filter { m.incompleteCleanup[$0] != nil }.count
+        if incompleteCount > 0 {
+            notice += "\n\n\(incompleteCount) added with incomplete-check overrides. Their unreadable or excluded contents also move to Trash. Those contents have not been verified."
+        }
+        return notice
     }
 
-    private func reviewButton(permanentIDs: Set<Int>) -> some View {
+    private func cleanupButton(permanentIDs: Set<Int>) -> some View {
         let hiddenCount = m.scan.map { filter.hiddenCount(m.staged.sorted(), in: $0) } ?? 0
+        let selection = m.nativeCleanupSelection()
+        let title = permanentIDs.isEmpty ? "Move \(m.staged.count) to Trash"
+            : permanentIDs.count == m.staged.count ? "Delete \(m.staged.count) permanently" : "Clean \(m.staged.count) items"
         return Button {
             if let scan = m.scan, filter.revealHiddenSelection(m.staged.sorted(), in: scan) { return }
-            m.trashStaged()
+            if let selection { m.performNativeCleanup(selection) }
         } label: {
             HStack {
-                Text(hiddenCount > 0 ? "Show all \(m.staged.count) items…" : "Review \(m.staged.count) \(m.staged.count == 1 ? "item" : "items")…")
+                Text(hiddenCount > 0 ? "Show all \(m.staged.count) items…" : title)
                 Spacer(minLength: 8)
-                Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
+                Image(systemName: permanentIDs.isEmpty ? "trash" : "trash.slash").font(.system(size: 11, weight: .semibold))
             }
-        }.buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy || m.monitoring || m.staged.isEmpty)
-            .help(permanentIDs.isEmpty ? "Review the final Move to Trash confirmation." : "Review the final permanent-cleanup confirmation.")
+        }.buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy || m.monitoring || selection == nil)
+            .help("Runs fresh cleanup checks, then removes the selected items using the displayed method.")
     }
 
     private func cleanupRow(id: Int, scan: ScanResult, permanentIDs: Set<Int>, quickCandidateIDs: Set<Int>) -> some View {
@@ -572,7 +580,7 @@ struct CleanupView: View {
                     methodPicker(permanentIDs: permanentIDs)
                 }
                 Spacer(minLength: 12)
-                reviewButton(permanentIDs: permanentIDs).fixedSize(horizontal: true, vertical: false)
+                cleanupButton(permanentIDs: permanentIDs).fixedSize(horizontal: true, vertical: false)
             }
             Text(m.monitoring ? "Stop monitoring before cleanup." : methodNotice(permanentIDs: permanentIDs))
                 .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(permanentIDs.isEmpty ? Tints.secondaryText : Tints.coral)
@@ -582,51 +590,56 @@ struct CleanupView: View {
     }
 }
 
-/// Auto Cleaner card: stale, usually-regenerable folders surfaced for review.
-/// Suggestions never delete anything — each one stages through the same
-/// preflight and review list as a manual pick.
 private struct AutoCleanerCard: View {
     let scan: ScanResult
     let ids: [Int]
     @EnvironmentObject var m: ExplorerModel
-    private var suggestions: [Int] { Array(ids.prefix(8)) }
+    private var suggestions: [Int] { ids }
 
     var body: some View {
-        SMSettingsGroup("Rebuildable items", footer: "Caches, project dependencies and build outputs. Apps may need to download or rebuild them afterward. Nothing moves automatically.") {
+        let direct = m.quickPermanentCleanup()
+        SMSettingsGroup("Quick Cleanup", footer: m.scanIsHistorical ? "Saved scan. Rescan for current files before deleting. Suggestions below are historical." : "Delete permanently bypasses Trash. Local changes inside these folders will be lost; reinstalling may require downloads. Items that fail checks are kept. Other suggestions can be reviewed below.") {
             ViewThatFits(in: .horizontal) {
-                HStack { summary; Spacer(minLength: 16); reviewButton }
-                VStack(alignment: .leading, spacing: 12) { summary; reviewButton }
+                HStack { summary; Spacer(minLength: 16); cleanupButtons(direct) }
+                VStack(alignment: .leading, spacing: 12) { summary; cleanupButtons(direct) }
             }.padding(16)
             Divider().padding(.horizontal, 16)
-            ForEach(suggestions, id: \.self) { id in
-                let category = m.cleanupCategory(id) ?? .packageCaches
-                SMResourceRow(CleanupReviewLabels.title(id, in: scan),
-                              subtitle: CleanupReviewLabels.subtitle(id, in: scan),
-                              systemImage: category.symbol) {
-                    EmptyView()
-                } trailing: {
-                    HStack(spacing: 12) {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(DiskFormat.bytes(scan.nodes[id].allocatedBytes)).monospacedDigit()
-                            Text(category.title).font(.caption).foregroundStyle(Tints.secondaryText)
+            LazyVStack(spacing: 0) {
+                ForEach(suggestions, id: \.self) { id in
+                    let category = m.cleanupCategory(id) ?? .packageCaches
+                    SMResourceRow(CleanupReviewLabels.title(id, in: scan),
+                                  subtitle: CleanupReviewLabels.subtitle(id, in: scan),
+                                  systemImage: category.symbol) {
+                        EmptyView()
+                    } trailing: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text(DiskFormat.bytes(scan.nodes[id].allocatedBytes)).monospacedDigit()
+                                Text(direct?.ids.contains(id) == true ? "Delete permanently · Bypasses Trash" : "Review separately")
+                                    .font(.caption).foregroundStyle(direct?.ids.contains(id) == true ? Tints.coral : Tints.secondaryText)
+                            }
+                            Button("inspect") { m.showCleanup = false; m.openStorage(.explore); m.open(scan.nodes[id]) }
+                                .accessibilityLabel("Inspect").buttonStyle(SMMacButtonStyle(.quiet))
+                            Button("add for review") { m.stage(id) }.accessibilityLabel("Add for Review").disabled(m.busy)
                         }
-                        Button("inspect") { m.showCleanup = false; m.openStorage(.explore); m.open(scan.nodes[id]) }
-                            .accessibilityLabel("Inspect").buttonStyle(SMMacButtonStyle(.quiet))
-                        Button("add for review") { m.stage(id) }.accessibilityLabel("Add for Review").disabled(m.busy)
                     }
+                    if id != suggestions.last { Divider().padding(.horizontal, 16) }
                 }
-                if id != suggestions.last { Divider().padding(.horizontal, 16) }
-            }
-            if ids.count > suggestions.count {
-                Text("+ \(ids.count - suggestions.count) more included in Review items")
-                    .font(.caption).foregroundStyle(Tints.secondaryText).padding(16)
             }
         }
     }
 
-    private var reviewButton: some View {
-        Button("Review \(ids.count) \(ids.count == 1 ? "item" : "items") (\(DiskFormat.bytes(totalBytes)))…", action: m.stageEasyCleanup)
-            .buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy || m.monitoring)
+    private func cleanupButtons(_ direct: ExplorerModel.QuickPermanentCleanup?) -> some View {
+        HStack(spacing: 10) {
+            if let direct {
+                Button("Delete \(direct.ids.count) \(direct.ids.count == 1 ? "folder" : "folders") · \(DiskFormat.bytes(direct.bytes)) permanently") {
+                    m.deleteQuickCleanup(direct)
+                }
+                .buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy || m.monitoring)
+            }
+            Button("Review \(ids.count) \(ids.count == 1 ? "item" : "items")…", action: m.stageEasyCleanup)
+                .buttonStyle(SMMacButtonStyle(.quiet)).disabled(m.busy || m.monitoring)
+        }
     }
     private var totalBytes: Int64 { ids.reduce(0) { $0 + scan.nodes[$1].allocatedBytes } }
 

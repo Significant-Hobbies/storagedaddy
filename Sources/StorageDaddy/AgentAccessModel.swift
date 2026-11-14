@@ -224,8 +224,8 @@ private struct AgentPolicy: Codable {
             reviews[i].outcome = "Overlaps native Cleanup review. Existing staging is unchanged."
             save(); return
         }
-        // Native action only. The existing preflight and Cleanup confirmation
-        // remain authoritative. RPC has no route to trashStaged/deleteStaged.
+        // Native cleanup rechecks preflight, request grants and permanent eligibility.
+        // RPC only queues requests and never removes files.
         pendingStaging[node.id] = request.id
         m.stage(node.id, authorization: { [weak self] in
             guard let self else { return false }
@@ -258,6 +258,15 @@ private struct AgentPolicy: Codable {
         pendingStaging.removeAll()
         stagedRequests.removeAll()
         for id in ownedIDs { explorer?.unstage(id) }
+    }
+
+    func allowsPermanentCleanup(of nodeID: Int) -> Bool {
+        guard let requestID = stagedRequests[nodeID] ?? pendingStaging[nodeID] else { return true }
+        guard policyHealthy, let request = reviews.first(where: { $0.id == requestID }), request.permanent,
+              sessions.contains(where: { $0.id == request.sessionID && $0.permissions.contains("request_permanent") }),
+              let scan = explorer?.scan, scan.nodes.indices.contains(nodeID) else { return false }
+        return scan.nodes[nodeID].device == request.device && scan.nodes[nodeID].inode == request.inode
+            && scan.url(for: nodeID).path == request.path
     }
 
     /// Call immediately before native Cleanup preflight and again before its

@@ -4,11 +4,10 @@ import SwiftUI
 import Testing
 @testable import StorageDaddy
 
-/// Production shell on temporary files; interaction is separately opt-in and must not confirm cleanup.
+/// Read-only production shell on temporary files. Cleanup actions are never interactive.
 @MainActor @Test(.enabled(if: ProcessInfo.processInfo.environment["STORAGEDADDY_MAC_UI_EVIDENCE"] == "1"))
 func sharedMacUIReviewHost() async throws {
     let environment = ProcessInfo.processInfo.environment
-    let interactive = environment["STORAGEDADDY_MAC_UI_INTERACTION_EVIDENCE"] == "1"
     let ready = try #require(environment["STORAGEDADDY_MAC_UI_READY"])
     let defaults = UserDefaults.standard
     let priorArguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
@@ -26,6 +25,8 @@ func sharedMacUIReviewHost() async throws {
         try Data(repeating: 42, count: 4096).write(to: location.appendingPathComponent("sample.bin"))
     }
     try Data("{}".utf8).write(to: root.appendingPathComponent("website/package.json"))
+    let sentinels = ["website/source.swift", "history.jsonl"]
+    for path in sentinels { try Data("preserve".utf8).write(to: root.appendingPathComponent(path)) }
     let scan = try await DiskScanner.scan(root: root)
     let ids = scan.nodes.filter { ["node_modules", "__pycache__"].contains($0.name) }.map(\.id)
     #expect(ids.count == 2)
@@ -44,13 +45,13 @@ func sharedMacUIReviewHost() async throws {
     let host = NSHostingView(rootView: ExplorerView(runsLaunchActions: false)
         .environmentObject(model).storageTheme(DaddyTheme.palette, appearance: "dark")
         .environment(\.storageArtworkDirectory, URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Assets"))
-        .allowsHitTesting(interactive).accessibilityHidden(!interactive))
+        .allowsHitTesting(false).accessibilityHidden(true))
     host.sizingOptions = []
     let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: height),
                           styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
     window.title = "StorageDaddy UI review · temporary sample folders"
     window.isReleasedWhenClosed = false
-    window.ignoresMouseEvents = !interactive
+    window.ignoresMouseEvents = true
     window.contentView = host
     NSApplication.shared.setActivationPolicy(.regular)
     window.makeKeyAndOrderFront(nil)
@@ -65,6 +66,12 @@ func sharedMacUIReviewHost() async throws {
     for folder in folders {
         #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).appendingPathComponent("sample.bin").path))
     }
+    for path in ["website/package.json"] + sentinels {
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path))
+    }
+    #expect(model.staged == Set(ids))
+    #expect(model.lastPermanentlyDeletedCount == 0)
+    #expect(model.lastTrashedURLs.isEmpty)
 }
 
 @MainActor private func holdStorageReviewEventLoop(until done: URL) {

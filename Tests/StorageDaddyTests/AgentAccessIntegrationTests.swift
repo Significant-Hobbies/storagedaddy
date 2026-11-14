@@ -208,6 +208,56 @@ struct AgentAccessIntegrationTests {
         #expect(f.explorer.activeScanVersion == laterVersion)
     }
 
+    @Test(arguments: [false, true])
+    func approvedAgentTrashRequestCannotBecomePermanentCleanup(_ forcePermanent: Bool) async throws {
+        let f = try await fixture(role: .admin)
+        defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
+        let dependencies = f.root.appendingPathComponent("node_modules")
+        try FileManager.default.createDirectory(at: dependencies, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: f.root.appendingPathComponent("package.json"))
+        try Data("local dependency changes".utf8).write(to: dependencies.appendingPathComponent("index.js"))
+        f.explorer.scan = try await DiskScanner.scan(root: f.root)
+        let nodeID = try #require(f.explorer.scan?.nodes.first { $0.name == "node_modules" }?.id)
+        _ = await call("move_to_trash", arguments: .object(["nodeIDs": .array([.integer(nodeID)]), "reason": .string("Trash-only dependency fixture")]), fixture: f)
+        let review = try #require(f.agents.reviews.first)
+        #expect(!review.permanent)
+        f.agents.review(review.id)
+        try await waitForReview(f)
+        try #require(f.explorer.staged == [nodeID])
+        #expect(!f.agents.allowsPermanentCleanup(of: nodeID))
+        #expect(f.explorer.permanentCleanupIDs.isEmpty)
+        let recovered = f.root.appendingPathComponent("recoverable-dependencies")
+        if forcePermanent {
+            f.explorer.performReviewedCleanup([nodeID], permanentlyDeleting: [nodeID], deletePermanently: { _ in
+                Issue.record("A Trash request must never call permanent removal")
+            }, moveToTrash: { _ in
+                Issue.record("A forced permanent destination must fail closed")
+                return nil
+            })
+        } else {
+            let selection = try #require(f.explorer.nativeCleanupSelection())
+            #expect(selection.permanentIDs.isEmpty)
+            f.explorer.performNativeCleanup(selection, deletePermanently: { _ in
+                Issue.record("A Trash request must never call permanent removal")
+            }, moveToTrash: { url in
+                try FileManager.default.moveItem(at: url, to: recovered)
+                return recovered
+            })
+        }
+        try await waitForReview(f)
+        #expect(f.explorer.lastPermanentlyDeletedCount == 0)
+        #expect(FileManager.default.fileExists(atPath: f.root.appendingPathComponent("package.json").path))
+        if forcePermanent {
+            #expect(FileManager.default.fileExists(atPath: dependencies.appendingPathComponent("index.js").path))
+            #expect(f.explorer.quickCleanupFailures[nodeID] != nil)
+            #expect(f.explorer.lastTrashedURLs.isEmpty)
+        } else {
+            #expect(!FileManager.default.fileExists(atPath: dependencies.path))
+            #expect(FileManager.default.fileExists(atPath: recovered.appendingPathComponent("index.js").path))
+            #expect(f.explorer.lastTrashedURLs == [recovered])
+        }
+    }
+
     @Test func roleReductionRejectsWaitingReviewAndHiddenToolAttemptIsLogged() async throws {
         let f = try await fixture()
         defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
