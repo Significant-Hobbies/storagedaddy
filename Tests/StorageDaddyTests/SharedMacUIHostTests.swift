@@ -70,7 +70,7 @@ func sharedMacUIReviewHost() async throws {
         "contentWidth": Double(host.bounds.width), "contentHeight": Double(host.bounds.height),
         "temporaryRoot": root.path, "directCleanup": directCleanup, "nativeStagedCleanup": nativeStagedCleanup, "temporaryFilesOnly": true])
         .write(to: URL(fileURLWithPath: ready))
-    holdStorageReviewEventLoop(until: URL(fileURLWithPath: ready + ".done"))
+    await holdStorageReviewEventLoop(until: URL(fileURLWithPath: ready + ".done"))
     for folder in folders {
         let exists = FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).appendingPathComponent("sample.bin").path)
         #expect(exists == !(cleanupExpected && folder == "website/node_modules"))
@@ -88,20 +88,25 @@ func sharedMacUIReviewHost() async throws {
     }
 }
 
-@MainActor private func holdStorageReviewEventLoop(until done: URL) {
-    let deadline = Date().addingTimeInterval(120)
-    let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-        MainActor.assumeIsolated {
-            guard FileManager.default.fileExists(atPath: done.path) || Date() >= deadline else { return }
-            NSApplication.shared.stop(nil)
-            if let event = NSEvent.otherEvent(with: .applicationDefined, location: .zero,
-                modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0) {
-                NSApplication.shared.postEvent(event, atStart: false)
+@MainActor private func holdStorageReviewEventLoop(until done: URL) async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        DispatchQueue.main.async {
+            let deadline = Date().addingTimeInterval(120)
+            let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                MainActor.assumeIsolated {
+                    guard FileManager.default.fileExists(atPath: done.path) || Date() >= deadline else { return }
+                    NSApplication.shared.stop(nil)
+                    if let event = NSEvent.otherEvent(with: .applicationDefined, location: .zero,
+                        modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0) {
+                        NSApplication.shared.postEvent(event, atStart: false)
+                    }
+                }
             }
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            NSApplication.shared.run()
+            timer.invalidate()
+            continuation.resume()
         }
     }
-    NSApplication.shared.activate(ignoringOtherApps: true)
-    NSApplication.shared.run()
-    timer.invalidate()
 }
