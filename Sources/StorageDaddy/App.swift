@@ -753,7 +753,13 @@ struct FileTypeStats: Sendable {
         }
     }
     func scanUserCaches() {
-        start(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches"), destination: .explore)
+        scanUserCaches(destination: .explore)
+    }
+    func scanUserCachesForCleanup() {
+        scanUserCaches(destination: .cleanup)
+    }
+    private func scanUserCaches(destination: Workspace) {
+        start(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches"), destination: destination)
     }
     func scanHomeFolder() {
         start(FileManager.default.homeDirectoryForCurrentUser, destination: .explore)
@@ -765,6 +771,7 @@ struct FileTypeStats: Sendable {
     }
     func requestAISessionsRefresh() { aiSessionsRefreshID = UUID() }
     func chooseFolder() { chooseFolder(destination: nil) }
+    func chooseCleanupFolder() { chooseFolder(destination: .cleanup) }
     private func chooseFolder(destination: Workspace?) {
         let p = NSOpenPanel(); p.canChooseDirectories = true; p.canChooseFiles = false; p.allowsMultipleSelection = false; p.prompt = "Scan Folder"
         if p.runModal() == .OK, let url = p.url {

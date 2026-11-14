@@ -379,6 +379,11 @@ struct CleanupView: View {
             } else if m.staged.isEmpty && m.lastPermanentlyDeletedCount == 0 {
                 if easyIDs.isEmpty {
                     StorageEmptyView(m.scan == nil ? "Scan to find rebuildable items" : "No rebuildable items found in this scan", systemImage: "tray", description: Text("Scan a folder, or add an item from Storage for individual review."))
+                    HStack(spacing: 12) {
+                        Button("Scan User Caches", action: m.scanUserCachesForCleanup)
+                            .buttonStyle(SMMacButtonStyle(.primary))
+                        Button("Choose Folder…", action: m.chooseCleanupFolder)
+                    }.frame(maxWidth: .infinity).disabled(m.busy)
                 }
             }
             else if !m.staged.isEmpty, let scan = m.scan {
