@@ -4,11 +4,13 @@ import SwiftUI
 import Testing
 @testable import StorageDaddy
 
-/// Production shell on temporary files; interaction is separately opt-in and must not confirm cleanup.
+/// Production shell on temporary files; deletion is restricted to an explicit fixture mode.
 @MainActor @Test(.enabled(if: ProcessInfo.processInfo.environment["STORAGEDADDY_MAC_UI_EVIDENCE"] == "1"))
 func sharedMacUIReviewHost() async throws {
     let environment = ProcessInfo.processInfo.environment
     let interactive = environment["STORAGEDADDY_MAC_UI_INTERACTION_EVIDENCE"] == "1"
+    let directCleanup = environment["STORAGEDADDY_MAC_UI_DIRECT_CLEANUP"] == "1"
+    try #require(!directCleanup || interactive)
     let ready = try #require(environment["STORAGEDADDY_MAC_UI_READY"])
     let defaults = UserDefaults.standard
     let priorArguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
@@ -26,6 +28,8 @@ func sharedMacUIReviewHost() async throws {
         try Data(repeating: 42, count: 4096).write(to: location.appendingPathComponent("sample.bin"))
     }
     try Data("{}".utf8).write(to: root.appendingPathComponent("website/package.json"))
+    let sentinels = ["website/source.swift", "history.jsonl"]
+    for name in sentinels { try Data("keep".utf8).write(to: root.appendingPathComponent(name)) }
     let scan = try await DiskScanner.scan(root: root)
     let ids = scan.nodes.filter { ["node_modules", "__pycache__"].contains($0.name) }.map(\.id)
     #expect(ids.count == 2)
@@ -36,8 +40,9 @@ func sharedMacUIReviewHost() async throws {
     model.developerGroups = DeveloperInsights.analyze(scan)
     model.developerReport = DeveloperReport.build(scan: scan, groups: model.developerGroups)
     model.quickCleanupCandidateIDs = ids
-    model.staged = Set(ids)
+    model.staged = directCleanup ? [] : Set(ids)
     model.openStorage(.cleanup)
+    let initialIncomplete = model.incompleteCleanup
     let width = Double(environment["STORAGEDADDY_MAC_UI_WIDTH"] ?? "") ?? 1200
     let height = Double(environment["STORAGEDADDY_MAC_UI_HEIGHT"] ?? "") ?? 850
     try #require((320...2400).contains(width) && (320...1800).contains(height))
@@ -48,7 +53,7 @@ func sharedMacUIReviewHost() async throws {
     host.sizingOptions = []
     let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: height),
                           styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-    window.title = "StorageDaddy UI review · temporary sample folders"
+    window.title = directCleanup ? "StorageDaddy direct cleanup · temporary sample folders" : "StorageDaddy UI review · temporary sample folders"
     window.isReleasedWhenClosed = false
     window.ignoresMouseEvents = !interactive
     window.contentView = host
@@ -59,11 +64,24 @@ func sharedMacUIReviewHost() async throws {
     host.layoutSubtreeIfNeeded()
     #expect(host.bounds.width > 0)
     try JSONSerialization.data(withJSONObject: ["windowNumber": window.windowNumber,
-        "contentWidth": Double(host.bounds.width), "contentHeight": Double(host.bounds.height)])
+        "contentWidth": Double(host.bounds.width), "contentHeight": Double(host.bounds.height),
+        "temporaryRoot": root.path, "directCleanup": directCleanup, "temporaryFilesOnly": true])
         .write(to: URL(fileURLWithPath: ready))
     holdStorageReviewEventLoop(until: URL(fileURLWithPath: ready + ".done"))
     for folder in folders {
-        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).appendingPathComponent("sample.bin").path))
+        let exists = FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).appendingPathComponent("sample.bin").path)
+        #expect(exists == !(directCleanup && folder == "website/node_modules"))
+    }
+    for name in ["website/package.json"] + sentinels {
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(name).path))
+    }
+    if directCleanup {
+        #expect(!model.busy)
+        #expect(model.staged.isEmpty)
+        #expect(model.incompleteCleanup == initialIncomplete)
+        #expect(model.lastPermanentlyDeletedCount == 1)
+        #expect(model.lastTrashedURLs.isEmpty)
+        #expect(model.progress.hasPrefix("Cleanup complete"))
     }
 }
 

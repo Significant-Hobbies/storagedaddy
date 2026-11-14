@@ -10,7 +10,7 @@ test('native cleanup safeguards, exclusions and packaged UI resources', { timeou
   const root = fileURLToPath(new URL('../', import.meta.url));
   const result = spawnSync('npx', [
     '--offline', 'xcodebuildmcp', 'swift-package', 'test', '--package-path', root,
-    '--filter', 'CleanupBatchTests|CleanupReviewFilterTests|StorageUIResourcesTests|FolderExclusion', '--parallel', 'false',
+    '--filter', 'QuickCleanupTests|CleanupBatchTests|CleanupReviewFilterTests|StorageUIResourcesTests|FolderExclusion', '--parallel', 'false',
   ], {
     cwd: root, encoding: 'utf8', timeout: 115_000, maxBuffer: 16 * 1024 * 1024,
     env: { ...process.env, STORAGEDADDY_MAC_UI_EVIDENCE: '0', STORAGEDADDY_CLEANUP_SCROLL_EVIDENCE: '0' },
@@ -30,7 +30,7 @@ test('native cleanup safeguards, exclusions and packaged UI resources', { timeou
   const logRoot = join(homedir(), 'Library/Developer/XcodeBuildMCP/workspaces');
   assert.ok(!relative(logRoot, logPath).startsWith('..'), 'Native log must belong to XcodeBuildMCP');
   const nativeLog = readFileSync(logPath, 'utf8');
-  for (const suite of ['CleanupBatchTests', 'CleanupReviewFilterTests', 'StorageUIResourcesTests', 'FolderExclusionsTests']) {
+  for (const suite of ['QuickCleanupTests', 'CleanupBatchTests', 'CleanupReviewFilterTests', 'StorageUIResourcesTests', 'FolderExclusionsTests']) {
     assert.match(nativeLog, new RegExp(`Suite ['"]?${suite}['"]? passed`), `Native suite ${suite} did not complete`);
   }
 });

@@ -582,9 +582,6 @@ struct CleanupView: View {
     }
 }
 
-/// Auto Cleaner card: stale, usually-regenerable folders surfaced for review.
-/// Suggestions never delete anything — each one stages through the same
-/// preflight and review list as a manual pick.
 private struct AutoCleanerCard: View {
     let scan: ScanResult
     let ids: [Int]
@@ -592,10 +589,11 @@ private struct AutoCleanerCard: View {
     private var suggestions: [Int] { Array(ids.prefix(8)) }
 
     var body: some View {
-        SMSettingsGroup("Rebuildable items", footer: "Caches, project dependencies and build outputs. Apps may need to download or rebuild them afterward. Nothing moves automatically.") {
+        let direct = m.quickPermanentCleanup()
+        SMSettingsGroup("Quick Cleanup", footer: "Delete permanently bypasses Trash. Local changes inside these folders will be lost; reinstalling may require downloads. Items that fail checks are kept. Other suggestions can be reviewed below.") {
             ViewThatFits(in: .horizontal) {
-                HStack { summary; Spacer(minLength: 16); reviewButton }
-                VStack(alignment: .leading, spacing: 12) { summary; reviewButton }
+                HStack { summary; Spacer(minLength: 16); cleanupButtons(direct) }
+                VStack(alignment: .leading, spacing: 12) { summary; cleanupButtons(direct) }
             }.padding(16)
             Divider().padding(.horizontal, 16)
             ForEach(suggestions, id: \.self) { id in
@@ -624,9 +622,17 @@ private struct AutoCleanerCard: View {
         }
     }
 
-    private var reviewButton: some View {
-        Button("Review \(ids.count) \(ids.count == 1 ? "item" : "items") (\(DiskFormat.bytes(totalBytes)))…", action: m.stageEasyCleanup)
-            .buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy || m.monitoring)
+    private func cleanupButtons(_ direct: ExplorerModel.QuickPermanentCleanup?) -> some View {
+        HStack(spacing: 10) {
+            if let direct {
+                Button("Delete \(direct.ids.count) \(direct.ids.count == 1 ? "folder" : "folders") · \(DiskFormat.bytes(direct.bytes)) permanently") {
+                    m.deleteQuickCleanup(direct)
+                }
+                .buttonStyle(SMMacButtonStyle(.primary)).disabled(m.busy || m.monitoring)
+            }
+            Button("Review \(ids.count) \(ids.count == 1 ? "item" : "items")…", action: m.stageEasyCleanup)
+                .buttonStyle(SMMacButtonStyle(.quiet)).disabled(m.busy || m.monitoring)
+        }
     }
     private var totalBytes: Int64 { ids.reduce(0) { $0 + scan.nodes[$1].allocatedBytes } }
 
