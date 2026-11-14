@@ -2,10 +2,10 @@ import DiskCore
 import Foundation
 
 extension ExplorerModel {
-    func openSavedScan(_ snapshot: SavedScanSnapshot) {
+    func openSavedScan(_ snapshot: SavedScanSnapshot, directory: URL? = nil) {
         guard !busy, !moves.busy, !snapshotBusy, staged.isEmpty, macTools?.isBusy != true else { return }
         busy = true
-        let directory = snapshotDirectory
+        let directory = directory ?? snapshotDirectory
         savedScanTask = Task {
             defer { busy = false; savedScanTask = nil }
             do {
@@ -20,7 +20,7 @@ extension ExplorerModel {
                 }
                 let result = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
                 try Task.checkCancellation()
-                scan = result.0; developerGroups = result.1; developerReport = result.2
+                scan = result.0; scanIsHistorical = true; developerGroups = result.1; developerReport = result.2
                 reportFindingsByID = Dictionary(uniqueKeysWithValues: result.2.findings.map { ($0.id, $0) })
                 reportProjectNames = Dictionary(uniqueKeysWithValues: result.2.projects.map { ($0.id, $0.name) })
                 mapIndex = result.3; allocationIndex = result.4; quickCleanupCandidateIDs = result.5

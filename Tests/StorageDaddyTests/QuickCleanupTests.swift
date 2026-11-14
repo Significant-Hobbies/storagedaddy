@@ -195,6 +195,88 @@ struct QuickCleanupTests {
         #expect(model.staged == [staged])
     }
 
+    @Test func nativeStagedActionExecutesDisplayedMixedDestinations() async throws {
+        let (root, scan, model) = try await fixture(["package.json", "node_modules/index.js", "ordinary.txt", "source.swift"])
+        let dependencies = try id("node_modules", in: scan), ordinary = try id("ordinary.txt", in: scan)
+        model.staged = [dependencies, ordinary]
+        let selection = try #require(model.nativeCleanupSelection())
+        #expect(selection.permanentIDs == [dependencies])
+        let recovery = root.appendingPathComponent("recoverable-ordinary.txt")
+        model.performNativeCleanup(selection, moveToTrash: { url in
+            #expect(url == scan.url(for: ordinary))
+            try FileManager.default.moveItem(at: url, to: recovery)
+            return recovery
+        })
+        try await wait(model)
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("node_modules").path))
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("ordinary.txt").path))
+        #expect(FileManager.default.fileExists(atPath: recovery.path))
+        for path in ["package.json", "source.swift"] {
+            #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path))
+        }
+        #expect(model.staged.isEmpty)
+        #expect(model.lastPermanentlyDeletedCount == 1)
+        #expect(model.lastTrashedURLs == [recovery])
+    }
+
+    enum NativeChange: CaseIterable { case selection, scan, destination }
+
+    @Test(arguments: NativeChange.allCases)
+    func nativeStagedActionRejectsChangedAuthorization(_ change: NativeChange) async throws {
+        let (root, scan, model) = try await fixture(["package.json", "node_modules/index.js", "other.txt"])
+        let dependencies = try id("node_modules", in: scan), other = try id("other.txt", in: scan)
+        model.staged = [dependencies]
+        let selection = try #require(model.nativeCleanupSelection())
+        switch change {
+        case .selection: model.staged.insert(other)
+        case .scan: model.scan = scan
+        case .destination: model.deleteNodeCachesPermanently = false
+        }
+        let staged = model.staged
+        model.performNativeCleanup(selection, deletePermanently: { _ in Issue.record("Stale native authorization must not delete") },
+                                   moveToTrash: { _ in Issue.record("Stale native authorization must not move"); return nil })
+        #expect(!model.busy)
+        #expect(model.staged == staged)
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("node_modules/index.js").path))
+    }
+
+    @Test func savedScanRequiresFreshScanBeforeEitherNativeCleanupAction() async throws {
+        let (root, scan, model) = try await fixture(["package.json", "node_modules/index.js"])
+        let dependencies = try id("node_modules", in: scan)
+        let directory = root.deletingLastPathComponent().appendingPathComponent("storage-saved-direct-\(UUID())")
+        let snapshot = try SnapshotHistoryStore.save(scan: scan, directory: directory, includeFileIndex: true)
+        model.openSavedScan(snapshot, directory: directory)
+        try await wait(model)
+        #expect(model.scanIsHistorical)
+        #expect(model.quickPermanentCleanup() == nil)
+        model.staged = [dependencies]
+        #expect(model.nativeCleanupSelection() == nil)
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("node_modules/index.js").path))
+        model.scan = scan
+        model.quickCleanupCandidateIDs = [dependencies]
+        model.staged = []
+        #expect(!model.scanIsHistorical)
+        #expect(model.quickPermanentCleanup() != nil)
+    }
+
+    @Test func completedRemovalIsRecordedBeforeChangedStagingStopsLaterItems() async throws {
+        let (root, scan, model) = try await fixture(["a/package.json", "a/node_modules/index.js", "b/package.json", "b/node_modules/index.js", "staged/keep.txt"])
+        let a = try id("a/node_modules", in: scan), b = try id("b/node_modules", in: scan), staged = try id("staged", in: scan)
+        model.quickCleanupCandidateIDs = [a, b]
+        let selection = try #require(model.quickPermanentCleanup())
+        model.deleteQuickCleanup(selection, deletePermanently: { url in
+            try FileManager.default.removeItem(at: url)
+            DispatchQueue.main.sync { MainActor.assumeIsolated { model.staged.insert(staged) } }
+        })
+        try await wait(model)
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("a/node_modules").path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("b/node_modules/index.js").path))
+        #expect(model.lastPermanentlyDeletedCount == 1)
+        #expect(model.quickCleanupCandidateIDs == [b])
+        #expect(model.staged == [staged])
+        #expect(model.progress.contains("1 not processed"))
+    }
+
     @Test func keptDuplicateInsideDependencyFolderPreventsDirectDeletion() async throws {
         let (root, scan, model) = try await fixture(["package.json", "node_modules/keep.bin", "copy.bin"])
         let kept = try id("node_modules/keep.bin", in: scan), copy = try id("copy.bin", in: scan)

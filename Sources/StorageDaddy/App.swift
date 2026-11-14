@@ -324,7 +324,8 @@ struct FileTypeStats: Sendable {
     @Published var showWelcome = false
     @Published var lastTrashedURLs: [URL] = []
     @Published private(set) var filenameSearchIdentity = UUID()
-    @Published var scan: ScanResult? { didSet { if oldValue?.started != scan?.started || oldValue?.rootPath != scan?.rootPath { agentAccess.clearStagedRequests() }; allocationIndex = nil; filenameSearchIdentity = UUID(); invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview(); quickCleanupFailures = [:]; quickCleanupCandidateIDs = []; lastPermanentlyDeletedCount = 0 } }
+    @Published var scanIsHistorical = false
+    @Published var scan: ScanResult? { didSet { scanIsHistorical = false; if oldValue?.started != scan?.started || oldValue?.rootPath != scan?.rootPath { agentAccess.clearStagedRequests() }; allocationIndex = nil; filenameSearchIdentity = UUID(); invalidateDuplicateReview(); duplicateSurvivorSelections = [:]; invalidateProjectReview(); invalidateAppDataReview(); quickCleanupFailures = [:]; quickCleanupCandidateIDs = []; lastPermanentlyDeletedCount = 0 } }
     @Published var allocationIndex: StorageAllocationIndex?
     @Published var scanStorageAccounting: ScanStorageAccounting?
     @Published private(set) var promptAvoidanceFolders: [String] = []
@@ -1176,7 +1177,7 @@ struct FileTypeStats: Sendable {
 
     /// Captures exactly what the native Delete button displays and authorizes.
     func quickPermanentCleanup(home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> QuickPermanentCleanup? {
-        guard let scan else { return nil }
+        guard let scan, !scanIsHistorical else { return nil }
         let ids = quickCleanupCandidateIDs.filter { id in
             guard scan.nodes.indices.contains(id), scan.nodes[id].parent != nil, scan.nodes[id].isDirectory,
                   quickCleanupFailures[id] == nil, incompleteCleanup[id] == nil else { return false }
@@ -1318,6 +1319,35 @@ struct FileTypeStats: Sendable {
         guard let scan, deleteNodeCachesPermanently else { return [] }
         return Set(staged.filter { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory
             && incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) })
+    }
+
+    struct NativeCleanupSelection {
+        fileprivate let version: UUID
+        fileprivate let scanIdentity: UUID
+        fileprivate let acknowledgements: [Int: CleanupIncompleteReview]
+        let ids: [Int]
+        let permanentIDs: Set<Int>
+    }
+
+    func nativeCleanupSelection() -> NativeCleanupSelection? {
+        guard let scan, !scanIsHistorical, !staged.isEmpty,
+              staged.allSatisfy({ scan.nodes.indices.contains($0) }) else { return nil }
+        return NativeCleanupSelection(version: scanVersion, scanIdentity: filenameSearchIdentity,
+                                      acknowledgements: incompleteCleanup, ids: staged.sorted(), permanentIDs: permanentCleanupIDs)
+    }
+
+    func performNativeCleanup(_ selection: NativeCleanupSelection,
+                              deletePermanently: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) },
+                              moveToTrash: @escaping (URL) throws -> URL? = { url in
+        var trashedURL: NSURL?
+        try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
+        return trashedURL as URL?
+    }) {
+        guard !scanIsHistorical, selection.version == scanVersion, selection.scanIdentity == filenameSearchIdentity,
+              Set(selection.ids) == staged, selection.permanentIDs == permanentCleanupIDs,
+              selection.acknowledgements == incompleteCleanup else { return }
+        performReviewedCleanup(selection.ids, permanentlyDeleting: selection.permanentIDs,
+                               deletePermanently: deletePermanently, moveToTrash: moveToTrash)
     }
 
     func trashStaged() {
@@ -1481,7 +1511,6 @@ struct FileTypeStats: Sendable {
                         deleted += 1
                         guard scanVersion == version, filenameSearchIdentity == scanIdentity else { throw CancellationError() }
                         lastPermanentlyDeletedCount = deleted
-                        guard cleanupAuthorizationIsCurrent(authorization, remaining: remaining) else { throw CancellationError() }
                     } else {
                         if let trashedURL = try moveToTrash(url) { lastTrashedURLs.append(trashedURL) }
                         moved += 1
@@ -1490,6 +1519,7 @@ struct FileTypeStats: Sendable {
                     if authorization.isReviewed { unstage(id) }
                     remaining.remove(id)
                     quickCleanupCandidateIDs.removeAll { $0 == id }
+                    guard cleanupAuthorizationIsCurrent(authorization, remaining: remaining) else { throw CancellationError() }
                     try Task.checkCancellation()
                 } catch is CancellationError {
                     if moved + deleted > 0 { requestAISessionsRefresh() }

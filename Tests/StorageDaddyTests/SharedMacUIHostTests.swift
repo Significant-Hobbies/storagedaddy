@@ -10,7 +10,10 @@ func sharedMacUIReviewHost() async throws {
     let environment = ProcessInfo.processInfo.environment
     let interactive = environment["STORAGEDADDY_MAC_UI_INTERACTION_EVIDENCE"] == "1"
     let directCleanup = environment["STORAGEDADDY_MAC_UI_DIRECT_CLEANUP"] == "1"
-    try #require(!directCleanup || interactive)
+    let nativeStagedCleanup = environment["STORAGEDADDY_MAC_UI_NATIVE_STAGED_CLEANUP"] == "1"
+    let cleanupExpected = directCleanup || nativeStagedCleanup
+    try #require(!cleanupExpected || interactive)
+    try #require(!(directCleanup && nativeStagedCleanup))
     let ready = try #require(environment["STORAGEDADDY_MAC_UI_READY"])
     let defaults = UserDefaults.standard
     let priorArguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
@@ -40,7 +43,7 @@ func sharedMacUIReviewHost() async throws {
     model.developerGroups = DeveloperInsights.analyze(scan)
     model.developerReport = DeveloperReport.build(scan: scan, groups: model.developerGroups)
     model.quickCleanupCandidateIDs = ids
-    model.staged = directCleanup ? [] : Set(ids)
+    model.staged = directCleanup ? [] : nativeStagedCleanup ? Set(ids.filter { scan.nodes[$0].name == "node_modules" }) : Set(ids)
     model.openStorage(.cleanup)
     let initialIncomplete = model.incompleteCleanup
     let width = Double(environment["STORAGEDADDY_MAC_UI_WIDTH"] ?? "") ?? 1200
@@ -53,7 +56,7 @@ func sharedMacUIReviewHost() async throws {
     host.sizingOptions = []
     let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: height),
                           styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-    window.title = directCleanup ? "StorageDaddy direct cleanup · temporary sample folders" : "StorageDaddy UI review · temporary sample folders"
+    window.title = directCleanup ? "StorageDaddy direct cleanup · temporary sample folders" : nativeStagedCleanup ? "StorageDaddy staged cleanup · temporary sample folders" : "StorageDaddy UI review · temporary sample folders"
     window.isReleasedWhenClosed = false
     window.ignoresMouseEvents = !interactive
     window.contentView = host
@@ -65,17 +68,17 @@ func sharedMacUIReviewHost() async throws {
     #expect(host.bounds.width > 0)
     try JSONSerialization.data(withJSONObject: ["windowNumber": window.windowNumber,
         "contentWidth": Double(host.bounds.width), "contentHeight": Double(host.bounds.height),
-        "temporaryRoot": root.path, "directCleanup": directCleanup, "temporaryFilesOnly": true])
+        "temporaryRoot": root.path, "directCleanup": directCleanup, "nativeStagedCleanup": nativeStagedCleanup, "temporaryFilesOnly": true])
         .write(to: URL(fileURLWithPath: ready))
     holdStorageReviewEventLoop(until: URL(fileURLWithPath: ready + ".done"))
     for folder in folders {
         let exists = FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).appendingPathComponent("sample.bin").path)
-        #expect(exists == !(directCleanup && folder == "website/node_modules"))
+        #expect(exists == !(cleanupExpected && folder == "website/node_modules"))
     }
     for name in ["website/package.json"] + sentinels {
         #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(name).path))
     }
-    if directCleanup {
+    if cleanupExpected {
         #expect(!model.busy)
         #expect(model.staged.isEmpty)
         #expect(model.incompleteCleanup == initialIncomplete)
