@@ -176,6 +176,7 @@ struct ExplorerView: View {
             }
         } navigation: {
             navigationItem(.dashboard, title: "Overview", symbol: "square.grid.2x2")
+            navigationItem(.cleanup, title: "Quick Cleanup", symbol: "sparkles")
             navigationItem(.explore, title: "Storage", symbol: "internaldrive")
             navigationItem(.applications, symbol: "square.stack.3d.up")
             navigationItem(.aiSessions, title: "AI sessions", symbol: "bubble.left.and.bubble.right")
@@ -218,16 +219,17 @@ struct ExplorerView: View {
     }
 
     private func navigationItem(_ item: Workspace, title: String? = nil, symbol: String? = nil) -> some View {
-        let storageSelected = [.explore, .cleanup, .developer].contains(m.workspace)
+        let cleanupSelected = m.workspace == .cleanup || (m.workspace == .explore && m.storageSection == .cleanup)
+        let storageSelected = (m.workspace == .explore && !cleanupSelected) || m.workspace == .developer
         return SMWorkspaceNavigationItem(title ?? item.title, systemImage: symbol ?? item.icon,
-            isSelected: item == .explore ? storageSelected : m.workspace == item,
-            badge: item == .explore && !m.staged.isEmpty ? m.staged.count.formatted() : nil) {
+            isSelected: item == .cleanup ? cleanupSelected : item == .explore ? storageSelected : m.workspace == item,
+            badge: item == .cleanup && !m.staged.isEmpty ? m.staged.count.formatted() : nil) {
                 m.showWelcome = false
                 if item == .explore { m.openStorage(m.storageSection) }
                 else { m.workspace = item }
             }
             .accessibilityIdentifier("workspace-\(item.rawValue)")
-            .accessibilityLabel(item == .explore && !m.staged.isEmpty ? "Storage, \(m.staged.count) \(m.staged.count == 1 ? "item" : "items") waiting for cleanup review" : title ?? item.title)
+            .accessibilityLabel(item == .cleanup && !m.staged.isEmpty ? "Quick Cleanup, \(m.staged.count) \(m.staged.count == 1 ? "item" : "items") waiting for cleanup review" : title ?? item.title)
             .help(item.requiresScan && m.scan == nil ? "Scan a disk or folder to see these results." : title ?? item.title)
     }
 
