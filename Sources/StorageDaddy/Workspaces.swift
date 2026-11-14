@@ -383,7 +383,7 @@ struct CleanupView: View {
                         Button("Scan User Caches", action: m.scanUserCachesForCleanup)
                             .buttonStyle(SMMacButtonStyle(.primary))
                         Button("Choose Folder…", action: m.chooseCleanupFolder)
-                    }.disabled(m.busy)
+                    }.frame(maxWidth: .infinity).disabled(m.busy)
                 }
             }
             else if !m.staged.isEmpty, let scan = m.scan {
