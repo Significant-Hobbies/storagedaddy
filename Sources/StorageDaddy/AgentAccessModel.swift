@@ -260,6 +260,15 @@ private struct AgentPolicy: Codable {
         for id in ownedIDs { explorer?.unstage(id) }
     }
 
+    func allowsPermanentCleanup(of nodeID: Int) -> Bool {
+        guard let requestID = stagedRequests[nodeID] ?? pendingStaging[nodeID] else { return true }
+        guard policyHealthy, let request = reviews.first(where: { $0.id == requestID }), request.permanent,
+              sessions.contains(where: { $0.id == request.sessionID && $0.permissions.contains("request_permanent") }),
+              let scan = explorer?.scan, scan.nodes.indices.contains(nodeID) else { return false }
+        return scan.nodes[nodeID].device == request.device && scan.nodes[nodeID].inode == request.inode
+            && scan.url(for: nodeID).path == request.path
+    }
+
     /// Call immediately before native Cleanup preflight and again before its
     /// execution. Session revocation/role reductions also invalidate staging.
     @discardableResult func validateStagedPermissions() -> Bool {

@@ -456,7 +456,7 @@ struct CleanupView: View {
 
     @ViewBuilder private func methodPicker(permanentIDs: Set<Int>) -> some View {
         let eligible = m.scan.map { scan in
-            m.staged.contains { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory && m.incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) }
+            m.staged.contains { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory && m.incompleteCleanup[$0] == nil && m.agentAccess.allowsPermanentCleanup(of: $0) && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) }
         } ?? false
         if eligible {
             Menu {

@@ -1318,7 +1318,8 @@ struct FileTypeStats: Sendable {
     var permanentCleanupIDs: Set<Int> {
         guard let scan, deleteNodeCachesPermanently else { return [] }
         return Set(staged.filter { scan.nodes.indices.contains($0) && scan.nodes[$0].isDirectory
-            && incompleteCleanup[$0] == nil && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) })
+            && incompleteCleanup[$0] == nil && agentAccess.allowsPermanentCleanup(of: $0)
+            && CleanupGuidance.canDeletePermanently(path: scan.url(for: $0).path) })
     }
 
     struct NativeCleanupSelection {
@@ -1477,7 +1478,7 @@ struct FileTypeStats: Sendable {
                                                allowingRegenerableChanges: regenerable.contains(id), home: home)
                     if permanent.contains(id) {
                         guard scan.nodes[id].isDirectory, acknowledgements[id] == nil,
-                              CleanupGuidance.canDeletePermanently(path: url.path, home: home) else {
+                              agentAccess.allowsPermanentCleanup(of: id), CleanupGuidance.canDeletePermanently(path: url.path, home: home) else {
                             throw NSError(domain: "Cleanup", code: 1, userInfo: [NSLocalizedDescriptionKey: "Permanent deletion is limited to verified Node dependencies and package caches. Item kept."])
                         }
                         // Removing a large dependency tree must not freeze the window.
@@ -1489,6 +1490,9 @@ struct FileTypeStats: Sendable {
                                 try Task.checkCancellation()
                                 guard self.scanVersion == version, self.filenameSearchIdentity == scanIdentity, self.task?.isCancelled != true,
                                       self.cleanupAuthorizationIsCurrent(authorization, remaining: expectedStaged) else { throw CancellationError() }
+                                guard self.agentAccess.allowsPermanentCleanup(of: id) else {
+                                    throw CocoaError(.fileWriteNoPermission)
+                                }
                                 if FolderExclusions(paths: self.excludedFolders).blocksCleanup(url) {
                                     throw CleanupPreflightError.excludedFolder(url.path)
                                 }
