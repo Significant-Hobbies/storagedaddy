@@ -98,6 +98,7 @@ func sharedMacUIReviewHost() async throws {
 }
 
 @MainActor private func pumpStorageReviewEvents() {
+    _ = RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.005))
     while let event = NSApplication.shared.nextEvent(matching: .any, until: .distantPast, inMode: .default, dequeue: true) {
         NSApplication.shared.sendEvent(event)
     }
