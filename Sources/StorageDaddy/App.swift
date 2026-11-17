@@ -843,7 +843,7 @@ struct FileTypeStats: Sendable {
               plan.id == planID, developerCleanupOutcome == nil else { return }
         busy = true
         progress = "Checking what is in use…"
-        task = Task {
+        task = Task { [self] in
             defer { busy = false }
             let reportProgress: @Sendable (Int, Int) -> Void = { [weak self] index, count in
                 Task { @MainActor in

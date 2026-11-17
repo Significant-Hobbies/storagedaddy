@@ -75,8 +75,6 @@ enum CleanupActiveUse {
     private static func users(of roots: Set<String>, in output: String) -> [String: String] {
         var matches: [String: String] = [:]
         let onlyRoot = roots.count == 1 ? roots.first : nil
-        let volumesPrefix = "/System/Volumes/Data"
-        let scope = commonParent(of: roots)
         var pid = "", command = "a running process"
         for record in output.split(separator: "\0") {
             let field = record.drop(while: \.isNewline)
@@ -87,9 +85,7 @@ enum CleanupActiveUse {
             case "c": command = String(value)
             case "n":
                 guard value.hasPrefix("/") else { continue }
-                let path = value.hasPrefix(volumesPrefix + "/") ? value.dropFirst(volumesPrefix.count) : value
-                if !path.hasPrefix(scope), !path.contains("//"), !path.contains("/./"), !path.contains("/../") { continue }
-                let file = CleanupGuidance.normalized(String(path))
+                let file = CleanupGuidance.normalized(String(value))
                 if let onlyRoot {
                     if file == onlyRoot || file.hasPrefix(onlyRoot + "/") { return [onlyRoot: "\(command) (PID \(pid))"] }
                     continue
@@ -106,15 +102,6 @@ enum CleanupActiveUse {
             if matches.count == roots.count { break }
         }
         return matches
-    }
-
-    private static func commonParent(of roots: Set<String>) -> String {
-        guard let first = roots.first else { return "/" }
-        var parent = (first as NSString).deletingLastPathComponent
-        while parent != "/", !roots.allSatisfy({ $0.hasPrefix(parent + "/") }) {
-            parent = (parent as NSString).deletingLastPathComponent
-        }
-        return parent == "/" ? "/" : parent + "/"
     }
 
     private static func error(_ message: String) -> NSError {
