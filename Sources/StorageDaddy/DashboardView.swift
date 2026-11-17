@@ -262,11 +262,7 @@ struct DashboardView: View {
             .font(.callout.weight(.medium))
             Text("Home Trash · separate from the candidates above")
                 .font(.caption2).foregroundStyle(Tints.secondaryText)
-            Button("review trash") {
-                m.showWelcome = false
-                m.showingDeveloperCleanup = false
-                m.workspace = .cleanup
-            }.accessibilityLabel("Review Trash")
+            Button("review trash", action: m.openQuickCleanup).accessibilityLabel("Review Trash")
             Spacer(minLength: 0)
         }
         .padding(22)

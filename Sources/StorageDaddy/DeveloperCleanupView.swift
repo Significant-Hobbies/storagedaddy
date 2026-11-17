@@ -10,7 +10,7 @@ struct DeveloperCleanupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             SMWorkspaceHeader("Developer Cleanup", subtitle: subtitle) {
-                Button("Other Cleanup") { model.showingDeveloperCleanup = false }
+                Button("Other Cleanup", action: model.openQuickCleanup)
                     .disabled(model.busy)
             }
             HStack(spacing: 10) {

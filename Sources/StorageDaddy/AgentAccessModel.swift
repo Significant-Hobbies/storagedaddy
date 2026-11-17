@@ -238,7 +238,7 @@ private struct AgentPolicy: Codable {
         }, didFinish: { [weak self] in
             if self?.pendingStaging[node.id] == request.id { self?.pendingStaging.removeValue(forKey: node.id) }
         })
-        m.workspace = .cleanup
+        m.openQuickCleanup()
         reviews[i].pending = false
         reviews[i].outcome = "Sent to native Cleanup preflight. Nothing removed; verify staging and choose the cleanup action there."
         save()

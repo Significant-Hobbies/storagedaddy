@@ -795,6 +795,12 @@ struct FileTypeStats: Sendable {
         }
     }
 
+    func openQuickCleanup() {
+        showingDeveloperCleanup = false
+        showWelcome = false
+        workspace = .cleanup
+    }
+
     func chooseDeveloperCleanupFolder() {
         guard canStartDeveloperCleanup else { return }
         let panel = NSOpenPanel()

@@ -31,7 +31,10 @@ public struct DeveloperCleanupPlan: Sendable {
         let scan = try await DiskScanner.scan(root: root, excludedFolders: exclusions,
                                               promptAvoidanceFolders: promptAvoidanceFolders, developerArtifactsOnly: true)
         try Task.checkCancellation()
-        if scan.nodes.isEmpty { throw CocoaError(.fileReadNoPermission, userInfo: [NSFilePathErrorKey: root.path]) }
+        if scan.nodes.isEmpty {
+            throw NSError(domain: "DeveloperCleanup", code: 2, userInfo: [NSLocalizedDescriptionKey:
+                scan.incompleteEvidence?.first?.reason ?? "This folder could not be scanned."])
+        }
         let exclusionPolicy = FolderExclusions(paths: exclusions)
         let candidates = scan.nodes.filter { $0.parent != nil && $0.isDirectory && !$0.isSymlink
             && CleanupGuidance.focusedDeveloperNames.contains($0.name) }

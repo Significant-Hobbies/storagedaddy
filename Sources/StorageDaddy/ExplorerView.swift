@@ -232,6 +232,7 @@ struct ExplorerView: View {
             badge: item == .cleanup && !m.staged.isEmpty ? m.staged.count.formatted() : nil) {
                 m.showWelcome = false
                 if item == .explore { m.openStorage(m.storageSection) }
+                else if item == .cleanup { m.openQuickCleanup() }
                 else { m.workspace = item }
             }
             .accessibilityIdentifier("workspace-\(item.rawValue)")

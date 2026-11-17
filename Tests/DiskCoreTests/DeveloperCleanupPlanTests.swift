@@ -16,9 +16,11 @@ struct DeveloperCleanupPlanTests {
             return dependencies
         }
         let idle = try project("idle")
-        let openedLater = try project("opened-later-café")
+        let laterName = "opened-later-café-👨‍👩‍👧"
+        let busyName = "busy-café\tproject"
+        let openedLater = try project(laterName)
         let replaced = try project("replaced")
-        let openedDuringReview = try project("busy-café")
+        let openedDuringReview = try project(busyName)
         let blocked = try project("excluded")
         let unchecked = try project("unchecked")
         let withoutManifest = try project("no-manifest")
@@ -34,11 +36,11 @@ struct DeveloperCleanupPlanTests {
         let full = try await DiskScanner.scan(root: root)
         let plan = try await DeveloperCleanupPlan.prepare(root: root, excluding: [blocked.appendingPathComponent("module.js").path])
         let items = Dictionary(uniqueKeysWithValues: plan.items.map { (URL(fileURLWithPath: $0.path).deletingLastPathComponent().lastPathComponent, $0) })
-        #expect(Set(items.keys) == ["idle", "opened-later-café", "replaced", "busy-café", "excluded", "unchecked", "swift"])
+        #expect(Set(items.keys) == ["idle", laterName, "replaced", busyName, "excluded", "unchecked", "swift"])
         let first = try #require(items["idle"])
         let reference = try #require(full.nodes.first { $0.name == "node_modules" && full.url(for: $0.id).deletingLastPathComponent().lastPathComponent == "idle" })
         #expect(first.allocatedBytes == reference.allocatedBytes)
-        #expect(items["busy-café"]?.keptReason?.contains("In use") == true)
+        #expect(items[busyName]?.keptReason?.contains("In use") == true)
         #expect(items["excluded"]?.keptReason != nil)
         #expect(items["swift"]?.canDeletePermanently == false)
 
@@ -47,7 +49,7 @@ struct DeveloperCleanupPlanTests {
         let held = replaced.deletingLastPathComponent().appendingPathComponent("original")
         try fm.moveItem(at: replaced, to: held)
         try fm.createDirectory(at: replaced, withIntermediateDirectories: true)
-        let later = try #require(items["opened-later-café"])
+        let later = try #require(items[laterName])
         let changed = try #require(items["replaced"])
         let result = await plan.clean(ids: [first.id, later.id, changed.id], permanently: true)
         #expect(result.deleted == [first.id])

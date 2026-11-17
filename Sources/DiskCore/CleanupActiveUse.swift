@@ -76,6 +76,8 @@ enum CleanupActiveUse {
     private static func users(of roots: Set<String>, in output: String) -> [String: String] {
         var matches: [String: String] = [:]
         let onlyRoot = roots.count == 1 ? roots.first : nil
+        let onlyKey = onlyRoot.map(processPathKey)
+        let rootsByKey = Dictionary(grouping: roots, by: processPathKey)
         var pid = "", command = "a running process"
         for record in output.split(separator: "\0") {
             let field = record.drop(while: \.isNewline)
@@ -86,15 +88,16 @@ enum CleanupActiveUse {
             case "c": command = String(value)
             case "n":
                 guard value.hasPrefix("/") else { continue }
-                let file = CleanupGuidance.normalized(String(value))
-                if let onlyRoot {
-                    if file == onlyRoot || file.hasPrefix(onlyRoot + "/") { return [onlyRoot: "\(command) (PID \(pid))"] }
+                let file = processPathKey(CleanupGuidance.normalized(decodePath(value)))
+                if let onlyRoot, let onlyKey {
+                    if file == onlyKey || file.hasPrefix(onlyKey + "/") { return [onlyRoot: "\(command) (PID \(pid))"] }
                     continue
                 }
                 var ancestor = file[...]
                 repeat {
-                    let path = String(ancestor)
-                    if roots.contains(path), matches[path] == nil { matches[path] = "\(command) (PID \(pid))" }
+                    for path in rootsByKey[String(ancestor)] ?? [] where matches[path] == nil {
+                        matches[path] = "\(command) (PID \(pid))"
+                    }
                     guard let slash = ancestor.lastIndex(of: "/"), slash != ancestor.startIndex else { break }
                     ancestor = ancestor[..<slash]
                 } while !ancestor.isEmpty
@@ -103,6 +106,59 @@ enum CleanupActiveUse {
             if matches.count == roots.count { break }
         }
         return matches
+    }
+
+    private static func decodePath(_ path: Substring) -> String {
+        guard path.contains("\\") else { return String(path) }
+        let bytes = Array(path.utf8)
+        var result: [UInt8] = []
+        var index = 0
+        while index < bytes.count {
+            let byte = bytes[index]
+            index += 1
+            guard byte == 92, index < bytes.count else { result.append(byte); continue }
+            switch bytes[index] {
+            case 92: result.append(92)
+            case 98: result.append(8)
+            case 102: result.append(12)
+            case 110: result.append(10)
+            case 114: result.append(13)
+            case 116: result.append(9)
+            case 118: result.append(11)
+            case 120 where index + 2 < bytes.count:
+                if let high = hexDigit(bytes[index + 1]), let low = hexDigit(bytes[index + 2]) {
+                    result.append(high * 16 + low)
+                    index += 3
+                    continue
+                }
+                result.append(byte)
+                continue
+            default: result.append(byte); continue
+            }
+            index += 1
+        }
+        return String(decoding: result, as: UTF8.self)
+    }
+
+    private static func hexDigit(_ byte: UInt8) -> UInt8? {
+        switch byte {
+        case 48...57: byte - 48
+        case 65...70: byte - 55
+        case 97...102: byte - 87
+        default: nil
+        }
+    }
+
+    private static func processPathKey(_ path: String) -> String {
+        // lsof prints some controls as caret pairs and leaves literal carets unchanged.
+        // Treat both spellings as active when they cannot be distinguished.
+        guard path.utf8.contains(where: { $0 < 32 || $0 == 127 }) else { return path }
+        let bytes = path.utf8.flatMap { byte -> [UInt8] in
+            if byte < 32 { return [94, byte + 64] }
+            if byte == 127 { return [94, 63] }
+            return [byte]
+        }
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     private static func error(_ message: String) -> NSError {
