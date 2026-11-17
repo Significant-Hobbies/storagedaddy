@@ -6,6 +6,7 @@ struct DeveloperCleanupView: View {
     @EnvironmentObject private var model: ExplorerModel
     @State private var selected: Set<Int> = []
     @State private var permanently = true
+    @State private var presentedOutcome = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -30,7 +31,9 @@ struct DeveloperCleanupView: View {
                     Text("\(plan.skipped.formatted()) locations skipped. Excluded, protected and unreadable locations stay untouched.")
                         .font(.caption).foregroundStyle(Tints.secondaryText)
                 }
-                if let outcome = model.developerCleanupOutcome { result(outcome) }
+                if let outcome = model.developerCleanupOutcome {
+                    result(outcome).onAppear { presentedOutcome = true }
+                }
                 if plan.items.isEmpty {
                     StorageEmptyView("No supported developer folders found", systemImage: "folder", description:
                         Text("Choose the folder containing your projects to look for Node dependencies, Swift and Rust build outputs, and framework caches."))
@@ -58,7 +61,11 @@ struct DeveloperCleanupView: View {
         .background(AppColors.canvas)
         .buttonStyle(SMMacButtonStyle(.secondary))
         .onChange(of: model.developerCleanupPlan?.id, initial: true) { _, _ in
+            presentedOutcome = false
             selected = Set(model.developerCleanupPlan?.items.filter { $0.keptReason == nil }.map(\.id) ?? [])
+        }
+        .onDisappear {
+            if presentedOutcome { model.finishViewingDeveloperCleanupResult() }
         }
     }
 

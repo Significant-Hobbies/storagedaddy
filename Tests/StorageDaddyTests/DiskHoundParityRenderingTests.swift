@@ -61,6 +61,12 @@ struct DiskHoundParityRenderingTests {
         #expect(!fm.fileExists(atPath: dependencies.path))
         #expect(fm.fileExists(atPath: manifest.path))
         #expect(fm.fileExists(atPath: build.path))
+        model.openQuickCleanup()
+        model.openDeveloperCleanup()
+        #expect(model.developerCleanupOutcome?.deleted == [item.id])
+        #expect(!model.busy)
+        model.finishViewingDeveloperCleanupResult()
+        #expect(model.developerCleanupOutcome == nil)
     }
 
     @Test func cleanupRefreshFollowsTheActiveScan() async throws {

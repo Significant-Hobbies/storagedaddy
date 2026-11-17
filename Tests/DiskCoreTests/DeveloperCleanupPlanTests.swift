@@ -3,6 +3,18 @@ import Testing
 @testable import DiskCore
 
 struct DeveloperCleanupPlanTests {
+    @Test func reportsWhyAnExcludedRootWasSkipped() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("developer-cleanup-excluded-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        do {
+            _ = try await DeveloperCleanupPlan.prepare(root: root, excluding: [root.path])
+            Issue.record("An excluded root should not produce a cleanup review")
+        } catch {
+            #expect(error.localizedDescription == "This folder was excluded by folder settings.")
+        }
+    }
+
     @Test func selectsMeasuredArtifactsAndKeepsBusyOrReplacedFolders() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("developer-cleanup-\(UUID())")
         let fm = FileManager.default

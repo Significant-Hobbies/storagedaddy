@@ -790,7 +790,7 @@ struct FileTypeStats: Sendable {
         workspace = .cleanup
         guard staged.isEmpty else { showingDeveloperCleanup = false; return }
         showingDeveloperCleanup = true
-        if entering, let developerCleanupFolder {
+        if entering, developerCleanupOutcome == nil, let developerCleanupFolder {
             findDeveloperCleanup(in: URL(fileURLWithPath: developerCleanupFolder))
         }
     }
@@ -799,6 +799,12 @@ struct FileTypeStats: Sendable {
         showingDeveloperCleanup = false
         showWelcome = false
         workspace = .cleanup
+    }
+
+    func finishViewingDeveloperCleanupResult() {
+        guard !busy, developerCleanupOutcome != nil else { return }
+        developerCleanupOutcome = nil
+        developerCleanupPlan = nil
     }
 
     func chooseDeveloperCleanupFolder() {

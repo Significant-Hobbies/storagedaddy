@@ -32,8 +32,10 @@ public struct DeveloperCleanupPlan: Sendable {
                                               promptAvoidanceFolders: promptAvoidanceFolders, developerArtifactsOnly: true)
         try Task.checkCancellation()
         if scan.nodes.isEmpty {
+            let message = scan.incompleteEvidence?.first.map { "This folder was \($0.reason)." }
+                ?? "This folder could not be scanned."
             throw NSError(domain: "DeveloperCleanup", code: 2, userInfo: [NSLocalizedDescriptionKey:
-                scan.incompleteEvidence?.first?.reason ?? "This folder could not be scanned."])
+                message])
         }
         let exclusionPolicy = FolderExclusions(paths: exclusions)
         let candidates = scan.nodes.filter { $0.parent != nil && $0.isDirectory && !$0.isSymlink

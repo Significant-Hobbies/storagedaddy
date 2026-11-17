@@ -15,7 +15,7 @@ enum CleanupActiveUse {
             self.capturedAt = capturedAt
         }
 
-        var isFresh: Bool { capturedAt.duration(to: .now) < .seconds(1) }
+        var isFresh: Bool { capturedAt.duration(to: .now) < .seconds(2) }
 
         func user(of path: String) -> String? { users[CleanupGuidance.normalized(path)] }
     }
