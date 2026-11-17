@@ -56,21 +56,22 @@ struct DeveloperCleanupReview: Sendable {
         let identities = canonical.map(FolderIdentity.init)
         for (index, root) in canonical.enumerated() {
             let otherPaths = canonical.indices.filter { $0 != index }
-            let ancestors = FolderExclusions(paths: otherPaths.map { canonical[$0].path }, resolveAliases: false)
+            var conflict = otherPaths.first {
+                FolderExclusions(paths: [canonical[$0].path], resolveAliases: false).contains(root.path)
+            }
             let otherIdentities = Set(otherPaths.compactMap { identities[$0] })
             var ancestor = root
-            var aliasesOtherScope = false
-            while !otherIdentities.isEmpty, !ancestor.path.isEmpty {
+            while conflict == nil, !otherIdentities.isEmpty, !ancestor.path.isEmpty {
                 if let identity = FolderIdentity(ancestor), otherIdentities.contains(identity) {
-                    aliasesOtherScope = true
+                    conflict = otherPaths.first { identities[$0] == identity }
                     break
                 }
                 if ancestor.path == "/" { break }
                 ancestor.deleteLastPathComponent()
             }
-            if ancestors.contains(root.path) || aliasesOtherScope {
+            if let conflict {
                 throw NSError(domain: "DeveloperCleanupReview", code: 1, userInfo: [NSLocalizedDescriptionKey:
-                    "Choose separate folders. One of your selections already contains another."])
+                    "Choose separate folders. \(StorageLabels.location(root.path)) overlaps \(StorageLabels.location(canonical[conflict].path))."])
             }
         }
         var scopes: [Scope] = []

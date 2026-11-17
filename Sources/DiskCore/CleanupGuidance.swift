@@ -7,7 +7,7 @@ public enum CleanupGuidance {
         "npm", "pnpm", "yarn", "pip", "uv", "homebrew", "go-build", "cocoapods", "composer", "ccache", "sccache"
     ]
     private static let focusedDeveloperNames: Set<String> = [
-        "node_modules", ".build", "target", ".next", ".nuxt", "DerivedData", "__pycache__", "build", "dist", "_cacache", "hub"
+        "node_modules", ".build", "target", ".next", ".nuxt", "DerivedData", "__pycache__", "_cacache", "hub"
     ]
 
     static func isFocusedDeveloperName(_ name: String) -> Bool {

@@ -819,7 +819,8 @@ struct FileTypeStats: Sendable {
             var known = Set(developerCleanupFolders)
             let additions = panel.urls.filter { known.insert($0.standardizedFileURL.path).inserted }
             if !additions.isEmpty {
-                findDeveloperCleanup(in: developerCleanupFolders.map { URL(fileURLWithPath: $0) } + additions)
+                findDeveloperCleanup(in: developerCleanupFolders.map { URL(fileURLWithPath: $0) } + additions,
+                                     retainingReviewOnFailure: true)
             }
         }
     }
@@ -837,10 +838,12 @@ struct FileTypeStats: Sendable {
         rescanDeveloperCleanup()
     }
 
-    func findDeveloperCleanup(in roots: [URL]) {
+    func findDeveloperCleanup(in roots: [URL], retainingReviewOnFailure: Bool = false) {
         guard canStartDeveloperCleanup, !roots.isEmpty else { return }
-        developerCleanupPlan = nil
-        developerCleanupOutcome = nil
+        if !retainingReviewOnFailure {
+            developerCleanupPlan = nil
+            developerCleanupOutcome = nil
+        }
         developerCleanupError = nil
         busy = true
         progress = "Finding developer files in \(roots.count) \(roots.count == 1 ? "folder" : "folders")…"
@@ -854,6 +857,7 @@ struct FileTypeStats: Sendable {
             do {
                 let plan = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
                 try Task.checkCancellation()
+                developerCleanupOutcome = nil
                 developerCleanupPlan = plan
                 developerCleanupFolders = plan.scopes.map(\.path)
                 progress = "\(plan.items.count) developer folders found"

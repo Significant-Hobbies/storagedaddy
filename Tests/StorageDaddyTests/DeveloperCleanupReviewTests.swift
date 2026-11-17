@@ -39,7 +39,8 @@ struct DeveloperCleanupReviewTests {
                                                           excludedFolders: [], promptAvoidance: [])
             Issue.record("A folder and its descendant would double-count the scan")
         } catch {
-            #expect(error.localizedDescription.contains("One of your selections already contains another"))
+            #expect(error.localizedDescription.contains("overlaps"))
+            #expect(error.localizedDescription.contains("Worktrees"))
         }
     }
 

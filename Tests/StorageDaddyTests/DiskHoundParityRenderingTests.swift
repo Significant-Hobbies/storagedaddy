@@ -17,10 +17,11 @@ struct DiskHoundParityRenderingTests {
 
         let projects = root.appendingPathComponent("Projects")
         let worktrees = root.appendingPathComponent("Linked Worktrees")
-        let web = projects.appendingPathComponent("Website")
+        let web = projects.appendingPathComponent("build/Website")
         let dependencies = web.appendingPathComponent("node_modules")
         let manifest = web.appendingPathComponent("package.json")
         try fm.createDirectory(at: dependencies, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: projects.appendingPathComponent("package.json"))
         try Data("{}".utf8).write(to: manifest)
         try Data(repeating: 1, count: 2_097_152).write(to: dependencies.appendingPathComponent("module.js"))
         let native = worktrees.appendingPathComponent("NativeLibrary")
@@ -46,6 +47,11 @@ struct DiskHoundParityRenderingTests {
         #expect(model.scan == nil)
         #expect(plan.items.count == 2)
         #expect(Set(plan.items.map(\.id.scope)).count == 2)
+        model.findDeveloperCleanup(in: [projects, worktrees, web], retainingReviewOnFailure: true)
+        let overlapDeadline = Date().addingTimeInterval(10)
+        while model.busy && Date() < overlapDeadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(model.developerCleanupPlan?.id == plan.id)
+        #expect(model.developerCleanupError?.contains("overlaps") == true)
         let assets = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Assets")
         for width in [880, 1100, 1440] {

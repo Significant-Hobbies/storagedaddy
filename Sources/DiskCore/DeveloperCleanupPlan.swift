@@ -71,7 +71,6 @@ public struct DeveloperCleanupPlan: Sendable {
                 } else if CleanupGuidance.isSuggestedCache(category: .modelCaches, path: url.path, home: home) {
                     reason = "Review these downloaded models in Developer Insights before removing them."
                 } else if node.isScanIncomplete == true { reason = "Some contents could not be checked. This folder is kept." }
-                else if ["build", "dist"].contains(node.name) { reason = "Review this project output in Storage before removing it." }
                 else if repositories.contains(node.id), node.name == "node_modules" {
                     reason = "Contains a Git checkout. This folder is kept."
                 } else if !FileManager.default.isDeletableFile(atPath: url.path) {
