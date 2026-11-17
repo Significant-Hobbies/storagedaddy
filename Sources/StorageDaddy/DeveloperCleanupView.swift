@@ -47,7 +47,6 @@ struct DeveloperCleanupView: View {
                     if model.developerCleanupOutcome == nil { confirmation(plan) }
                 }
             } else if model.busy {
-                ProgressView("Looking for developer folders…").controlSize(.small)
                 Spacer(minLength: 0)
             } else {
                 StorageEmptyView("Start with your projects folder", systemImage: "folder.badge.gearshape",
