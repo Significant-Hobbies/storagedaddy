@@ -29,7 +29,7 @@ public struct DeveloperCleanupPlan: Sendable {
                                promptAvoidanceFolders: [String] = [],
                                home: String = FileManager.default.homeDirectoryForCurrentUser.path) async throws -> Self {
         let scan = try await DiskScanner.scan(root: root, excludedFolders: exclusions,
-                                              promptAvoidanceFolders: promptAvoidanceFolders, developerArtifactsOnly: true)
+                                              promptAvoidanceFolders: promptAvoidanceFolders, developerArtifactHome: home)
         try Task.checkCancellation()
         if scan.nodes.isEmpty {
             let message = scan.incompleteEvidence?.first.map { "This folder was \($0.reason)." }
@@ -39,7 +39,7 @@ public struct DeveloperCleanupPlan: Sendable {
         }
         let exclusionPolicy = FolderExclusions(paths: exclusions)
         let candidates = scan.nodes.filter { $0.parent != nil && $0.isDirectory && !$0.isSymlink
-            && CleanupGuidance.focusedDeveloperNames.contains($0.name) }
+            && CleanupGuidance.isFocusedDeveloperName($0.name) }
         let eligible = Dictionary(uniqueKeysWithValues: candidates.compactMap { node -> (Int, URL)? in
             let url = scan.url(for: node.id)
             return CleanupGuidance.isRegenerableFolder(path: url.path, home: home) ? (node.id, url) : nil
@@ -63,7 +63,15 @@ public struct DeveloperCleanupPlan: Sendable {
                 if exclusionPolicy.blocksCleanup(url) { throw CleanupPreflightError.excludedFolder(url.path) }
                 try CleanupSafety.validate(url: url, expected: node, root: URL(fileURLWithPath: scan.rootPath),
                                            allowingRegenerableChanges: true, home: home)
-                if node.isScanIncomplete == true { reason = "Some contents could not be checked. This folder is kept." }
+                if let cleaner = CleanupGuidance.requiredNativeCleaner(path: url.path, home: home) {
+                    reason = "Use \(cleaner) in Developer Insights. The cache manager owns its lock."
+                } else if CleanupGuidance.isSuggestedCache(category: .packageCaches, path: url.path, home: home)
+                            || node.name == "_cacache" {
+                    reason = "Use the package manager’s cache cleaner to remove this cache."
+                } else if CleanupGuidance.isSuggestedCache(category: .modelCaches, path: url.path, home: home) {
+                    reason = "Review these downloaded models in Developer Insights before removing them."
+                } else if node.isScanIncomplete == true { reason = "Some contents could not be checked. This folder is kept." }
+                else if ["build", "dist"].contains(node.name) { reason = "Review this project output in Storage before removing it." }
                 else if repositories.contains(node.id), node.name == "node_modules" {
                     reason = "Contains a Git checkout. This folder is kept."
                 } else if !FileManager.default.isDeletableFile(atPath: url.path) {

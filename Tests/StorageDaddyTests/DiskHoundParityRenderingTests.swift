@@ -12,16 +12,18 @@ struct DiskHoundParityRenderingTests {
         let root = fm.temporaryDirectory.appendingPathComponent("Developer Cleanup Demo \(UUID())")
         defer { try? fm.removeItem(at: root) }
         let defaults = UserDefaults.standard
-        let previous = defaults.object(forKey: "developerCleanupFolder")
-        defer { defaults.set(previous, forKey: "developerCleanupFolder") }
+        let previous = defaults.object(forKey: "developerCleanupFolders")
+        defer { defaults.set(previous, forKey: "developerCleanupFolders") }
 
-        let web = root.appendingPathComponent("Website")
+        let projects = root.appendingPathComponent("Projects")
+        let worktrees = root.appendingPathComponent("Linked Worktrees")
+        let web = projects.appendingPathComponent("Website")
         let dependencies = web.appendingPathComponent("node_modules")
         let manifest = web.appendingPathComponent("package.json")
         try fm.createDirectory(at: dependencies, withIntermediateDirectories: true)
         try Data("{}".utf8).write(to: manifest)
         try Data(repeating: 1, count: 2_097_152).write(to: dependencies.appendingPathComponent("module.js"))
-        let native = root.appendingPathComponent("NativeLibrary")
+        let native = worktrees.appendingPathComponent("NativeLibrary")
         let build = native.appendingPathComponent(".build")
         try fm.createDirectory(at: build, withIntermediateDirectories: true)
         try Data().write(to: native.appendingPathComponent("Package.swift"))
@@ -37,12 +39,13 @@ struct DiskHoundParityRenderingTests {
         model.staged = []
         #expect(!model.showsDeveloperCleanupReview)
         model.showingDeveloperCleanup = true
-        model.findDeveloperCleanup(in: root)
+        model.findDeveloperCleanup(in: [projects, worktrees])
         let deadline = Date().addingTimeInterval(10)
         while model.busy && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
         let plan = try #require(model.developerCleanupPlan)
         #expect(model.scan == nil)
         #expect(plan.items.count == 2)
+        #expect(Set(plan.items.map(\.id.scope)).count == 2)
         let assets = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Assets")
         for width in [880, 1100, 1440] {

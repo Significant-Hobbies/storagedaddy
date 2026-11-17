@@ -3,6 +3,24 @@ import Testing
 @testable import DiskCore
 
 struct DeveloperCleanupPlanTests {
+    @Test func findsKnownCacheLocationsAndHoldsLockManagedCaches() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("developer-cache-home-\(UUID())")
+        let caches = home.appendingPathComponent(".cache")
+        let fm = FileManager.default
+        defer { try? fm.removeItem(at: home) }
+        for name in ["uv", "go-build", "unknown"] {
+            let folder = caches.appendingPathComponent(name)
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data(repeating: 1, count: 4096).write(to: folder.appendingPathComponent("fixture"))
+        }
+        let plan = try await DeveloperCleanupPlan.prepare(root: caches, home: home.path)
+        let names = Dictionary(uniqueKeysWithValues: plan.items.map { (URL(fileURLWithPath: $0.path).lastPathComponent, $0) })
+        #expect(Set(names.keys) == ["uv", "go-build"])
+        #expect(names["uv"]?.keptReason?.contains("uv cache clean") == true)
+        #expect(names["go-build"]?.keptReason?.contains("cache cleaner") == true)
+        #expect(names["go-build"]?.allocatedBytes == 4096)
+    }
+
     @Test func reportsWhyAnExcludedRootWasSkipped() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("developer-cleanup-excluded-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

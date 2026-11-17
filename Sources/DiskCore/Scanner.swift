@@ -13,12 +13,12 @@ public enum DiskScanner {
         progress: (@Sendable (ScanProgress) -> Void)? = nil
     ) async throws -> ScanResult {
         try await scan(root: root, backend: backend, parallelism: parallelism, excludedFolders: excludedFolders,
-                       promptAvoidanceFolders: promptAvoidanceFolders, developerArtifactsOnly: false, progress: progress)
+                       promptAvoidanceFolders: promptAvoidanceFolders, developerArtifactHome: nil, progress: progress)
     }
 
     static func scan(
         root: URL, backend: ScanBackend = .parallel, parallelism: Int = 0, excludedFolders: [String],
-        promptAvoidanceFolders: [String] = [], developerArtifactsOnly: Bool,
+        promptAvoidanceFolders: [String] = [], developerArtifactHome: String?,
         progress: (@Sendable (ScanProgress) -> Void)? = nil
     ) async throws -> ScanResult {
         // Resolve ancestor aliases (for example /var -> /private/var), preserving
@@ -29,7 +29,7 @@ public enum DiskScanner {
             var scanner = Scanner(root: canonical, backend: backend, parallelism: parallelism,
                                   exclusions: FolderExclusions(paths: excludedFolders),
                                   promptAvoidance: FolderExclusions(paths: promptAvoidanceFolders, resolveAliases: false),
-                                  developerArtifactsOnly: developerArtifactsOnly, cancellation: cancellation, progress: progress)
+                                  developerArtifactHome: developerArtifactHome, cancellation: cancellation, progress: progress)
             return try scanner.run()
         }
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { cancellation.cancel(); worker.cancel() }
@@ -54,7 +54,7 @@ private struct Scanner {
     private let exclusions: FolderExclusions
     private let promptAvoidance: FolderExclusions
     private let parallelism: Int
-    private let developerArtifactsOnly: Bool
+    private let developerArtifactHome: String?
     private let cancellation: ScanCancellation
     private var sharedAllocations: [(id: Int, bytes: Int64, identity: AllocationIdentity)] = []
     private var fileAllocationDetails: [FileAllocationDetail] = []
@@ -79,7 +79,7 @@ private struct Scanner {
     private var livePendingBytes: Int64 = 0
 
     init(root: URL, backend: ScanBackend, parallelism: Int, exclusions: FolderExclusions,
-         promptAvoidance: FolderExclusions, developerArtifactsOnly: Bool,
+         promptAvoidance: FolderExclusions, developerArtifactHome: String?,
          cancellation: ScanCancellation, progress: (@Sendable (ScanProgress) -> Void)?) {
         self.exclusions = exclusions
         self.promptAvoidance = promptAvoidance
@@ -87,7 +87,7 @@ private struct Scanner {
         self.rootPath = root.path
         self.backend = backend
         self.parallelism = max(0, min(64, parallelism))
-        self.developerArtifactsOnly = developerArtifactsOnly
+        self.developerArtifactHome = developerArtifactHome
         self.cancellation = cancellation
         self.progress = progress
         self.diskReadStart = ProcessMemory.diskReadBytes()
@@ -193,13 +193,13 @@ private struct Scanner {
             for (entryIndex, entry) in entries.enumerated() {
                 if entryIndex & 255 == 0 { try cancellation.check() }
                 var insideArtifact = directory.insideDeveloperArtifact
-                if developerArtifactsOnly, !insideArtifact {
+                if let home = developerArtifactHome, !insideArtifact {
                     guard entry.isDirectory, !entry.isSymlink else { continue }
-                    let isArtifact = CleanupGuidance.focusedDeveloperNames.contains(entry.name)
-                    if isArtifact {
-                        insideArtifact = CleanupGuidance.isRegenerableFolder(path: childPath(directory.path, entry.name))
-                        guard insideArtifact else { continue }
-                    } else {
+                    if CleanupGuidance.isFocusedDeveloperName(entry.name) {
+                        insideArtifact = CleanupGuidance.isRegenerableFolder(path: childPath(directory.path, entry.name), home: home)
+                    }
+                    if !insideArtifact {
+                        guard entry.name != "node_modules" else { continue }
                         guard entry.name == ".worktrees" || !entry.name.hasPrefix(".") else { continue }
                         guard !entry.name.hasSuffix(".app"), !entry.name.hasSuffix(".framework"), !entry.name.hasSuffix(".xpc") else { continue }
                     }

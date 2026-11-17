@@ -3,7 +3,16 @@ import Foundation
 
 /// Recoverability guidance, never proof that a folder is unused or safe to delete.
 public enum CleanupGuidance {
-    static let focusedDeveloperNames: Set<String> = ["node_modules", ".build", "target", ".next", ".nuxt", "DerivedData", "__pycache__"]
+    private static let packageCacheNames: Set<String> = [
+        "npm", "pnpm", "yarn", "pip", "uv", "homebrew", "go-build", "cocoapods", "composer", "ccache", "sccache"
+    ]
+    private static let focusedDeveloperNames: Set<String> = [
+        "node_modules", ".build", "target", ".next", ".nuxt", "DerivedData", "__pycache__", "build", "dist", "_cacache", "hub"
+    ]
+
+    static func isFocusedDeveloperName(_ name: String) -> Bool {
+        focusedDeveloperNames.contains(name) || packageCacheNames.contains(name.lowercased())
+    }
 
     /// uv owns cache locking and shared installed environments. Its supported
     /// cleaner keeps the cache root and lock; direct Trash/delete is unsafe.
@@ -68,7 +77,7 @@ public enum CleanupGuidance {
         let aliases = roots.map { "/System/Volumes/Data" + $0 }
         let tool = url.lastPathComponent.lowercased()
         return (roots + aliases).contains(parent)
-            && ["npm", "pnpm", "yarn", "pip", "uv", "homebrew", "go-build", "cocoapods", "composer", "ccache", "sccache"].contains(tool)
+            && packageCacheNames.contains(tool)
     }
 
     /// Installed runtimes are not project dependencies or disposable build outputs.

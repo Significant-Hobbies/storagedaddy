@@ -4,7 +4,7 @@ import SwiftUI
 
 struct DeveloperCleanupView: View {
     @EnvironmentObject private var model: ExplorerModel
-    @State private var selected: Set<Int> = []
+    @State private var selected: Set<DeveloperCleanupReview.Item.ID> = []
     @State private var permanently = true
     @State private var presentedOutcome = false
 
@@ -15,14 +15,33 @@ struct DeveloperCleanupView: View {
                     .disabled(model.busy)
             }
             HStack(spacing: 10) {
-                if let folder = model.developerCleanupFolder {
-                    Button("Scan Again") { model.findDeveloperCleanup(in: URL(fileURLWithPath: folder)) }
+                if !model.developerCleanupFolders.isEmpty {
+                    Button("Scan Again", action: model.rescanDeveloperCleanup)
                 }
-                Button(model.developerCleanupFolder == nil ? "Choose Projects Folder…" : "Change Folder…",
+                Button(model.developerCleanupFolders.isEmpty ? "Choose Folders…" : "Add Folders…",
                        action: model.chooseDeveloperCleanupFolder)
-                    .buttonStyle(SMMacButtonStyle(model.developerCleanupFolder == nil ? .primary : .secondary))
+                    .buttonStyle(SMMacButtonStyle(model.developerCleanupFolders.isEmpty ? .primary : .secondary))
             }.disabled(!model.canStartDeveloperCleanup)
 
+            if !model.developerCleanupFolders.isEmpty {
+                let unavailable = model.developerCleanupPlan?.scopes.filter { $0.error != nil }.count ?? 0
+                DisclosureGroup(unavailable == 0 ? "Scan locations" : "Scan locations · \(unavailable) unavailable") {
+                    ForEach(model.developerCleanupFolders, id: \.self) { path in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(StorageLabels.location(path)).lineLimit(1).truncationMode(.middle).help(path)
+                                if let reason = model.developerCleanupPlan?.scopes.first(where: { $0.path == path })?.error {
+                                    Text(reason).font(.caption).foregroundStyle(Tints.yellow)
+                                }
+                            }
+                            Spacer(minLength: 8)
+                            Button("Remove") { model.removeDeveloperCleanupFolder(path) }
+                                .accessibilityLabel("Remove \(path) from scan locations")
+                                .disabled(!model.canStartDeveloperCleanup)
+                        }.padding(.top, 5)
+                    }
+                }
+            }
             if let error = model.developerCleanupError {
                 Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Tints.yellow)
             }
@@ -31,12 +50,19 @@ struct DeveloperCleanupView: View {
                     Text("\(plan.skipped.formatted()) locations skipped. Excluded, protected and unreadable locations stay untouched.")
                         .font(.caption).foregroundStyle(Tints.secondaryText)
                 }
+                if !plan.items.isEmpty, model.developerCleanupOutcome == nil {
+                    let ready = plan.items.filter { $0.keptReason == nil }
+                    let kept = plan.items.filter { $0.keptReason != nil }
+                    Text("\(ready.count.formatted()) ready · \(bytes(ready))  |  \(kept.count.formatted()) kept · \(bytes(kept))")
+                        .font(.callout.weight(.semibold))
+                        .help("These are measured folder allocations. Shared blocks and items sent to Trash can reduce the space actually reclaimed.")
+                }
                 if let outcome = model.developerCleanupOutcome {
                     result(outcome).onAppear { presentedOutcome = true }
                 }
                 if plan.items.isEmpty {
                     StorageEmptyView("No supported developer folders found", systemImage: "folder", description:
-                        Text("Choose the folder containing your projects to look for Node dependencies, Swift and Rust build outputs, and framework caches."))
+                        Text("Add the locations that hold your projects, linked worktrees, or developer caches."))
                 } else {
                     if model.developerCleanupOutcome == nil { selectionControls(plan) }
                     ScrollView {
@@ -52,8 +78,8 @@ struct DeveloperCleanupView: View {
             } else if model.busy {
                 Spacer(minLength: 0)
             } else {
-                StorageEmptyView("Start with your projects folder", systemImage: "folder.badge.gearshape",
-                    description: Text("Scan for rebuildable dependencies and build outputs, then confirm the folders you want to remove."))
+                StorageEmptyView("Choose where to look", systemImage: "folder.badge.gearshape",
+                    description: Text("Add project and worktree locations, including any worktrees stored outside your projects folder."))
             }
         }
         .padding(28)
@@ -70,13 +96,14 @@ struct DeveloperCleanupView: View {
     }
 
     private var subtitle: String {
-        if let root = model.developerCleanupPlan?.rootPath ?? model.developerCleanupFolder {
+        if let root = model.developerCleanupFolders.first, model.developerCleanupFolders.count == 1 {
             return StorageLabels.location(root)
         }
-        return "Find dependencies and build outputs inside a projects folder."
+        return model.developerCleanupFolders.isEmpty ? "Find rebuildable developer files." :
+            "Review developer files across \(model.developerCleanupFolders.count) folders."
     }
 
-    private func selectionControls(_ plan: DeveloperCleanupPlan) -> some View {
+    private func selectionControls(_ plan: DeveloperCleanupReview) -> some View {
         HStack(spacing: 12) {
             Button("Select All") { selected = Set(plan.items.filter { $0.keptReason == nil }.map(\.id)) }
             Button("Clear") { selected.removeAll() }
@@ -85,7 +112,7 @@ struct DeveloperCleanupView: View {
         }.disabled(model.busy)
     }
 
-    private func row(_ item: DeveloperCleanupPlan.Item) -> some View {
+    private func row(_ item: DeveloperCleanupReview.Item) -> some View {
         let outcome = model.developerCleanupOutcome
         let reason = outcome?.kept[item.id] ?? item.keptReason
         let name = URL(fileURLWithPath: item.path).lastPathComponent
@@ -120,15 +147,19 @@ struct DeveloperCleanupView: View {
         }.padding(.vertical, 10).padding(.horizontal, 16)
     }
 
-    private func confirmation(_ plan: DeveloperCleanupPlan) -> some View {
+    private func bytes(_ items: [DeveloperCleanupReview.Item]) -> String {
+        DiskFormat.bytes(items.reduce(0) { $0 + $1.allocatedBytes })
+    }
+
+    private func confirmation(_ plan: DeveloperCleanupReview) -> some View {
         let items = plan.items.filter { selected.contains($0.id) }
         let permanentCount = permanently ? items.filter(\.canDeletePermanently).count : 0
         let count = items.count
-        let allocation = DiskFormat.bytes(items.reduce(0) { $0 + $1.allocatedBytes })
+        let allocation = bytes(items)
         let countLabel = count == 1 ? "1 Folder" : "\(count) Folders"
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(count) selected · \(allocation) allocated").font(.callout.weight(.semibold))
+                Text("\(count) selected · \(allocation) on disk").font(.callout.weight(.semibold))
                 if permanentCount > 0 {
                     Text("\(permanentCount) permanent · \(count - permanentCount) to Trash. Permanent deletion cannot be undone.")
                 } else {
@@ -143,7 +174,7 @@ struct DeveloperCleanupView: View {
         }
     }
 
-    private func result(_ outcome: DeveloperCleanupPlan.Outcome) -> some View {
+    private func result(_ outcome: DeveloperCleanupReview.Outcome) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(outcome.cancelled ? "Cleanup stopped" : "Cleanup complete").font(.headline)
             Text("\(outcome.deleted.count) deleted · \(outcome.trashed.count) moved to Trash · \(outcome.kept.count) could not be removed")
