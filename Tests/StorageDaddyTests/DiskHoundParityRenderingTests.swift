@@ -6,6 +6,41 @@ import DiskCore
 
 @MainActor @Suite(.serialized)
 struct DiskHoundParityRenderingTests {
+    @Test func cleanupRefreshFollowsTheActiveScan() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sd-refresh-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let scan = try await DiskScanner.scan(root: root)
+
+        let defaults = UserDefaults.standard
+        let priorArguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        var arguments = priorArguments
+        arguments["cleanupRefreshPaths"] = [root.appendingPathComponent("removed-test-folder").path, scan.rootPath]
+        defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        defer { defaults.setVolatileDomain(priorArguments, forName: UserDefaults.argumentDomain) }
+
+        let model = ExplorerModel()
+        model.workspace = .cleanup
+        #expect(model.cleanupRefreshPath == nil)
+        model.scan = scan
+        #expect(model.cleanupRefreshPath == scan.rootPath)
+        model.scanIsHistorical = true
+        #expect(model.cleanupRefreshPath == nil)
+        model.scanIsHistorical = false
+        model.workspace = .dashboard
+        #expect(model.cleanupRefreshPath == nil)
+
+        if ProcessInfo.processInfo.environment["STORAGEDADDY_OVERVIEW_EVIDENCE"] == "1" {
+            model.dashboard.report = SystemInventory.collect()
+            for width in [880, 1100, 1440] {
+                model.workspace = .dashboard
+                try capture(AnyView(ExplorerView(runsLaunchActions: false).environmentObject(model)), name: "cleanup-overview-\(width)", width: width)
+                model.workspace = .cleanup
+                try capture(AnyView(ExplorerView(runsLaunchActions: false).environmentObject(model)), name: "cleanup-refresh-\(width)", width: width)
+            }
+        }
+    }
+
     @Test func nativeParityViewsRenderAtSupportedWindowWidths() async throws {
         let model = ExplorerModel()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("sd-render-\(UUID())")

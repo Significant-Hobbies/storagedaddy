@@ -312,8 +312,19 @@ struct FileTypeStats: Sendable {
     @Published var cleanupRefreshPaths: [String] = UserDefaults.standard.stringArray(forKey: "cleanupRefreshPaths") ?? [] {
         didSet { UserDefaults.standard.set(cleanupRefreshPaths, forKey: "cleanupRefreshPaths") }
     }
+    var cleanupRefreshPath: String? {
+        guard workspace == .explore || workspace == .cleanup, !scanIsHistorical,
+              let path = scan?.rootPath, cleanupRefreshPaths.contains(path) else { return nil }
+        return path
+    }
+
+    func dismissCleanupRefresh() {
+        guard let path = cleanupRefreshPath else { return }
+        cleanupRefreshPaths.removeAll { $0 == path }
+    }
+
     func rescanAfterCleanup() {
-        guard !busy, !moves.busy, staged.isEmpty, let path = cleanupRefreshPaths.first else { return }
+        guard !busy, !moves.busy, staged.isEmpty, let path = cleanupRefreshPath else { return }
         guard FileManager.default.isReadableFile(atPath: path) else {
             message = "The previous scan location is unavailable. Reconnect the disk or use Scan Folder to grant access again."
             return

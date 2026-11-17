@@ -317,7 +317,7 @@ struct CleanupView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 24) {
                 SMWorkspaceHeader("Quick Cleanup",
-                    subtitle: m.scan == nil ? "Scan a folder to find cleanup candidates." : stagedIDs.isEmpty ? "Choose the folders your workspace can let go." : "Choose what to keep, then clean up your selection.") {
+                    subtitle: stagedIDs.isEmpty ? "Scan for rebuildable items or add specific files and folders from Storage." : "Review your selection and check how each item will be removed.") {
                     if m.showCleanup { Button("Done") { m.showCleanup = false } }
                 }
                 if stagedIDs.isEmpty { DoodleArt(topic: .cleanup).frame(width: 68, height: 68) }
@@ -378,7 +378,7 @@ struct CleanupView: View {
                 Spacer()
             } else if m.staged.isEmpty && m.lastPermanentlyDeletedCount == 0 {
                 if easyIDs.isEmpty {
-                    StorageEmptyView(m.scan == nil ? "Scan to find rebuildable items" : "No rebuildable items found in this scan", systemImage: "tray", description: Text("Scan a folder, or add an item from Storage for individual review."))
+                    StorageEmptyView(m.scan == nil ? "Scan to find rebuildable items" : "No rebuildable items found in this scan", systemImage: "tray", description: Text("To review a specific item, open it in Storage and click Add to Cleanup."))
                     HStack(spacing: 12) {
                         Button("Scan User Caches", action: m.scanUserCachesForCleanup)
                             .buttonStyle(SMMacButtonStyle(.primary))

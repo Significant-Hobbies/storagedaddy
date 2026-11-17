@@ -141,10 +141,14 @@ struct DashboardView: View {
             HStack(spacing: 16) {
                 DoodleArt(topic: .overview).frame(width: 72, height: 72)
                 VStack(alignment: .trailing, spacing: 8) {
-                    Button("Refresh", action: dashboard.refresh).disabled(dashboard.loading || m.busy)
-                    if let report = dashboard.report {
-                        Text("Checked \(report.collectedAt.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption).foregroundStyle(Tints.secondaryText)
+                    Button("Open Quick Cleanup") { m.workspace = .cleanup }
+                        .buttonStyle(SMMacButtonStyle(.primary))
+                    HStack(spacing: 10) {
+                        Button("Refresh", action: dashboard.refresh).disabled(dashboard.loading || m.busy)
+                        if let report = dashboard.report {
+                            Text("Checked \(report.collectedAt.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption).foregroundStyle(Tints.secondaryText)
+                        }
                     }
                 }
             }
@@ -230,10 +234,10 @@ struct DashboardView: View {
                         .tracking(-1.5).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
                     Text("\(m.easyCleanupIDs.count) usually regenerable \(m.easyCleanupIDs.count == 1 ? "item" : "items") in this scan")
                         .font(.callout.weight(.medium))
-                    Text("Candidates only. Each item is checked before staging and nothing moves until you confirm.")
+                    Text(m.easyCleanupIDs.isEmpty
+                         ? "Open Quick Cleanup to scan another folder, or use Storage to pick an item yourself."
+                         : "Open Quick Cleanup to review these items and choose what to remove.")
                         .font(.caption).foregroundStyle(Tints.secondaryText)
-                    Button("review candidates") { m.openStorage(.cleanup) }.accessibilityLabel("Review candidates")
-                        .disabled(m.busy || m.easyCleanupIDs.isEmpty)
                     if !m.staged.isEmpty {
                         Text("\(m.staged.count) already staged for review")
                             .font(.caption).foregroundStyle(Tints.yellow)
@@ -245,9 +249,9 @@ struct DashboardView: View {
             } else {
                 Text("Scan to find candidates")
                     .font(.title3.weight(.semibold))
-                Text("Build outputs, dependency folders and package caches can be suggested after a scan.")
+                Text("Scan user caches for suggestions, or choose a different folder in Quick Cleanup.")
                     .font(.caption).foregroundStyle(Tints.secondaryText)
-                Button("scan user caches", action: m.scanUserCaches).accessibilityLabel("Scan user caches").disabled(m.busy)
+                Button("Scan User Caches", action: m.scanUserCachesForCleanup).disabled(m.busy)
             }
             Divider().overlay(Tints.yellow.opacity(0.22))
             HStack {
@@ -375,7 +379,7 @@ struct DashboardView: View {
         DisclosureGroup(isExpanded: $showingSystemDetails) {
             VStack(alignment: .leading, spacing: 22) {
                 otherContainersSection(report)
-                volumesSection(report.volumes)
+                volumesSection(report)
                 healthSection
                 pressureSection(report.pressure)
             }
@@ -420,10 +424,16 @@ struct DashboardView: View {
 
     // MARK: - Volumes
 
-    private func volumesSection(_ volumes: [MountedVolumeInfo]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func volumesSection(_ report: SystemStorageReport) -> some View {
+        let startup = report.volumes.first(where: \.isStartupData) ?? report.volumes.first { $0.mountPoint == "/" }
+        let measuredPools = Set(report.containers.compactMap { pool in
+            pool.volumeNames.count > 1 && (pool.totalCapacity ?? 0) > 0 && pool.freeCapacity != nil ? pool.name : nil
+        })
+        return VStack(alignment: .leading, spacing: 8) {
             Text("mounted volumes").accessibilityLabel("MOUNTED VOLUMES").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Tints.secondaryText)
-            ForEach(volumes, id: \.mountPoint) { volume in
+            Text("Read-only inventory. APFS volumes in the same pool share free space.")
+                .font(.caption).foregroundStyle(Tints.secondaryText)
+            ForEach(report.volumes, id: \.mountPoint) { volume in
                 HStack(spacing: 12) {
                     Image(systemName: volumeIcon(volume))
                         .foregroundStyle(volume.isSystem ? Tints.secondaryText : Tints.electricBlue)
@@ -446,7 +456,11 @@ struct DashboardView: View {
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        if let total = volume.totalCapacity, let free = volume.availableCapacity {
+                        if let pool = volume.apfsContainer, volume.mountPoint != startup?.mountPoint,
+                           measuredPools.contains(pool) {
+                            Text(pool == startup?.apfsContainer ? "Shares startup space" : "Shares pool \(pool)")
+                                .font(.caption).foregroundStyle(Tints.secondaryText)
+                        } else if let total = volume.totalCapacity, total > 0, let free = volume.availableCapacity {
                             Text("\(DiskFormat.bytes(free)) free of \(DiskFormat.bytes(total))")
                                 .font(.callout).monospacedDigit()
                             if let purgeable = volume.purgeableCapacity, purgeable > 0 {
