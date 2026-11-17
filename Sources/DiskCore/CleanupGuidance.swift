@@ -3,6 +3,8 @@ import Foundation
 
 /// Recoverability guidance, never proof that a folder is unused or safe to delete.
 public enum CleanupGuidance {
+    static let focusedDeveloperNames: Set<String> = ["node_modules", ".build", "target", ".next", ".nuxt", "DerivedData", "__pycache__"]
+
     /// uv owns cache locking and shared installed environments. Its supported
     /// cleaner keeps the cache root and lock; direct Trash/delete is unsafe.
     public static func requiredNativeCleaner(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String? {

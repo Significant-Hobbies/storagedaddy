@@ -4,11 +4,40 @@ import Foundation
 /// Positive evidence of current use, including working directories and mapped
 /// files. Absence of an open handle is not proof that a folder is never needed.
 enum CleanupActiveUse {
-    static func validate(urls: [URL], home: String = FileManager.default.homeDirectoryForCurrentUser.path) throws {
-        let text = try probe(executable: "/usr/sbin/lsof",
+    struct OpenFiles: Sendable {
+        fileprivate let coveredRoots: Set<String>
+        fileprivate let users: [String: String]
+        private let capturedAt: ContinuousClock.Instant
+
+        fileprivate init(paths: [String], output: String, capturedAt: ContinuousClock.Instant) {
+            coveredRoots = Set(paths.map(CleanupGuidance.normalized))
+            users = CleanupActiveUse.users(of: coveredRoots, in: output)
+            self.capturedAt = capturedAt
+        }
+
+        var isFresh: Bool { capturedAt.duration(to: .now) < .seconds(1) }
+
+        func user(of path: String) -> String? { users[CleanupGuidance.normalized(path)] }
+    }
+
+    static func captureOpenFiles(for paths: [String]) throws -> OpenFiles {
+        let started = ContinuousClock.now
+        let output = try probe(executable: "/usr/sbin/lsof",
             arguments: ["-w", "-n", "-P", "-F0pcn", "-u", String(getuid())], maximumOutputBytes: 32 * 1024 * 1024)
+        return OpenFiles(paths: paths, output: output, capturedAt: started)
+    }
+
+    static func validate(urls: [URL], home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                         openFiles: OpenFiles? = nil) throws {
+        let paths = urls.map { CleanupGuidance.normalized($0.path) }
+        let evidence: OpenFiles
+        if let openFiles, openFiles.isFresh, paths.allSatisfy(openFiles.coveredRoots.contains) {
+            evidence = openFiles
+        } else {
+            evidence = try captureOpenFiles(for: paths)
+        }
         for url in urls {
-            if let user = user(of: url.path, in: text) {
+            if let user = evidence.user(of: url.path) {
                 throw error("\(url.lastPathComponent) is in use by \(user). Quit that process before cleanup.")
             }
         }
@@ -40,22 +69,52 @@ enum CleanupActiveUse {
 
     static func user(of path: String, in output: String) -> String? {
         let root = CleanupGuidance.normalized(path)
+        return users(of: [root], in: output)[root]
+    }
+
+    private static func users(of roots: Set<String>, in output: String) -> [String: String] {
+        var matches: [String: String] = [:]
+        let onlyRoot = roots.count == 1 ? roots.first : nil
+        let volumesPrefix = "/System/Volumes/Data"
+        let scope = commonParent(of: roots)
         var pid = "", command = "a running process"
-        for field in output.split(separator: "\0") {
-            let field = field.trimmingCharacters(in: .newlines)
+        for record in output.split(separator: "\0") {
+            let field = record.drop(while: \.isNewline)
             guard let type = field.first else { continue }
-            let value = String(field.dropFirst())
+            let value = field.dropFirst()
             switch type {
-            case "p": pid = value; command = "a running process"
-            case "c": command = value
+            case "p": pid = String(value); command = "a running process"
+            case "c": command = String(value)
             case "n":
                 guard value.hasPrefix("/") else { continue }
-                let file = CleanupGuidance.normalized(value)
-                if file == root || file.hasPrefix(root + "/") { return "\(command) (PID \(pid))" }
+                let path = value.hasPrefix(volumesPrefix + "/") ? value.dropFirst(volumesPrefix.count) : value
+                if !path.hasPrefix(scope), !path.contains("//"), !path.contains("/./"), !path.contains("/../") { continue }
+                let file = CleanupGuidance.normalized(String(path))
+                if let onlyRoot {
+                    if file == onlyRoot || file.hasPrefix(onlyRoot + "/") { return [onlyRoot: "\(command) (PID \(pid))"] }
+                    continue
+                }
+                var ancestor = file[...]
+                repeat {
+                    let path = String(ancestor)
+                    if roots.contains(path), matches[path] == nil { matches[path] = "\(command) (PID \(pid))" }
+                    guard let slash = ancestor.lastIndex(of: "/"), slash != ancestor.startIndex else { break }
+                    ancestor = ancestor[..<slash]
+                } while !ancestor.isEmpty
             default: break
             }
+            if matches.count == roots.count { break }
         }
-        return nil
+        return matches
+    }
+
+    private static func commonParent(of roots: Set<String>) -> String {
+        guard let first = roots.first else { return "/" }
+        var parent = (first as NSString).deletingLastPathComponent
+        while parent != "/", !roots.allSatisfy({ $0.hasPrefix(parent + "/") }) {
+            parent = (parent as NSString).deletingLastPathComponent
+        }
+        return parent == "/" ? "/" : parent + "/"
     }
 
     private static func error(_ message: String) -> NSError {

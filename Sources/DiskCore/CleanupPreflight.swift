@@ -32,6 +32,13 @@ public enum CleanupPreflightError: Error, LocalizedError, Sendable {
 public enum CleanupPreflight {
     public static func validate(ids: [Int], in scan: ScanResult, acknowledgedIncomplete: [Int: CleanupIncompleteReview] = [:], excludedFolders: [String] = [],
                                 regenerableIDs: Set<Int> = [], home: String = FileManager.default.homeDirectoryForCurrentUser.path) async throws {
+        try await validate(ids: ids, in: scan, acknowledgedIncomplete: acknowledgedIncomplete, excludedFolders: excludedFolders,
+                           regenerableIDs: regenerableIDs, home: home, openFiles: nil)
+    }
+
+    static func validate(ids: [Int], in scan: ScanResult, acknowledgedIncomplete: [Int: CleanupIncompleteReview] = [:], excludedFolders: [String],
+                         regenerableIDs: Set<Int>, home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                         openFiles: CleanupActiveUse.OpenFiles?) async throws {
         try Task.checkCancellation()
         guard !ids.isEmpty else { return }
 
@@ -141,8 +148,8 @@ public enum CleanupPreflight {
         // An unchanged database, snapshot, dependency tree or ordinary file can
         // still be open. Regeneration changes comparison rules, never use checks.
         let urls = activeUseURLs
-        let probe = Task.detached(priority: .utility) { try CleanupActiveUse.validate(urls: urls, home: home) }
-        try await probe.value
+        let probe = Task.detached(priority: .utility) { try CleanupActiveUse.validate(urls: urls, home: home, openFiles: openFiles) }
+        try await withTaskCancellationHandler { try await probe.value } onCancel: { probe.cancel() }
 
         // Run the final identity/path checks after all subtree comparisons. This
         // detects stale scan identities. Path-based moves still have a small

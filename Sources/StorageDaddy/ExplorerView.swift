@@ -308,7 +308,9 @@ struct ExplorerView: View {
             }
         case .snapshots: SavedHistoryView()
         case .dashboard: DashboardView(dashboard: m.dashboard)
-        case .cleanup: CleanupView()
+        case .cleanup:
+            if m.showingDeveloperCleanup { DeveloperCleanupView() }
+            else { CleanupView() }
         case .duplicates:
             if let scan = m.scan {
                 DuplicateReviewView(scan: scan, groups: m.duplicateGroups, isLoading: m.duplicatesLoading,

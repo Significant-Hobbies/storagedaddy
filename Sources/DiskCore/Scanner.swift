@@ -12,6 +12,15 @@ public enum DiskScanner {
         promptAvoidanceFolders: [String] = [],
         progress: (@Sendable (ScanProgress) -> Void)? = nil
     ) async throws -> ScanResult {
+        try await scan(root: root, backend: backend, parallelism: parallelism, excludedFolders: excludedFolders,
+                       promptAvoidanceFolders: promptAvoidanceFolders, developerArtifactsOnly: false, progress: progress)
+    }
+
+    static func scan(
+        root: URL, backend: ScanBackend = .parallel, parallelism: Int = 0, excludedFolders: [String],
+        promptAvoidanceFolders: [String] = [], developerArtifactsOnly: Bool,
+        progress: (@Sendable (ScanProgress) -> Void)? = nil
+    ) async throws -> ScanResult {
         // Resolve ancestor aliases (for example /var -> /private/var), preserving
         // a symbolic-link leaf as a link rather than traversing its destination.
         let cancellation = ScanCancellation()
@@ -20,7 +29,7 @@ public enum DiskScanner {
             var scanner = Scanner(root: canonical, backend: backend, parallelism: parallelism,
                                   exclusions: FolderExclusions(paths: excludedFolders),
                                   promptAvoidance: FolderExclusions(paths: promptAvoidanceFolders, resolveAliases: false),
-                                  cancellation: cancellation, progress: progress)
+                                  developerArtifactsOnly: developerArtifactsOnly, cancellation: cancellation, progress: progress)
             return try scanner.run()
         }
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { cancellation.cancel(); worker.cancel() }
@@ -45,6 +54,7 @@ private struct Scanner {
     private let exclusions: FolderExclusions
     private let promptAvoidance: FolderExclusions
     private let parallelism: Int
+    private let developerArtifactsOnly: Bool
     private let cancellation: ScanCancellation
     private var sharedAllocations: [(id: Int, bytes: Int64, identity: AllocationIdentity)] = []
     private var fileAllocationDetails: [FileAllocationDetail] = []
@@ -69,13 +79,15 @@ private struct Scanner {
     private var livePendingBytes: Int64 = 0
 
     init(root: URL, backend: ScanBackend, parallelism: Int, exclusions: FolderExclusions,
-         promptAvoidance: FolderExclusions, cancellation: ScanCancellation, progress: (@Sendable (ScanProgress) -> Void)?) {
+         promptAvoidance: FolderExclusions, developerArtifactsOnly: Bool,
+         cancellation: ScanCancellation, progress: (@Sendable (ScanProgress) -> Void)?) {
         self.exclusions = exclusions
         self.promptAvoidance = promptAvoidance
         self.root = root
         self.rootPath = root.path
         self.backend = backend
         self.parallelism = max(0, min(64, parallelism))
+        self.developerArtifactsOnly = developerArtifactsOnly
         self.cancellation = cancellation
         self.progress = progress
         self.diskReadStart = ProcessMemory.diskReadBytes()
@@ -180,6 +192,18 @@ private struct Scanner {
             var childDirectories: [ScanDirectory] = []
             for (entryIndex, entry) in entries.enumerated() {
                 if entryIndex & 255 == 0 { try cancellation.check() }
+                var insideArtifact = directory.insideDeveloperArtifact
+                if developerArtifactsOnly, !insideArtifact {
+                    guard entry.isDirectory, !entry.isSymlink else { continue }
+                    let isArtifact = CleanupGuidance.focusedDeveloperNames.contains(entry.name)
+                    if isArtifact {
+                        insideArtifact = CleanupGuidance.isRegenerableFolder(path: childPath(directory.path, entry.name))
+                        guard insideArtifact else { continue }
+                    } else {
+                        guard entry.name == ".worktrees" || !entry.name.hasPrefix(".") else { continue }
+                        guard !entry.name.hasSuffix(".app"), !entry.name.hasSuffix(".framework"), !entry.name.hasSuffix(".xpc") else { continue }
+                    }
+                }
                 if !exclusions.paths.isEmpty, exclusions.contains(childPath(directory.path, entry.name)) {
                     nodes[directory.id].isScanIncomplete = true
                     recordSkip(path: childPath(directory.path, entry.name), reason: "excluded by folder settings")
@@ -203,7 +227,8 @@ private struct Scanner {
                 let childID = appendNode(parent: directory.id, metadata: entry, liveOwner: directory.owner)
                 reportProgress(path: childPath(directory.path, entry.name))
                 if entry.isDirectory, !entry.isSymlink {
-                    childDirectories.append(ScanDirectory(id: childID, path: childPath(directory.path, entry.name), owner: directory.owner ?? childID))
+                    childDirectories.append(ScanDirectory(id: childID, path: childPath(directory.path, entry.name),
+                                                          owner: directory.owner ?? childID, insideDeveloperArtifact: insideArtifact))
                 }
             }
             return childDirectories
@@ -413,6 +438,7 @@ private struct ScanDirectory: Sendable {
     let id: Int
     let path: String
     let owner: Int?
+    var insideDeveloperArtifact = false
 }
 
 private struct CompletedDirectory: Sendable {

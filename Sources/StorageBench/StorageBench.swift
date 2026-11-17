@@ -17,6 +17,42 @@ import DiskCore
             }
             print(root.path); return
         }
+        if args.count == 3 && ["developer-cleanup", "legacy-developer-cleanup"].contains(args[1]) {
+            let root = URL(fileURLWithPath: args[2])
+            let start = ContinuousClock.now
+            let items: [[String: Any]]
+            let skipped: Int
+            if args[1] == "developer-cleanup" {
+                let plan = try await DeveloperCleanupPlan.prepare(root: root)
+                items = plan.items.map { ["path": $0.path, "allocatedBytes": $0.allocatedBytes, "ready": $0.keptReason == nil] }
+                skipped = plan.skipped
+            } else {
+                let scan = try await DiskScanner.scan(root: root, progress: { _ in })
+                let groups = DeveloperInsights.analyze(scan)
+                let report = DeveloperReport.build(scan: scan, groups: groups)
+                let ids = CleanupGuidance.quickCleanupIDs(in: scan, findings: report.findings)
+                var checked: [[String: Any]] = []
+                for id in ids {
+                    let path = scan.url(for: id).path
+                    let ready: Bool
+                    do {
+                        try await CleanupPreflight.validate(ids: [id], in: scan, regenerableIDs: [id])
+                        ready = true
+                    } catch { ready = false }
+                    checked.append(["path": path, "allocatedBytes": scan.nodes[id].allocatedBytes, "ready": ready])
+                }
+                items = checked
+                skipped = scan.skipped
+            }
+            let duration = start.duration(to: .now).components
+            let result: [String: Any] = [
+                "seconds": Double(duration.seconds) + Double(duration.attoseconds) / 1e18,
+                "skipped": skipped,
+                "items": items,
+            ]
+            print(String(decoding: try JSONSerialization.data(withJSONObject: result, options: .sortedKeys), as: UTF8.self))
+            return
+        }
         guard args.count >= 3, ["compare", "compare-live", "scan", "profile", "report", "discover-dependencies"].contains(args[1]) else { print("StorageBench fixture [count]\nStorageBench compare <fixture-folder>\nStorageBench compare-live <fixture-folder>\nStorageBench scan <folder> [--live]\nStorageBench report <folder>\nStorageBench discover-dependencies <home-folder>"); return }
         let root = URL(fileURLWithPath: args[2])
         if args[1] == "discover-dependencies" {
