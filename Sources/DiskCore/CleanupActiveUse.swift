@@ -60,7 +60,8 @@ enum CleanupActiveUse {
         do {
             let result = try PackageToolCommand.run(executable: URL(fileURLWithPath: executable), arguments: arguments,
                 directory: FileManager.default.temporaryDirectory, timeout: 15,
-                maximumOutputBytes: maximumOutputBytes, requireCompleteOutput: true, mergeStandardError: false)
+                maximumOutputBytes: maximumOutputBytes, requireCompleteOutput: true, mergeStandardError: false,
+                locale: "en_US.UTF-8")
             guard result.status == 0 else { throw error("Process evidence unavailable.") }
             return result.output
         } catch is CancellationError { throw CancellationError() }

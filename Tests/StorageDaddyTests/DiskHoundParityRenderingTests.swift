@@ -30,6 +30,10 @@ struct DiskHoundParityRenderingTests {
         let model = ExplorerModel()
         model.workspace = .cleanup
         model.showingDeveloperCleanup = true
+        #expect(model.showsDeveloperCleanupReview)
+        model.staged = [1]
+        #expect(!model.showsDeveloperCleanupReview)
+        model.staged = []
         model.findDeveloperCleanup(in: root)
         let deadline = Date().addingTimeInterval(10)
         while model.busy && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }

@@ -315,7 +315,7 @@ struct FileTypeStats: Sendable {
         didSet { UserDefaults.standard.set(cleanupRefreshPaths, forKey: "cleanupRefreshPaths") }
     }
     var cleanupRefreshPath: String? {
-        guard workspace == .explore || (workspace == .cleanup && !showingDeveloperCleanup), !scanIsHistorical,
+        guard workspace == .explore || (workspace == .cleanup && !showsDeveloperCleanupReview), !scanIsHistorical,
               let path = scan?.rootPath, cleanupRefreshPaths.contains(path) else { return nil }
         return path
     }
@@ -777,6 +777,8 @@ struct FileTypeStats: Sendable {
     @Published private(set) var developerCleanupFolder = UserDefaults.standard.string(forKey: "developerCleanupFolder") {
         didSet { UserDefaults.standard.set(developerCleanupFolder, forKey: "developerCleanupFolder") }
     }
+
+    var showsDeveloperCleanupReview: Bool { showingDeveloperCleanup && staged.isEmpty }
 
     var canStartDeveloperCleanup: Bool {
         !busy && !moves.busy && moves.plan == nil && !snapshotBusy && !monitoring
