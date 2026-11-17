@@ -804,6 +804,7 @@ struct FileTypeStats: Sendable {
         guard !busy, developerCleanupOutcome != nil else { return }
         developerCleanupOutcome = nil
         developerCleanupPlan = nil
+        developerCleanupError = nil
     }
 
     func chooseDeveloperCleanupFolder() {
@@ -872,6 +873,7 @@ struct FileTypeStats: Sendable {
     func confirmDeveloperCleanup(planID: UUID, ids: Set<DeveloperCleanupReview.Item.ID>, permanently: Bool) {
         guard canStartDeveloperCleanup, !ids.isEmpty, let plan = developerCleanupPlan,
               plan.id == planID, developerCleanupOutcome == nil else { return }
+        developerCleanupError = nil
         busy = true
         progress = "Checking what is in use…"
         task = Task { [self] in

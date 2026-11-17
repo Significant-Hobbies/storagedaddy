@@ -64,6 +64,7 @@ struct DiskHoundParityRenderingTests {
         #expect(!model.busy)
         #expect(fm.fileExists(atPath: dependencies.path))
         model.confirmDeveloperCleanup(planID: plan.id, ids: [item.id], permanently: true)
+        #expect(model.developerCleanupError == nil)
         let removalDeadline = Date().addingTimeInterval(10)
         while model.busy && Date() < removalDeadline { try await Task.sleep(for: .milliseconds(20)) }
         #expect(model.developerCleanupOutcome?.deleted == [item.id])
