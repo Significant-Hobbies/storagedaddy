@@ -3,6 +3,39 @@ import Testing
 @testable import DiskCore
 
 struct DeveloperCleanupPlanTests {
+    @Test func discoversMetroCachesInClaudeWorktreesAndKeepsBusyProjects() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("developer-metro-\(UUID())")
+        defer { try? fm.removeItem(at: root) }
+        let worktree = root.appendingPathComponent("repo/.claude/worktrees/agent")
+        let metadata = root.appendingPathComponent("repo/.claude/projects/agent")
+        let other = root.appendingPathComponent("repo/unrelated")
+        for (location, hasMetroConfig) in [(worktree, true), (metadata, true), (other, false)] {
+            let cache = location.appendingPathComponent(".metro-cache")
+            try fm.createDirectory(at: cache, withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: location.appendingPathComponent("package.json"))
+            if hasMetroConfig {
+                try Data().write(to: location.appendingPathComponent("metro.config.js"))
+            }
+            try Data(repeating: 1, count: 4096).write(to: cache.appendingPathComponent("bundle"))
+        }
+        let plan = try await DeveloperCleanupPlan.prepare(root: root)
+        #expect(plan.items.count == 1)
+        let item = try #require(plan.items.first)
+        #expect(item.path.hasSuffix("/repo/.claude/worktrees/agent/.metro-cache"))
+        #expect(item.allocatedBytes == 4096)
+        #expect(item.keptReason == nil)
+        #expect(!item.canDeletePermanently)
+
+        let handle = try FileHandle(forReadingFrom: worktree.appendingPathComponent("package.json"))
+        defer { try? handle.close() }
+        let busy = try await DeveloperCleanupPlan.prepare(root: root)
+        #expect(busy.items.first?.keptReason?.contains("Metro project in use") == true)
+        let result = await plan.clean(ids: [item.id], permanently: true)
+        #expect(result.kept[item.id]?.contains("Metro project is in use") == true)
+        #expect(fm.fileExists(atPath: item.path))
+    }
+
     @Test func findsKnownCacheLocationsAndHoldsLockManagedCaches() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("developer-cache-home-\(UUID())")
         let caches = home.appendingPathComponent(".cache")

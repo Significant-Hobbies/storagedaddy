@@ -7,7 +7,7 @@ public enum CleanupGuidance {
         "npm", "pnpm", "yarn", "pip", "uv", "homebrew", "go-build", "cocoapods", "composer", "ccache", "sccache"
     ]
     private static let focusedDeveloperNames: Set<String> = [
-        "node_modules", ".build", "target", ".next", ".nuxt", "DerivedData", "__pycache__", "_cacache", "hub"
+        "node_modules", ".build", "target", ".next", ".nuxt", ".metro-cache", "DerivedData", "__pycache__", "_cacache", "hub"
     ]
 
     static func isFocusedDeveloperName(_ name: String) -> Bool {
@@ -124,19 +124,22 @@ public enum CleanupGuidance {
         let normalizedHome = normalized(home)
         if name == "__pycache__" { return true }
         if name == "DerivedData", normalizedPath.hasPrefix(normalizedHome + "/Library/Developer/") { return true }
+        let parent = url.deletingLastPathComponent()
+        func hasRegularFile(_ name: String) -> Bool {
+            var info = stat()
+            return lstat(parent.appendingPathComponent(name).path, &info) == 0 && info.st_mode & S_IFMT == S_IFREG
+        }
         let manifests: [String]
         switch name {
         case "node_modules", ".next", ".nuxt": manifests = ["package.json"]
+        case ".metro-cache":
+            return hasRegularFile("package.json") && ["js", "cjs", "mjs", "ts"].contains { hasRegularFile("metro.config.\($0)") }
         case ".build": manifests = ["Package.swift"]
         case "target": manifests = ["Cargo.toml"]
         case "build", "dist": manifests = ["package.json", "Package.swift", "Cargo.toml", "CMakeLists.txt", "pyproject.toml"]
         default: return false
         }
-        return manifests.contains { name in
-            var info = stat()
-            let manifest = url.deletingLastPathComponent().appendingPathComponent(name)
-            return lstat(manifest.path, &info) == 0 && info.st_mode & S_IFMT == S_IFREG
-        }
+        return manifests.contains(where: hasRegularFile)
     }
 
     static func normalized(_ path: String) -> String {

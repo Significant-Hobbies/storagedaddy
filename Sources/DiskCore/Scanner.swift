@@ -190,17 +190,20 @@ private struct Scanner {
             nodes[directory.id].isScanIncomplete = false
             nodes[directory.id].children.reserveCapacity(entries.count)
             var childDirectories: [ScanDirectory] = []
+            let isClaudeDirectory = directory.path.hasSuffix("/.claude")
             for (entryIndex, entry) in entries.enumerated() {
                 if entryIndex & 255 == 0 { try cancellation.check() }
                 var insideArtifact = directory.insideDeveloperArtifact
                 if let home = developerArtifactHome, !insideArtifact {
                     guard entry.isDirectory, !entry.isSymlink else { continue }
+                    // Agent metadata also lives here. Descend only into the checkout container.
+                    guard !isClaudeDirectory || entry.name == "worktrees" else { continue }
                     if CleanupGuidance.isFocusedDeveloperName(entry.name) {
                         insideArtifact = CleanupGuidance.isRegenerableFolder(path: childPath(directory.path, entry.name), home: home)
                     }
                     if !insideArtifact {
                         guard entry.name != "node_modules" else { continue }
-                        guard entry.name == ".worktrees" || !entry.name.hasPrefix(".") else { continue }
+                        guard entry.name == ".worktrees" || entry.name == ".claude" || !entry.name.hasPrefix(".") else { continue }
                         guard !entry.name.hasSuffix(".app"), !entry.name.hasSuffix(".framework"), !entry.name.hasSuffix(".xpc") else { continue }
                     }
                 }

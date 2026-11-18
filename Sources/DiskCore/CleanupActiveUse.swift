@@ -29,7 +29,7 @@ enum CleanupActiveUse {
 
     static func validate(urls: [URL], home: String = FileManager.default.homeDirectoryForCurrentUser.path,
                          openFiles: OpenFiles? = nil) throws {
-        let paths = urls.map { CleanupGuidance.normalized($0.path) }
+        let paths = urls.flatMap { [$0.path, metroProject(for: $0)?.path].compactMap { $0 } }.map(CleanupGuidance.normalized)
         let evidence: OpenFiles
         if let openFiles, openFiles.isFresh, paths.allSatisfy(openFiles.coveredRoots.contains) {
             evidence = openFiles
@@ -39,6 +39,9 @@ enum CleanupActiveUse {
         for url in urls {
             if let user = evidence.user(of: url.path) {
                 throw error("\(url.lastPathComponent) is in use by \(user). Quit that process before cleanup.")
+            }
+            if let project = metroProject(for: url), let user = evidence.user(of: project.path) {
+                throw error("The Metro project is in use by \(user). Quit that process before cleanup.")
             }
         }
         let entries = try NpxCacheReview.affectedEntries(urls: urls, home: home)
@@ -54,6 +57,10 @@ enum CleanupActiveUse {
                                       maximumOutputBytes: 8 * 1024 * 1024)
             try NpxCacheReview.validate(entries: entries, processOutput: processes)
         }
+    }
+
+    static func metroProject(for cache: URL) -> URL? {
+        cache.lastPathComponent == ".metro-cache" ? cache.deletingLastPathComponent() : nil
     }
 
     private static func probe(executable: String, arguments: [String], maximumOutputBytes: Int) throws -> String {

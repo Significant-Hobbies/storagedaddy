@@ -51,7 +51,9 @@ public struct DeveloperCleanupPlan: Sendable {
         let rootIDs = Set(roots.map(\.id))
         let repositories = Set(scan.nodes.lazy.filter { $0.name == ".git" }
             .flatMap { ancestors(of: $0.id, in: scan).filter(rootIDs.contains) })
-        let openFiles = try captureOpenFiles(roots.compactMap { eligible[$0.id]?.path })
+        let openFiles = try captureOpenFiles(roots.compactMap { eligible[$0.id] }.flatMap { url in
+            [url.path, CleanupActiveUse.metroProject(for: url)?.path].compactMap { $0 }
+        })
 
         var items: [Item] = []
         for node in roots {
@@ -71,11 +73,14 @@ public struct DeveloperCleanupPlan: Sendable {
                 } else if CleanupGuidance.isSuggestedCache(category: .modelCaches, path: url.path, home: home) {
                     reason = "Review these downloaded models in Developer Insights before removing them."
                 } else if node.isScanIncomplete == true { reason = "Some contents could not be checked. This folder is kept." }
-                else if repositories.contains(node.id), node.name == "node_modules" {
+                else if repositories.contains(node.id), ["node_modules", ".metro-cache"].contains(node.name) {
                     reason = "Contains a Git checkout. This folder is kept."
                 } else if !FileManager.default.isDeletableFile(atPath: url.path) {
                     reason = "macOS does not allow removal with the current permissions."
                 } else if let user = openFiles?.user(of: url.path) { reason = "In use by \(user). Quit it and scan again." }
+                else if let project = CleanupActiveUse.metroProject(for: url), let user = openFiles?.user(of: project.path) {
+                    reason = "Metro project in use by \(user). Quit it and scan again."
+                }
                 else { reason = nil }
             } catch { reason = error.localizedDescription }
             items.append(Item(id: node.id, path: url.path, allocatedBytes: node.allocatedBytes,
@@ -111,6 +116,10 @@ public struct DeveloperCleanupPlan: Sendable {
                     regenerableIDs: [item.id], home: home, openFiles: isDependencies ? openFiles : nil)
                 try Task.checkCancellation()
                 if policy.blocksCleanup(url) { throw CleanupPreflightError.excludedFolder(url.path) }
+                if CleanupActiveUse.metroProject(for: url) != nil,
+                   !CleanupGuidance.isRegenerableFolder(path: url.path, home: home) {
+                    throw CleanupPreflightError.changedRecord(path: url.path)
+                }
                 try CleanupSafety.validate(url: url, expected: scan.nodes[item.id], root: root,
                                            allowingRegenerableChanges: true, home: home)
                 if permanently && item.canDeletePermanently {
