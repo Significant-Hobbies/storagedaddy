@@ -72,6 +72,16 @@ struct AgentAccessIntegrationTests {
         return try #require(JSONDecoder().decode(AgentJSON.self, from: data)["access_token"].string)
     }
 
+    @Test func showCleanupOpensRegularReviewFromDeveloperCleanup() async throws {
+        let f = try await fixture(role: .admin)
+        defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
+        f.explorer.workspace = .cleanup
+        f.explorer.showingDeveloperCleanup = true
+        _ = await call("show", arguments: .object(["section": .string("Cleanup")]), fixture: f)
+        #expect(f.explorer.workspace == .cleanup)
+        #expect(!f.explorer.showsDeveloperCleanupReview)
+    }
+
     @Test func requestQueuesWithoutStagingAndRevocationBlocksAsyncStaging() async throws {
         let f = try await fixture()
         defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }

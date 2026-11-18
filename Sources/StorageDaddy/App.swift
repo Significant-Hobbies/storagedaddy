@@ -287,6 +287,8 @@ struct FileTypeStats: Sendable {
         didSet {
             UserDefaults.standard.set(excludedFolders, forKey: "excludedFolders")
             macTools?.setExcludedFolders(excludedFolders)
+            developerCleanupPlan = nil
+            developerCleanupOutcome = nil
             // Existing results remain historical; clear prior cleanup approvals.
             agentAccess.clearStagedRequests()
             staged.removeAll()
@@ -313,7 +315,7 @@ struct FileTypeStats: Sendable {
         didSet { UserDefaults.standard.set(cleanupRefreshPaths, forKey: "cleanupRefreshPaths") }
     }
     var cleanupRefreshPath: String? {
-        guard workspace == .explore || workspace == .cleanup, !scanIsHistorical,
+        guard workspace == .explore || (workspace == .cleanup && !showsDeveloperCleanupReview), !scanIsHistorical,
               let path = scan?.rootPath, cleanupRefreshPaths.contains(path) else { return nil }
         return path
     }
@@ -767,6 +769,142 @@ struct FileTypeStats: Sendable {
     func scanUserCaches() {
         scanUserCaches(destination: .explore)
     }
+
+    @Published var showingDeveloperCleanup = false
+    @Published private(set) var developerCleanupPlan: DeveloperCleanupReview?
+    @Published private(set) var developerCleanupOutcome: DeveloperCleanupReview.Outcome?
+    @Published private(set) var developerCleanupError: String?
+    @Published private(set) var developerCleanupFolders = UserDefaults.standard.stringArray(forKey: "developerCleanupFolders")
+        ?? UserDefaults.standard.string(forKey: "developerCleanupFolder").map { [$0] } ?? [] {
+        didSet { UserDefaults.standard.set(developerCleanupFolders, forKey: "developerCleanupFolders") }
+    }
+
+    var showsDeveloperCleanupReview: Bool { showingDeveloperCleanup && staged.isEmpty }
+
+    var canStartDeveloperCleanup: Bool {
+        !busy && !moves.busy && moves.plan == nil && !snapshotBusy && !monitoring
+            && macTools?.isBusy != true && !conversationArchive.busy && staged.isEmpty
+    }
+
+    func openDeveloperCleanup() {
+        let entering = workspace != .cleanup || !showingDeveloperCleanup
+        workspace = .cleanup
+        guard staged.isEmpty else { showingDeveloperCleanup = false; return }
+        showingDeveloperCleanup = true
+        if entering, developerCleanupOutcome == nil { rescanDeveloperCleanup() }
+    }
+
+    func openQuickCleanup() {
+        showingDeveloperCleanup = false
+        showWelcome = false
+        workspace = .cleanup
+    }
+
+    func finishViewingDeveloperCleanupResult() {
+        guard !busy, developerCleanupOutcome != nil else { return }
+        developerCleanupOutcome = nil
+        developerCleanupPlan = nil
+        developerCleanupError = nil
+    }
+
+    func chooseDeveloperCleanupFolder() {
+        guard canStartDeveloperCleanup else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Find Developer Files"
+        panel.message = "Choose project, worktree, or developer cache folders to scan together."
+        if let first = developerCleanupFolders.first { panel.directoryURL = URL(fileURLWithPath: first) }
+        if panel.runModal() == .OK {
+            var known = Set(developerCleanupFolders)
+            let additions = panel.urls.filter { known.insert($0.standardizedFileURL.path).inserted }
+            if !additions.isEmpty {
+                findDeveloperCleanup(in: developerCleanupFolders.map { URL(fileURLWithPath: $0) } + additions,
+                                     retainingReviewOnFailure: true)
+            }
+        }
+    }
+
+    func rescanDeveloperCleanup() {
+        findDeveloperCleanup(in: developerCleanupFolders.map { URL(fileURLWithPath: $0) })
+    }
+
+    func removeDeveloperCleanupFolder(_ path: String) {
+        guard canStartDeveloperCleanup else { return }
+        developerCleanupFolders.removeAll { $0 == path }
+        developerCleanupPlan = nil
+        developerCleanupOutcome = nil
+        developerCleanupError = nil
+        rescanDeveloperCleanup()
+    }
+
+    func findDeveloperCleanup(in roots: [URL], retainingReviewOnFailure: Bool = false) {
+        guard canStartDeveloperCleanup, !roots.isEmpty else { return }
+        if !retainingReviewOnFailure {
+            developerCleanupPlan = nil
+            developerCleanupOutcome = nil
+        }
+        developerCleanupError = nil
+        busy = true
+        progress = "Finding developer files in \(roots.count) \(roots.count == 1 ? "folder" : "folders")…"
+        let exclusions = excludedFolders
+        let promptAvoidance = AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
+        task = Task {
+            defer { busy = false }
+            let worker = Task.detached(priority: .userInitiated) {
+                try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: promptAvoidance)
+            }
+            do {
+                let plan = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+                try Task.checkCancellation()
+                developerCleanupOutcome = nil
+                developerCleanupPlan = plan
+                developerCleanupFolders = plan.scopes.map(\.path)
+                progress = "\(plan.items.count) developer folders found"
+            } catch is CancellationError { progress = "Developer scan cancelled" }
+            catch {
+                developerCleanupError = error.localizedDescription
+                progress = "Developer scan needs attention"
+            }
+        }
+    }
+
+    func confirmDeveloperCleanup(planID: UUID, ids: Set<DeveloperCleanupReview.Item.ID>, permanently: Bool) {
+        guard canStartDeveloperCleanup, !ids.isEmpty, let plan = developerCleanupPlan,
+              plan.id == planID, developerCleanupOutcome == nil else { return }
+        developerCleanupError = nil
+        busy = true
+        progress = "Checking what is in use…"
+        task = Task { [self] in
+            defer { busy = false }
+            let reportProgress: @Sendable (Int, Int) -> Void = { [weak self] index, count in
+                Task { @MainActor in
+                    guard let self, self.busy, self.developerCleanupPlan?.id == planID,
+                          self.developerCleanupOutcome == nil else { return }
+                    self.progress = "Cleaning folder \(index) of \(count)…"
+                }
+            }
+            let worker = Task.detached(priority: .userInitiated) {
+                await plan.clean(ids: ids, permanently: permanently, progress: reportProgress)
+            }
+            let outcome = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+            developerCleanupOutcome = outcome
+            let removed = outcome.deleted.union(outcome.trashed)
+            if !removed.isEmpty {
+                dashboard.refresh()
+                if let scan {
+                    let scanned = FolderExclusions(paths: [scan.rootPath])
+                    if plan.items.contains(where: { removed.contains($0.id) && scanned.blocksCleanup(URL(fileURLWithPath: $0.path)) }),
+                       !cleanupRefreshPaths.contains(scan.rootPath) {
+                        cleanupRefreshPaths.append(scan.rootPath)
+                    }
+                }
+            }
+            progress = outcome.cancelled ? "Developer cleanup cancelled" : "Developer cleanup complete"
+        }
+    }
+
     func scanUserCachesForCleanup() {
         scanUserCaches(destination: .cleanup)
     }
@@ -808,6 +946,7 @@ struct FileTypeStats: Sendable {
         projectDependenciesBusy = false
         if !background {
             showWelcome = false
+            if destination == .cleanup { showingDeveloperCleanup = false }
             if let destination { workspace = destination }
             else { openStorage(.explore) }
         }

@@ -67,7 +67,8 @@ public enum PackageToolCommand {
     /// Fixed executable and arguments, never a shell command. Drain output even
     /// after the display bound; a verbose manager cannot deadlock the pipe.
     public static func run(executable: URL, arguments: [String], directory: URL, timeout: TimeInterval = 300,
-                           maximumOutputBytes: Int = 262_144, requireCompleteOutput: Bool = false, mergeStandardError: Bool = true) throws -> PackageToolCommandResult {
+                           maximumOutputBytes: Int = 262_144, requireCompleteOutput: Bool = false, mergeStandardError: Bool = true,
+                           locale: String? = nil) throws -> PackageToolCommandResult {
         try Task.checkCancellation()
         let process = Process(), pipe = Pipe()
         process.executableURL = executable
@@ -82,6 +83,7 @@ public enum PackageToolCommand {
         environment["HOMEBREW_NO_ANALYTICS"] = "1"
         environment["COREPACK_ENABLE_NETWORK"] = "0"
         environment["COREPACK_ENABLE_DOWNLOAD_PROMPT"] = "0"
+        if let locale { environment["LC_ALL"] = locale }
         process.environment = environment
         try process.run()
         let fd = pipe.fileHandleForReading.fileDescriptor

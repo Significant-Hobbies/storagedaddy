@@ -319,6 +319,7 @@ struct CleanupView: View {
                 SMWorkspaceHeader("Quick Cleanup",
                     subtitle: stagedIDs.isEmpty ? "Scan for rebuildable items or add specific files and folders from Storage." : "Review your selection and check how each item will be removed.") {
                     if m.showCleanup { Button("Done") { m.showCleanup = false } }
+                    else if stagedIDs.isEmpty { Button("Find Developer Files", action: m.openDeveloperCleanup).disabled(m.busy) }
                 }
                 if stagedIDs.isEmpty { DoodleArt(topic: .cleanup).frame(width: 68, height: 68) }
                 else if showsMeasurement { WelcomeIllustration().frame(width: 92, height: 68) }

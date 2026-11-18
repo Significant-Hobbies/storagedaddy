@@ -141,7 +141,7 @@ struct DashboardView: View {
             HStack(spacing: 16) {
                 DoodleArt(topic: .overview).frame(width: 72, height: 72)
                 VStack(alignment: .trailing, spacing: 8) {
-                    Button("Open Quick Cleanup") { m.workspace = .cleanup }
+                    Button("Find Developer Files", action: m.openDeveloperCleanup)
                         .buttonStyle(SMMacButtonStyle(.primary))
                     HStack(spacing: 10) {
                         Button("Refresh", action: dashboard.refresh).disabled(dashboard.loading || m.busy)
@@ -262,7 +262,7 @@ struct DashboardView: View {
             .font(.callout.weight(.medium))
             Text("Home Trash · separate from the candidates above")
                 .font(.caption2).foregroundStyle(Tints.secondaryText)
-            Button("review trash") { m.showWelcome = false; m.workspace = .cleanup }.accessibilityLabel("Review Trash")
+            Button("review trash", action: m.openQuickCleanup).accessibilityLabel("Review Trash")
             Spacer(minLength: 0)
         }
         .padding(22)

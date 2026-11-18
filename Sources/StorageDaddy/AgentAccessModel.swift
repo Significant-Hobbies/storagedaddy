@@ -238,7 +238,7 @@ private struct AgentPolicy: Codable {
         }, didFinish: { [weak self] in
             if self?.pendingStaging[node.id] == request.id { self?.pendingStaging.removeValue(forKey: node.id) }
         })
-        m.workspace = .cleanup
+        m.openQuickCleanup()
         reviews[i].pending = false
         reviews[i].outcome = "Sent to native Cleanup preflight. Nothing removed; verify staging and choose the cleanup action there."
         save()
@@ -393,7 +393,8 @@ private struct AgentPolicy: Codable {
             guard !m.busy else { throw AgentSecurity.failure("A native storage operation is in progress.") }
             if let section = a["section"].string {
                 guard let workspace = Workspace.allCases.first(where: { $0.rawValue.localizedCaseInsensitiveCompare(section) == .orderedSame }) else { throw AgentSecurity.failure("Unknown section. Use the workspace names from StorageDaddy.") }
-                m.workspace = workspace
+                if workspace == .cleanup { m.openQuickCleanup() }
+                else { m.workspace = workspace }
             }
             if let id = a["nodeID"].int, let scan = m.scan, scan.nodes.indices.contains(id) { m.openStorage(.explore); m.open(scan.nodes[id]) }
             return .object(["workspace": .string(m.workspace.rawValue)])
