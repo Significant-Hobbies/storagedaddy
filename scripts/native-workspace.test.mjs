@@ -10,7 +10,7 @@ test('native cleanup safeguards, exclusions and packaged UI resources', { timeou
   const root = fileURLToPath(new URL('../', import.meta.url));
   const result = spawnSync('npx', [
     '--offline', 'xcodebuildmcp', 'swift-package', 'test', '--package-path', root,
-    '--filter', 'AgentAccessIntegrationTests|QuickCleanupTests|CleanupBatchTests|CleanupReviewFilterTests|DeveloperCleanupPlanTests|DeveloperCleanupReviewTests|StorageUIResourcesTests|FolderExclusion', '--parallel', 'false',
+    '--filter', 'AgentAccessIntegrationTests|QuickCleanupTests|CleanupBatchTests|CleanupReviewFilterTests|DeveloperCleanupPlanTests|DeveloperCleanupReviewTests|twoClickTargetDeletesOnlyReviewedStartupDiskDependencies|StorageUIResourcesTests|FolderExclusion', '--parallel', 'false',
   ], {
     cwd: root, encoding: 'utf8', timeout: 115_000, maxBuffer: 16 * 1024 * 1024,
     env: { ...process.env, STORAGEDADDY_MAC_UI_EVIDENCE: '0', STORAGEDADDY_CLEANUP_SCROLL_EVIDENCE: '0' },

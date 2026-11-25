@@ -45,6 +45,22 @@ struct DeveloperCleanupReview: Sendable {
         }
     }
 
+    func reclaimable(on device: UInt64?) -> Self {
+        Self(scopes: scopes, items: items.filter {
+            $0.device == device && $0.device != 0 && $0.keptReason == nil && $0.canDeletePermanently && $0.allocatedBytes > 0
+        })
+    }
+
+    func selection(upTo target: Int64) -> Set<Item.ID> {
+        var remaining = target
+        var selected = Set<Item.ID>()
+        for item in items where remaining > 0 {
+            selected.insert(item.id)
+            remaining -= item.allocatedBytes
+        }
+        return selected
+    }
+
     struct Outcome: Sendable {
         var deleted: Set<Item.ID> = []
         var trashed: Set<Item.ID> = []

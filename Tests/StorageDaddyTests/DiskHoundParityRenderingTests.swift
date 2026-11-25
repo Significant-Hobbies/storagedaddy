@@ -6,6 +6,47 @@ import DiskCore
 
 @MainActor @Suite(.serialized)
 struct DiskHoundParityRenderingTests {
+    @Test(.timeLimit(.minutes(2)))
+    func twoClickTargetDeletesOnlyReviewedStartupDiskDependencies() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("space-target-\(UUID())")
+        defer { try? fm.removeItem(at: home) }
+        let projects = home.appendingPathComponent("Projects")
+        for (name, size) in [("Larger", 65536), ("Smaller", 4096)] {
+            let project = projects.appendingPathComponent(name)
+            let dependencies = project.appendingPathComponent("node_modules")
+            try fm.createDirectory(at: dependencies, withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: project.appendingPathComponent("package.json"))
+            try Data(repeating: 42, count: size).write(to: dependencies.appendingPathComponent("index.js"))
+        }
+        let model = ExplorerModel(developerCleanupPreferences: nil)
+        let target = try #require(StartupCapacity(total: 100_001, available: 10_000))
+        #expect(target.bytesToEightyPercent == 10_001)
+        model.openSpaceTarget(target, home: home)
+        await model.waitForCurrentStorageOperation()
+        let plan = try #require(model.developerCleanupPlan)
+        #expect(model.showsDeveloperCleanupReview)
+        #expect(model.developerCleanupFolders.isEmpty)
+        #expect(plan.items.count == 2)
+        #expect(plan.reclaimable(on: nil).items.isEmpty)
+        #expect(plan.selection(upTo: Int64.max).count == 2)
+        let item = try #require(plan.items.first)
+        #expect(item.path.contains("/Larger/"))
+        #expect(model.developerCleanupSelectedIDs == [item.id])
+        if ProcessInfo.processInfo.environment["STORAGEDADDY_DEVELOPER_CLEANUP_EVIDENCE"] == "1" {
+            for width in [880, 1100, 1440] {
+                try capture(AnyView(ExplorerView(runsLaunchActions: false).environmentObject(model)),
+                            name: "space-target-\(width)", width: width)
+            }
+        }
+        model.confirmDeveloperCleanup(planID: plan.id, ids: model.developerCleanupSelectedIDs, permanently: true)
+        await model.waitForCurrentStorageOperation()
+        #expect(model.developerCleanupOutcome?.deleted == [item.id])
+        #expect(!fm.fileExists(atPath: item.path))
+        #expect(fm.fileExists(atPath: projects.appendingPathComponent("Larger/package.json").path))
+        #expect(fm.fileExists(atPath: projects.appendingPathComponent("Smaller/node_modules/index.js").path))
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["STORAGEDADDY_DEVELOPER_CLEANUP_EVIDENCE"] == "1"),
           .timeLimit(.minutes(2)))
     func developerCleanupShowsOneReviewAndConfirmsSelectedFolders() async throws {

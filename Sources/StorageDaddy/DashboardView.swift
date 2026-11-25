@@ -141,8 +141,17 @@ struct DashboardView: View {
             HStack(spacing: 16) {
                 DoodleArt(topic: .overview).frame(width: 72, height: 72)
                 VStack(alignment: .trailing, spacing: 8) {
-                    Button("Find Developer Files", action: m.openDeveloperCleanup)
-                        .buttonStyle(SMMacButtonStyle(.primary))
+                    if let capacity = dashboard.report.flatMap(StartupCapacity.init(report:)), capacity.bytesToEightyPercent > 0 {
+                        Button("Review cleanup for 80%") { m.openSpaceTarget(capacity) }
+                            .buttonStyle(SMMacButtonStyle(.primary))
+                            .disabled(!m.canStartDeveloperCleanup)
+                            .help("Scan saved project folders, or Desktop and common development folders, for rebuildable dependencies.")
+                        Text("Free \(DiskFormat.bytes(capacity.bytesToEightyPercent)) to reach 80% used")
+                            .font(.caption).foregroundStyle(Tints.secondaryText)
+                    } else {
+                        Button("Find Developer Files", action: m.openDeveloperCleanup)
+                            .buttonStyle(SMMacButtonStyle(.primary))
+                    }
                     HStack(spacing: 10) {
                         Button("Refresh", action: dashboard.refresh).disabled(dashboard.loading || m.busy)
                         if let report = dashboard.report {
@@ -157,8 +166,7 @@ struct DashboardView: View {
     }
 
     private func capacityPanel(_ report: SystemStorageReport) -> some View {
-        let capacity = report.startupAccounting.flatMap { StartupCapacity(total: $0.total, available: $0.available) }
-            ?? StartupCapacity(volumes: report.volumes)
+        let capacity = StartupCapacity(report: report)
         let startup = report.volumes.first(where: \.isStartupData)
             ?? report.volumes.first(where: { $0.mountPoint == "/" })
         return VStack(alignment: .leading, spacing: 18) {

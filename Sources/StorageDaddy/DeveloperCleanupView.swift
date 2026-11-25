@@ -8,35 +8,51 @@ struct DeveloperCleanupView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            SMWorkspaceHeader("Developer Cleanup", subtitle: subtitle) {
+            SMWorkspaceHeader(model.spaceTarget == nil ? "Developer Cleanup" : "Review cleanup for 80%", subtitle: subtitle) {
                 Button("Other Cleanup", action: model.openQuickCleanup)
                     .disabled(model.busy)
             }
-            HStack(spacing: 10) {
-                if !model.developerCleanupFolders.isEmpty {
-                    Button("Scan Again", action: model.rescanDeveloperCleanup)
+            if let target = model.spaceTarget {
+                Text("Free \(DiskFormat.bytes(target.bytesToEightyPercent)) to reach 80% used")
+                    .font(.headline)
+                if let plan = model.developerCleanupPlan, !plan.scopes.isEmpty {
+                    DisclosureGroup("Scanned locations (\(plan.scopes.count))") {
+                        ForEach(plan.scopes) { scope in
+                            Text(StorageLabels.location(scope.path) + (scope.error.map { " · " + $0 } ?? ""))
+                                .font(.caption)
+                        }
+                    }
                 }
-                Button(model.developerCleanupFolders.isEmpty ? "Choose Folders…" : "Add Folders…",
-                       action: model.chooseDeveloperCleanupFolder)
-                    .buttonStyle(SMMacButtonStyle(model.developerCleanupFolders.isEmpty ? .primary : .secondary))
-            }.disabled(!model.canStartDeveloperCleanup)
+                if !model.busy && model.developerCleanupOutcome == nil {
+                    Button("Other developer folders", action: model.openDeveloperCleanup)
+                }
+            } else {
+                HStack(spacing: 10) {
+                    if !model.developerCleanupFolders.isEmpty {
+                        Button("Scan Again", action: model.rescanDeveloperCleanup)
+                    }
+                    Button(model.developerCleanupFolders.isEmpty ? "Choose Folders…" : "Add Folders…",
+                           action: model.chooseDeveloperCleanupFolder)
+                        .buttonStyle(SMMacButtonStyle(model.developerCleanupFolders.isEmpty ? .primary : .secondary))
+                }.disabled(!model.canStartDeveloperCleanup)
 
-            if !model.developerCleanupFolders.isEmpty {
-                let unavailable = model.developerCleanupPlan?.scopes.filter { $0.error != nil }.count ?? 0
-                DisclosureGroup(unavailable == 0 ? "Scan locations" : "Scan locations · \(unavailable) unavailable") {
-                    ForEach(model.developerCleanupFolders, id: \.self) { path in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(StorageLabels.location(path)).lineLimit(1).truncationMode(.middle).help(path)
-                                if let reason = model.developerCleanupPlan?.scopes.first(where: { $0.path == path })?.error {
-                                    Text(reason).font(.caption).foregroundStyle(Tints.yellow)
+                if !model.developerCleanupFolders.isEmpty {
+                    let unavailable = model.developerCleanupPlan?.scopes.filter { $0.error != nil }.count ?? 0
+                    DisclosureGroup(unavailable == 0 ? "Scan locations" : "Scan locations · \(unavailable) unavailable") {
+                        ForEach(model.developerCleanupFolders, id: \.self) { path in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(StorageLabels.location(path)).lineLimit(1).truncationMode(.middle).help(path)
+                                    if let reason = model.developerCleanupPlan?.scopes.first(where: { $0.path == path })?.error {
+                                        Text(reason).font(.caption).foregroundStyle(Tints.yellow)
+                                    }
                                 }
-                            }
-                            Spacer(minLength: 8)
-                            Button("Remove") { model.removeDeveloperCleanupFolder(path) }
-                                .accessibilityLabel("Remove \(path) from scan locations")
-                                .disabled(!model.canStartDeveloperCleanup)
-                        }.padding(.top, 5)
+                                Spacer(minLength: 8)
+                                Button("Remove") { model.removeDeveloperCleanupFolder(path) }
+                                    .accessibilityLabel("Remove \(path) from scan locations")
+                                    .disabled(!model.canStartDeveloperCleanup)
+                            }.padding(.top, 5)
+                        }
                     }
                 }
             }
@@ -48,7 +64,7 @@ struct DeveloperCleanupView: View {
                     Text("\(plan.skipped.formatted()) locations skipped. Excluded, protected and unreadable locations stay untouched.")
                         .font(.caption).foregroundStyle(Tints.secondaryText)
                 }
-                if !plan.items.isEmpty, model.developerCleanupOutcome == nil {
+                if !plan.items.isEmpty, model.developerCleanupOutcome == nil, model.spaceTarget == nil {
                     let ready = plan.items.filter { $0.keptReason == nil }
                     let kept = plan.items.filter { $0.keptReason != nil }
                     Text("\(ready.count.formatted()) ready · \(bytes(ready))  |  \(kept.count.formatted()) kept · \(bytes(kept))")
@@ -59,12 +75,12 @@ struct DeveloperCleanupView: View {
                     result(outcome).onAppear { presentedOutcome = true }
                 }
                 if plan.items.isEmpty {
-                    let reason = plan.scopes.count == 1 ? plan.scopes.first?.error : nil
-                    StorageEmptyView(reason == nil ? "No supported developer folders found" : "Scan location unavailable",
+                    let reason = plan.scopes.compactMap(\.error).first
+                    StorageEmptyView(reason == nil ? (model.spaceTarget == nil ? "No supported developer folders found" : "No eligible dependencies found") : "Scan location unavailable",
                         systemImage: "folder", description:
                             Text(reason ?? "Add the locations that hold your projects, linked worktrees, or developer caches."))
                 } else {
-                    if model.developerCleanupOutcome == nil { selectionControls(plan) }
+                    if model.developerCleanupOutcome == nil && model.spaceTarget == nil { selectionControls(plan) }
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(plan.items) { item in
@@ -77,7 +93,7 @@ struct DeveloperCleanupView: View {
                 }
             } else if model.busy {
                 Spacer(minLength: 0)
-            } else {
+            } else if model.spaceTarget == nil {
                 StorageEmptyView("Choose where to look", systemImage: "folder.badge.gearshape",
                     description: Text("Add project and worktree locations, including any worktrees stored outside your projects folder."))
             }
@@ -95,6 +111,7 @@ struct DeveloperCleanupView: View {
     }
 
     private var subtitle: String {
+        if model.spaceTarget != nil { return "Rebuildable project dependencies · startup disk only" }
         if let root = model.developerCleanupFolders.first, model.developerCleanupFolders.count == 1 {
             return StorageLabels.location(root)
         }
@@ -171,7 +188,14 @@ struct DeveloperCleanupView: View {
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(count) selected · \(allocation) on disk").font(.callout.weight(.semibold))
-                if permanentCount > 0 {
+                if let target = model.spaceTarget {
+                    let gap = max(0, target.bytesToEightyPercent - items.reduce(0) { $0 + $1.allocatedBytes })
+                    Text(gap > 0 ? "At least \(DiskFormat.bytes(gap)) more needed. Shared blocks may reduce savings." :
+                            "Selected allocation covers the target. Actual space freed can vary.")
+                }
+                if model.spaceTarget != nil {
+                    Text("Permanent deletion removes local edits. Reinstall dependencies before building again.")
+                } else if permanentCount > 0 {
                     Text("\(permanentCount) permanent · \(count - permanentCount) to Trash. Permanent deletion cannot be undone.")
                 } else {
                     Text("Items in Trash use disk space until you empty it.")
@@ -190,6 +214,14 @@ struct DeveloperCleanupView: View {
             Text(outcome.cancelled ? "Cleanup stopped" : "Cleanup complete").font(.headline)
             Text("\(outcome.deleted.count) deleted · \(outcome.trashed.count) moved to Trash · \(outcome.kept.count) could not be removed")
                 .font(.callout).foregroundStyle(Tints.secondaryText)
+            if model.spaceTarget != nil {
+                if let capacity = model.spaceTargetResult {
+                    Text(capacity.bytesToEightyPercent == 0 ? "Target reached · \(capacity.usedPercent)% used" :
+                            "\(capacity.usedPercent)% used · \(DiskFormat.bytes(capacity.bytesToEightyPercent)) still needed")
+                } else {
+                    Text("Current startup disk usage is unavailable.")
+                }
+            }
             if !outcome.trashed.isEmpty {
                 Text("Review and empty Trash in Finder when you’re ready to reclaim that space.")
                     .font(.caption).foregroundStyle(Tints.secondaryText)

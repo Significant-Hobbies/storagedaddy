@@ -812,7 +812,46 @@ struct FileTypeStats: Sendable {
             && macTools?.isBusy != true && !conversationArchive.busy && staged.isEmpty
     }
 
+    @Published private(set) var spaceTarget: StartupCapacity?
+    @Published private(set) var spaceTargetResult: StartupCapacity?
+    private var permanentBeforeTarget = true
+
+    func openSpaceTarget(_ capacity: StartupCapacity, home: URL = FileManager.default.homeDirectoryForCurrentUser) {
+        guard canStartDeveloperCleanup, capacity.bytesToEightyPercent > 0 else { return }
+        if spaceTarget == nil { permanentBeforeTarget = developerCleanupDeletesPermanently }
+        spaceTarget = capacity
+        spaceTargetResult = nil
+        developerCleanupDeletesPermanently = true
+        showingDeveloperCleanup = true
+        workspace = .cleanup
+        let roots: [URL]
+        if developerCleanupFolders.isEmpty {
+            roots = ["Desktop", "Developer", "Projects", "Code", "src", "repos"].compactMap {
+                let url = home.appendingPathComponent($0)
+                let metadata = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                return metadata?.isDirectory == true && metadata?.isSymbolicLink == false ? url : nil
+            }
+        } else {
+            roots = developerCleanupFolders.map { URL(fileURLWithPath: $0) }
+        }
+        developerCleanupPlan = nil
+        developerCleanupOutcome = nil
+        guard !roots.isEmpty else {
+            developerCleanupError = "Choose the folders where you keep your projects to look for rebuildable dependencies."
+            return
+        }
+        findDeveloperCleanup(in: roots)
+    }
+
     func openDeveloperCleanup() {
+        if spaceTarget != nil {
+            guard canStartDeveloperCleanup else { return }
+            spaceTarget = nil
+            developerCleanupDeletesPermanently = permanentBeforeTarget
+            developerCleanupPlan = nil
+            developerCleanupOutcome = nil
+            showingDeveloperCleanup = false
+        }
         let entering = workspace != .cleanup || !showingDeveloperCleanup
         workspace = .cleanup
         guard staged.isEmpty else { showingDeveloperCleanup = false; return }
@@ -849,6 +888,10 @@ struct FileTypeStats: Sendable {
             developerCleanupSelectedIDs.removeAll()
             return
         }
+        if let spaceTarget {
+            developerCleanupSelectedIDs = plan.selection(upTo: spaceTarget.bytesToEightyPercent)
+            return
+        }
         let ready = plan.items.filter { $0.keptReason == nil }
         let selected: [DeveloperCleanupReview.Item]
         if let keys = developerCleanupSelectionKeys {
@@ -861,6 +904,7 @@ struct FileTypeStats: Sendable {
 
     private func rememberDeveloperCleanupSelection(_ items: [DeveloperCleanupReview.Item], in plan: DeveloperCleanupReview) {
         developerCleanupSelectedIDs = Set(items.map(\.id))
+        guard spaceTarget == nil else { return }
         developerCleanupSelectionKeys = Set(items.compactMap { plan.selectionKey(for: $0) })
     }
 
@@ -924,8 +968,14 @@ struct FileTypeStats: Sendable {
                 let plan = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
                 try Task.checkCancellation()
                 developerCleanupOutcome = nil
-                developerCleanupPlan = plan
-                developerCleanupFolders = plan.scopes.map(\.path)
+                if spaceTarget != nil {
+                    var data = stat()
+                    let device = stat("/System/Volumes/Data", &data) == 0 ? UInt64(UInt32(bitPattern: data.st_dev)) : nil
+                    developerCleanupPlan = plan.reclaimable(on: device)
+                } else {
+                    developerCleanupPlan = plan
+                    developerCleanupFolders = plan.scopes.map(\.path)
+                }
                 progress = "\(plan.items.count) developer folders found"
             } catch is CancellationError { progress = "Developer scan cancelled" }
             catch {
@@ -955,6 +1005,11 @@ struct FileTypeStats: Sendable {
                 await plan.clean(ids: ids, permanently: permanently, progress: reportProgress)
             }
             let outcome = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+            if spaceTarget != nil {
+                spaceTargetResult = await Task.detached(priority: .userInitiated) {
+                    StartupCapacity(report: SystemInventory.collect())
+                }.value
+            }
             developerCleanupOutcome = outcome
             let removed = outcome.deleted.union(outcome.trashed)
             if !removed.isEmpty {
