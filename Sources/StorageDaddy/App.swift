@@ -482,6 +482,12 @@ struct FileTypeStats: Sendable {
     private var focusTask: Task<Void, Never>?
     private var focusVersion = UUID()
     private var task: Task<Void, Never>?
+
+    func waitForCurrentStorageOperation() async {
+        guard let task else { return }
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+
     var cacheCommandTask: Task<Void, Never>?
     var savedScanTask: Task<Void, Never>?
     private var projectDependenciesTask: Task<Void, Never>?

@@ -6,7 +6,8 @@ import DiskCore
 
 @MainActor @Suite(.serialized)
 struct DiskHoundParityRenderingTests {
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["STORAGEDADDY_DEVELOPER_CLEANUP_EVIDENCE"] == "1"))
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["STORAGEDADDY_DEVELOPER_CLEANUP_EVIDENCE"] == "1"),
+          .timeLimit(.minutes(2)))
     func developerCleanupShowsOneReviewAndConfirmsSelectedFolders() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("Developer Cleanup Demo \(UUID())")
@@ -41,15 +42,15 @@ struct DiskHoundParityRenderingTests {
         #expect(!model.showsDeveloperCleanupReview)
         model.showingDeveloperCleanup = true
         model.findDeveloperCleanup(in: [projects, worktrees])
-        let deadline = Date().addingTimeInterval(10)
-        while model.busy && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        await model.waitForCurrentStorageOperation()
+        try Task.checkCancellation()
         let plan = try #require(model.developerCleanupPlan)
         #expect(model.scan == nil)
         #expect(plan.items.count == 2)
         #expect(Set(plan.items.map(\.id.scope)).count == 2)
         model.findDeveloperCleanup(in: [projects, worktrees, web], retainingReviewOnFailure: true)
-        let overlapDeadline = Date().addingTimeInterval(10)
-        while model.busy && Date() < overlapDeadline { try await Task.sleep(for: .milliseconds(20)) }
+        await model.waitForCurrentStorageOperation()
+        try Task.checkCancellation()
         #expect(model.developerCleanupPlan?.id == plan.id)
         #expect(model.developerCleanupError?.contains("overlaps") == true)
         model.setDeveloperCleanupDeletesPermanently(false, planID: plan.id)
@@ -67,8 +68,8 @@ struct DiskHoundParityRenderingTests {
         model.setDeveloperCleanupDeletesPermanently(true, planID: plan.id)
         model.confirmDeveloperCleanup(planID: plan.id, ids: [item.id], permanently: true)
         #expect(model.developerCleanupError == nil)
-        let removalDeadline = Date().addingTimeInterval(10)
-        while model.busy && Date() < removalDeadline { try await Task.sleep(for: .milliseconds(20)) }
+        await model.waitForCurrentStorageOperation()
+        try Task.checkCancellation()
         #expect(model.developerCleanupOutcome?.deleted == [item.id])
         #expect(!fm.fileExists(atPath: dependencies.path))
         #expect(fm.fileExists(atPath: manifest.path))

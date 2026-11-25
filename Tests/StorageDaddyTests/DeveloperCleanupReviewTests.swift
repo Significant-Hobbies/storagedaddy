@@ -3,7 +3,7 @@ import Testing
 @testable import StorageDaddy
 
 struct DeveloperCleanupReviewTests {
-    @MainActor @Test func deselectionsAndNewFoldersStayUncheckedAcrossReviews() async throws {
+    @MainActor @Test(.timeLimit(.minutes(2))) func deselectionsAndNewFoldersStayUncheckedAcrossReviews() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("developer-selection-\(UUID())")
         let first = root.appendingPathComponent("First")
@@ -30,8 +30,8 @@ struct DeveloperCleanupReviewTests {
         let model = ExplorerModel()
 
         func completedReview() async throws -> DeveloperCleanupReview {
-            let deadline = Date().addingTimeInterval(15)
-            while model.busy && Date() < deadline { try await Task.sleep(for: .milliseconds(25)) }
+            await model.waitForCurrentStorageOperation()
+            try Task.checkCancellation()
             try #require(!model.busy)
             return try #require(model.developerCleanupPlan)
         }
