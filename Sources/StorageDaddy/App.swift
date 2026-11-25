@@ -1017,7 +1017,16 @@ struct FileTypeStats: Sendable {
             }
             let worker = Task.detached(priority: .userInitiated) { [self] in
                 guard let cacheHome else { return try await planner(roots, exclusions) }
-                async let projectPlan = quickPlanner(roots, exclusions, cacheHome)
+                let npx = cacheHome.appendingPathComponent(".npm/_npx").standardizedFileURL
+                let npmRoots = roots.filter { $0.standardizedFileURL.path == npx.path }
+                let others = roots.filter { $0.standardizedFileURL.path != npx.path }
+                // Keep the normal planner's overlap validation for nested or aliased roots.
+                let split = npmRoots.count == 1 && !others.isEmpty && others.allSatisfy {
+                    !FolderExclusions(paths: [$0.resolvingSymlinksInPath().path]).blocksCleanup(npx.resolvingSymlinksInPath())
+                }
+                async let projectPlan = quickPlanner(split ? others : roots, exclusions, cacheHome)
+                async let npmPlan = split ? quickPlanner(npmRoots, exclusions, cacheHome) : DeveloperCleanupReview(scopes: [], items: [])
+                async let inventory = FleetManagedCheckout.idleRetired(home: cacheHome, roots: roots, exclusions: exclusions)
                 var data = stat()
                 let device = stat("/System/Volumes/Data", &data) == 0 ? UInt64(UInt32(bitPattern: data.st_dev)) : nil
                 let caches = try SpaceTargetCache.discover(home: cacheHome, exclusions: exclusions)
@@ -1025,15 +1034,25 @@ struct FileTypeStats: Sendable {
                 if !initial.items.isEmpty && !roots.isEmpty {
                     await showInitialCleanupReview(initial, runID: runID)
                 }
-                let retired = (try? FleetManagedCheckout.idleRetired(home: cacheHome, roots: roots, exclusions: exclusions)) ?? []
+                let npm = try await npmPlan
+                let early = npm.reclaimable(on: device, caches: caches, exclusions: exclusions)
+                if !npm.items.isEmpty { await showInitialCleanupReview(early, runID: runID) }
+                let retired: [GitWorktreeCandidate]
+                do { retired = try await inventory }
+                catch is CancellationError { throw CancellationError() }
+                catch {
+                    retired = []
+                    await reportInventoryFailure(error.localizedDescription, runID: runID)
+                }
                 try Task.checkCancellation()
                 if !retired.isEmpty {
-                    var quickReview = initial
+                    var quickReview = early
                     quickReview.managedInventory = retired
                     await showInitialCleanupReview(quickReview, runID: runID)
                 }
                 let sized = try GitWorktreeManager.measure(retired)
-                let projects = try await projectPlan
+                let remaining = try await projectPlan
+                let projects = split ? DeveloperCleanupReview.projectScopes(npm.scopes + remaining.scopes) : remaining
                 var measured = projects.reclaimable(on: device, caches: caches, exclusions: exclusions)
                 measured.projectsMeasured = true
                 measured.managedInventory = sized
@@ -1088,6 +1107,11 @@ struct FileTypeStats: Sendable {
                 progress = "Developer scan needs attention"
             }
         }
+    }
+
+    private func reportInventoryFailure(_ detail: String, runID: UUID) {
+        guard discoveryID == runID else { return }
+        developerCleanupError = "Could not check retired worktrees. " + detail
     }
 
     private func updateWorktreeProgress(checked: Int, total: Int, runID: UUID) {

@@ -137,6 +137,9 @@ struct GitWorktreeReviewSheet: View {
                     Button("Remove Worktree…", role: .destructive) { confirming = true }.disabled(!acknowledged || model.working)
                 } else {
                     Text(managed.status).foregroundStyle(Tints.yellow)
+                    ForEach(Array(managed.blockers.dropFirst()), id: \.self) { reason in
+                        Text(reason.replacingOccurrences(of: "-", with: " ")).font(.caption)
+                    }
                     if !managed.ignoredPaths.isEmpty {
                         DisclosureGroup("Ignored paths kept (\(managed.ignoredPaths.count))") {
                             ScrollView {

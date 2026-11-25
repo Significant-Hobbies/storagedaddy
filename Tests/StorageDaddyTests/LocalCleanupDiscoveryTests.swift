@@ -19,12 +19,16 @@ import Testing
         let capacity = try #require(StartupCapacity(report: SystemInventory.collect()))
         let start = ContinuousClock.now
         model.openSpaceTarget(capacity)
-        var sawItems = false, sawWorktrees = false
+        var sawItems = false, sawWorktrees = false, sawModules = false
         while model.busy {
             if let plan = model.developerCleanupPlan {
                 if !sawItems && !plan.items.isEmpty && model.canEditCleanupReview {
                     print("First actionable review", start.duration(to: .now))
                     sawItems = true
+                }
+                if !sawModules && plan.items.contains(where: { $0.path.hasSuffix("/node_modules") }) {
+                    print("First actionable node_modules", start.duration(to: .now))
+                    sawModules = true
                 }
                 if !sawWorktrees && !plan.idleWorktrees.isEmpty {
                     print("First idle worktrees", start.duration(to: .now), plan.idleWorktrees.count)

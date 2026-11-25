@@ -23,6 +23,15 @@ final class NpxPackageCleanupTests: XCTestCase {
         try JSONEncoder().encode(["packages": packageIndex]).write(to: modules.appendingPathComponent(".package-lock.json"))
         let initialInode = try fm.attributesOfItem(atPath: sentinel.path)[.systemFileNumber] as? NSNumber
 
+        let earlier = try await DeveloperCleanupPlan.prepare(root: npx, home: home.path, quickCleanup: true)
+        let earlierRow = try XCTUnwrap(earlier.items.first)
+        let changed = cli.appendingPathComponent("credentials.js")
+        try Data("late fixture".utf8).write(to: changed)
+        let blocked = await earlier.clean(ids: [earlierRow.id], permanently: true)
+        XCTAssertTrue(blocked.deleted.isEmpty)
+        XCTAssertTrue(fm.fileExists(atPath: changed.path))
+        try fm.removeItem(at: changed)
+
         let plan = try await DeveloperCleanupPlan.prepare(root: npx, home: home.path, quickCleanup: true)
         let row = try XCTUnwrap(plan.items.first)
         XCTAssertNil(row.keptReason)

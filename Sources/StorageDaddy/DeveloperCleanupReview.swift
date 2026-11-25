@@ -180,6 +180,10 @@ struct DeveloperCleanupReview: Sendable {
             } catch is CancellationError { throw CancellationError() }
             catch { scopes.append(Scope(url: root, plan: nil, error: error.localizedDescription)) }
         }
+        return projectScopes(scopes)
+    }
+
+    static func projectScopes(_ scopes: [Scope]) -> Self {
         let items = scopes.enumerated().flatMap { scope, entry in
             (entry.plan?.items ?? []).map { artifact in
                 Item(id: .init(scope: scope, node: artifact.id), path: artifact.path, allocatedBytes: artifact.allocatedBytes,
