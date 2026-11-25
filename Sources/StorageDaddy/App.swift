@@ -786,6 +786,7 @@ struct FileTypeStats: Sendable {
     private var developerCleanupSelectionKeys: Set<DeveloperCleanupReview.SelectionKey>?
     @Published private(set) var developerCleanupOutcome: DeveloperCleanupReview.Outcome?
     @Published private(set) var developerCleanupError: String?
+    private var quickReviewSelection: Set<DeveloperCleanupReview.SelectionKey>?
     private let developerCleanupPreferences: UserDefaults?
     private let quickProjectPlanner: @Sendable ([URL], [String], URL) async throws -> DeveloperCleanupReview
     private let developerCleanupPlanner: @Sendable ([URL], [String]) async throws -> DeveloperCleanupReview
@@ -824,8 +825,9 @@ struct FileTypeStats: Sendable {
     @Published private(set) var spaceTargetResult: StartupCapacity?
     private var permanentBeforeTarget = true
 
-    func openSpaceTarget(_ capacity: StartupCapacity, home: URL = FileManager.default.homeDirectoryForCurrentUser) {
+    func openSpaceTarget(_ capacity: StartupCapacity, home: URL = FileManager.default.homeDirectoryForCurrentUser, preservingSelection: Bool = false) {
         guard canStartDeveloperCleanup else { return }
+        if !preservingSelection { quickReviewSelection = nil }
         if spaceTarget == nil { permanentBeforeTarget = developerCleanupDeletesPermanently }
         spaceTarget = capacity
         spaceTargetResult = nil
@@ -919,6 +921,7 @@ struct FileTypeStats: Sendable {
         let selected = plan.items.filter { ids.contains($0.id) && $0.keptReason == nil }
         guard selected.count == ids.count else { return }
         freezeCleanupReview()
+        if spaceTarget != nil { quickReviewSelection = Set(selected.compactMap { plan.selectionKey(for: $0) }) }
         rememberDeveloperCleanupSelection(selected, in: plan)
     }
 
@@ -928,7 +931,10 @@ struct FileTypeStats: Sendable {
             return
         }
         if spaceTarget != nil {
-            developerCleanupSelectedIDs = Set(plan.items.map(\.id))
+            let selected = quickReviewSelection.map { keys in
+                plan.items.filter { plan.selectionKey(for: $0).map(keys.contains) == true }
+            } ?? plan.items
+            developerCleanupSelectedIDs = Set(selected.map(\.id))
             return
         }
         let ready = plan.items.filter { $0.keptReason == nil }
@@ -1031,7 +1037,7 @@ struct FileTypeStats: Sendable {
                 var measured = projects.reclaimable(on: device, caches: caches, exclusions: exclusions)
                 measured.projectsMeasured = true
                 measured.managedInventory = sized
-                let candidates = measured.idleWorktrees.filter { $0.device == device && $0.allocatedBytes > 0 && FleetManagedCheckout.manages($0.url) }
+                let candidates = measured.idleWorktrees.filter { $0.device == device && FleetManagedCheckout.manages($0.url) }
                 if !candidates.isEmpty {
                     await showInitialCleanupReview(measured, runID: runID)
                     var checkedWorktrees: [FleetManagedCheckout.Preview] = []
@@ -2001,8 +2007,8 @@ extension ExplorerModel {
     }
     var scanScheduleBlockReason: String? { storageOperationBlockReason(scheduled: true) }
 
-    func storageOperationBlockReason(scheduled: Bool) -> String? {
-        if busy || isScanning { return "A scan, cleanup or package command is running." }
+    func storageOperationBlockReason(scheduled: Bool, allowingDiscovery: Bool = false) -> String? {
+        if (busy && !(allowingDiscovery && searchingForMoreCleanup)) || isScanning { return "A scan, cleanup or package command is running." }
         if !staged.isEmpty || showCleanup || !incompleteCleanup.isEmpty { return "Your cleanup selections are waiting for review." }
         if macTools?.isBusy == true { return "Mac Controls is busy." }
         if moves.busy || moves.plan != nil || moves.isPresented { return "A file move or review is open." }

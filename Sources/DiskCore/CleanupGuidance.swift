@@ -145,6 +145,7 @@ public enum CleanupGuidance {
     /// dependencies use folder-level checks; other candidates retain deeper checks.
     public static func isRegenerableFolder(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
         guard !isInstalledRuntime(path: path) else { return false }
+        if normalized(path).hasPrefix(normalized(home) + "/Library/Application Support/StorageDaddy/Cleanup Recovery/") { return false }
         if normalized(path) == normalized(home) + "/.npm/_cacache"
             || isSuggestedCache(category: .packageCaches, path: path, home: home)
             || isSuggestedCache(category: .modelCaches, path: path, home: home) { return true }

@@ -8,6 +8,8 @@ public struct DeveloperCleanupPlan: Sendable {
         public let allocatedBytes: Int64
         public let canDeletePermanently: Bool
         public let keptReason: String?
+        public let recoveryPath: String?
+        public let verifiedPackages: Int
         package let device: UInt64
         package let inode: UInt64
     }
@@ -27,6 +29,7 @@ public struct DeveloperCleanupPlan: Sendable {
     private let scan: ScanResult
     private let exclusions: [String]
     private let promptAvoidanceFolders: [String]
+    private let partialNpx: [Int: NpxPackageCleanup]
     private let quickCleanup: Bool
     private let home: String
 
@@ -81,12 +84,13 @@ public struct DeveloperCleanupPlan: Sendable {
         let linked = quickCleanup && !isNpxScope && root.standardizedFileURL.path != managedRetired.path
             ? try GitWorktreeManager.linkedCandidates(in: scan, excluding: rootIDs, exclusions: exclusionPolicy) : []
         let openFiles = try captureOpenFiles(linked.map { $0.url.path } + roots.compactMap { eligible[$0.id] }.flatMap { url in
-            [url.path, CleanupActiveUse.metroProject(for: url)?.path, quickCleanup && !isNpxScope ? url.deletingLastPathComponent().path : nil].compactMap { $0 }
+            [url.path, CleanupActiveUse.metroProject(for: url)?.path, quickCleanup ? url.deletingLastPathComponent().path : nil].compactMap { $0 }
         })
 
         let idle = linked.filter { openFiles?.user(of: $0.url.path) == nil && !FleetManagedCheckout.isReserved($0.url) }
         let measuredWorktrees = try GitWorktreeManager.measure(idle)
         let npxProcesses = isNpxScope && !roots.isEmpty ? try CleanupActiveUse.npxProcessSnapshot() : nil
+        var partialNpx: [Int: NpxPackageCleanup] = [:]
         var items: [Item] = []
         for node in roots {
             try Task.checkCancellation()
@@ -94,12 +98,15 @@ public struct DeveloperCleanupPlan: Sendable {
             let reason: String?
             do {
                 if quickCleanup && FleetManagedCheckout.containsReservedProject(url) {
-                    throw DiskAnalysisError.unsafePath(path: url.path, reason: "Fleet has reserved this workspace.")
+                    throw DiskAnalysisError.unsafePath(path: url.path, reason: "Fleet has an active registration or an uncleared lease for this workspace.")
                 }
                 if quickCleanup && !isNpxScope && CleanupGuidance.isProjectDependencies(path: url.path) {
                     try Self.checkDependencyOwner(url, openFiles: openFiles)
                 }
                 if let npxProcesses {
+                    if let owner = openFiles?.user(of: url.deletingLastPathComponent().path) {
+                        throw DiskAnalysisError.unsafePath(path: url.path, reason: "npx entry in use by " + owner)
+                    }
                     try NpxCacheReview.validate(entries: [url.deletingLastPathComponent()], processOutput: npxProcesses)
                 }
                 try ToolStorage.validateCleanup(path: url.path)
@@ -113,7 +120,13 @@ public struct DeveloperCleanupPlan: Sendable {
                     reason = "Use the package manager’s cache cleaner to remove this cache."
                 } else if CleanupGuidance.isSuggestedCache(category: .modelCaches, path: url.path, home: home) {
                     reason = "Review these downloaded models in Developer Insights before removing them."
-                } else if node.isScanIncomplete == true { reason = "Some contents could not be checked. This folder is kept." }
+                } else if node.isScanIncomplete == true {
+                    if isNpxScope, !repositories.contains(node.id), openFiles?.user(of: url.path) == nil,
+                       let partial = try NpxPackageCleanup.prepare(node: node, scan: scan, home: home, exclusions: exclusions) {
+                        partialNpx[node.id] = partial
+                        reason = nil
+                    } else { reason = "Some contents could not be checked. This folder is kept." }
+                }
                 else if repositories.contains(node.id), quickCleanup || ["node_modules", ".metro-cache"].contains(node.name) {
                     reason = "Contains a Git checkout. This folder is kept."
                 } else if !FileManager.default.isDeletableFile(atPath: url.path) {
@@ -126,15 +139,15 @@ public struct DeveloperCleanupPlan: Sendable {
                 }
                 else { reason = nil }
             } catch { reason = error.localizedDescription }
-            items.append(Item(id: node.id, path: url.path, allocatedBytes: node.allocatedBytes,
+            items.append(Item(id: node.id, path: url.path, allocatedBytes: partialNpx[node.id]?.bytes ?? node.allocatedBytes,
                               canDeletePermanently: (quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path)) || CleanupGuidance.canDeletePermanently(path: url.path, home: home),
-                              keptReason: reason, device: node.device, inode: node.inode))
+                              keptReason: reason, recoveryPath: partialNpx[node.id]?.recovery.path, verifiedPackages: partialNpx[node.id]?.ids.count ?? 0, device: node.device, inode: node.inode))
         }
         return Self(idleWorktrees: measuredWorktrees, items: items.sorted {
             if ($0.keptReason == nil) != ($1.keptReason == nil) { return $0.keptReason == nil }
             if $0.allocatedBytes != $1.allocatedBytes { return $0.allocatedBytes > $1.allocatedBytes }
             return $0.path < $1.path
-        }, scan: scan, exclusions: exclusions, promptAvoidanceFolders: promptAvoidanceFolders, quickCleanup: quickCleanup, home: home)
+        }, scan: scan, exclusions: exclusions, promptAvoidanceFolders: promptAvoidanceFolders, partialNpx: partialNpx, quickCleanup: quickCleanup, home: home)
     }
 
     public func clean(ids: Set<Int>, permanently: Bool,
@@ -142,7 +155,9 @@ public struct DeveloperCleanupPlan: Sendable {
         let selected = items.filter { ids.contains($0.id) && $0.keptReason == nil }
         var outcome = Outcome()
         guard selected.count == ids.count else { return outcome }
-        let dependencies = selected.filter { CleanupGuidance.isProjectDependencies(path: $0.path) }.map(\.path)
+        let dependencies = selected.filter { CleanupGuidance.isProjectDependencies(path: $0.path) }.flatMap {
+            quickCleanup ? [$0.path, URL(fileURLWithPath: $0.path).deletingLastPathComponent().path] : [$0.path]
+        }
         var openFiles: CleanupActiveUse.OpenFiles?
         let root = URL(fileURLWithPath: scan.rootPath)
         let policy = FolderExclusions(paths: exclusions)
@@ -151,6 +166,13 @@ public struct DeveloperCleanupPlan: Sendable {
                 try Task.checkCancellation()
                 progress?(index + 1, selected.count)
                 let url = URL(fileURLWithPath: item.path)
+                if let partial = partialNpx[item.id] {
+                    guard permanently else { throw CocoaError(.fileWriteNoPermission) }
+                    try await partial.clean(parent: scan.nodes[item.id], scan: scan, home: home,
+                                            exclusions: exclusions, avoidance: promptAvoidanceFolders)
+                    outcome.deleted.insert(item.id)
+                    continue
+                }
                 let isDependencies = CleanupGuidance.isProjectDependencies(path: item.path)
                 if isDependencies, openFiles?.isFresh != true {
                     openFiles = try Self.captureOpenFiles(dependencies)
@@ -171,10 +193,10 @@ public struct DeveloperCleanupPlan: Sendable {
                     try CleanupActiveUse.validate(urls: [url.deletingLastPathComponent()], home: home)
                 }
                 if quickCleanup && FleetManagedCheckout.containsReservedProject(url) {
-                    throw DiskAnalysisError.unsafePath(path: url.path, reason: "Fleet has reserved this workspace.")
+                    throw DiskAnalysisError.unsafePath(path: url.path, reason: "Fleet has an active registration or an uncleared lease for this workspace.")
                 }
                 if quickCleanup && isDependencies && !url.path.hasPrefix(URL(fileURLWithPath: home).appendingPathComponent(".npm/_npx").path + "/") {
-                    try Self.checkDependencyOwner(url, openFiles: nil)
+                    try Self.checkDependencyOwner(url, openFiles: openFiles?.isFresh == true ? openFiles : nil)
                 }
                 if permanently && item.canDeletePermanently {
                     guard (quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path)) || CleanupGuidance.canDeletePermanently(path: url.path, home: home),

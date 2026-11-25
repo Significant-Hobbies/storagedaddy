@@ -18,8 +18,8 @@ final class GitWorktreeReviewModel: ObservableObject {
     func inspect(_ candidate: GitWorktreeCandidate, explorer: ExplorerModel) {
         guard !working else { return }
         let interrupted = explorer.searchingForMoreCleanup
+        guard explorer.storageOperationBlockReason(scheduled: false, allowingDiscovery: true) == nil else { return }
         if interrupted { explorer.freezeCleanupReview() }
-        guard explorer.storageOperationBlockReason(scheduled: false) == nil else { return }
         self.explorer = explorer; explorer.busy = true
         review = nil; managed = nil; refreshOnClose = interrupted; message = nil; presented = true; working = true
         let exclusions = explorer.excludedFolders
@@ -55,7 +55,10 @@ final class GitWorktreeReviewModel: ObservableObject {
     func close() {
         guard !working else { return }
         presented = false; review = nil; managed = nil; explorer?.busy = false
-        if refreshOnClose, let explorer, let capacity = explorer.spaceTarget { explorer.openSpaceTarget(capacity) }
+        if refreshOnClose, let explorer, let previous = explorer.spaceTarget {
+            explorer.dashboard.refresh()
+            explorer.openSpaceTarget(StartupCapacity(report: SystemInventory.collect()) ?? previous, preservingSelection: true)
+        }
         explorer = nil
     }
 }

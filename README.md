@@ -29,7 +29,9 @@ sizes and timing are not a whole-disk benchmark.
   Review idle Node installs, Swift and Next.js build caches, and linked Git worktrees.
   Fleet checks retired worktrees for merged history, active leases and unknown ignored
   files before they qualify for permanent removal. You can change the selection before
-  confirming. The result shows the measured change in startup-disk free space.
+  confirming. For eligible idle npx installs with protected peers, StorageDaddy moves
+  the installation into local Cleanup Recovery, removes only the fully checked packages,
+  and leaves npm free to rebuild the original entry. The result shows the measured change in startup-disk free space.
   Other cleanup views also support moving reviewed files to Trash.
 - Installed applications with icons, sizes, last-used metadata, categories
   and reviewed removal of eligible apps.

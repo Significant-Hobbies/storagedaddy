@@ -16,6 +16,8 @@ struct DeveloperCleanupReview: Sendable {
         let canDeletePermanently: Bool
         let device: UInt64
         let inode: UInt64
+        var recoveryPath: String? = nil
+        var verifiedPackages = 0
     }
 
     struct SelectionKey: Hashable {
@@ -182,7 +184,7 @@ struct DeveloperCleanupReview: Sendable {
             (entry.plan?.items ?? []).map { artifact in
                 Item(id: .init(scope: scope, node: artifact.id), path: artifact.path, allocatedBytes: artifact.allocatedBytes,
                      keptReason: artifact.keptReason, canDeletePermanently: artifact.canDeletePermanently,
-                     device: artifact.device, inode: artifact.inode)
+                     device: artifact.device, inode: artifact.inode, recoveryPath: artifact.recoveryPath, verifiedPackages: artifact.verifiedPackages)
             }
         }.sorted {
             if ($0.keptReason == nil) != ($1.keptReason == nil) { return $0.keptReason == nil }

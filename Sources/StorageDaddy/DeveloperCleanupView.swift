@@ -32,8 +32,15 @@ struct DeveloperCleanupView: View {
                     }
                 }
                 if !model.busy && model.developerCleanupOutcome == nil {
-                    Button("Other developer folders", action: model.openDeveloperCleanup)
-                        .disabled(!model.canStartDeveloperCleanup)
+                    HStack {
+                        Button("Other developer folders", action: model.openDeveloperCleanup)
+                            .disabled(!model.canStartDeveloperCleanup)
+                        let recovery = FileManager.default.homeDirectoryForCurrentUser
+                            .appendingPathComponent("Library/Application Support/StorageDaddy/Cleanup Recovery")
+                        if FileManager.default.fileExists(atPath: recovery.path) {
+                            Button("Open Cleanup Recovery") { NSWorkspace.shared.open(recovery) }
+                        }
+                    }
                 }
             } else {
                 HStack(spacing: 10) {
@@ -199,7 +206,9 @@ struct DeveloperCleanupView: View {
         let cache = model.developerCleanupPlan.flatMap { plan in
             plan.id == planID && plan.scopes.indices.contains(item.id.scope) ? plan.scopes[item.id.scope].cache : nil
         }
-        let isWorktree = model.developerCleanupPlan?.scopes[item.id.scope].worktree != nil
+        let isWorktree = model.developerCleanupPlan.flatMap { plan in
+            plan.id == planID && plan.scopes.indices.contains(item.id.scope) ? plan.scopes[item.id.scope].worktree : nil
+        } != nil
         let name: String
         if isWorktree { name = "Merged worktree · " + url.lastPathComponent }
         else if let cache { name = cache.tool == .go ? "Go build cache" : "\(cache.tool.title) package cache" }
@@ -232,6 +241,13 @@ struct DeveloperCleanupView: View {
                 Text(name).font(.callout.weight(.semibold))
                 Text(StorageLabels.location(item.path)).font(.caption).foregroundStyle(Tints.secondaryText)
                     .lineLimit(1).truncationMode(.middle).help(item.path)
+                if let recovery = item.recoveryPath {
+                    Text("\(item.verifiedPackages) checked packages · Remaining files move to Cleanup Recovery")
+                        .font(.caption).foregroundStyle(Tints.secondaryText).help(recovery)
+                    if outcome?.deleted.contains(item.id) == true {
+                        Button("Show retained files") { NSWorkspace.shared.open(URL(fileURLWithPath: recovery)) }
+                    }
+                }
                 if let cache { Text(cache.tool.command).font(.caption.monospaced()).foregroundStyle(Tints.secondaryText) }
                 if let reason { Text(reason).font(.caption).foregroundStyle(Tints.yellow) }
             }
@@ -240,7 +256,7 @@ struct DeveloperCleanupView: View {
                 Text(DiskFormat.bytes(item.allocatedBytes)).monospacedDigit()
                 if reason != nil { Text(cache != nil && outcome != nil ? "Check result" : "Kept").foregroundStyle(Tints.yellow).font(.caption) }
                 else if let outcome {
-                    Text(outcome.deleted.contains(item.id) ? "Deleted" : outcome.trashed.contains(item.id) ? "In Trash" : "Unchanged")
+                    Text(outcome.deleted.contains(item.id) ? (item.recoveryPath == nil ? "Deleted" : "Packages cleaned") : outcome.trashed.contains(item.id) ? "In Trash" : "Unchanged")
                         .foregroundStyle(Tints.secondaryText).font(.caption)
                 } else {
                     Text(method).foregroundStyle(deletesPermanently ? Tints.coral : Tints.secondaryText).font(.caption)
@@ -284,7 +300,7 @@ struct DeveloperCleanupView: View {
     private func result(_ outcome: DeveloperCleanupReview.Outcome) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(outcome.cancelled ? "Cleanup stopped" : "Cleanup complete").font(.headline)
-            Text("\(outcome.deleted.count) deleted · \(outcome.trashed.count) moved to Trash · \(outcome.kept.count) did not complete")
+            Text("\(outcome.deleted.count) cleaned permanently · \(outcome.trashed.count) moved to Trash · \(outcome.kept.count) did not complete")
                 .font(.callout).foregroundStyle(Tints.secondaryText)
             if model.spaceTarget != nil {
                 if let capacity = model.spaceTargetResult {
