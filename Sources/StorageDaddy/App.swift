@@ -1024,6 +1024,8 @@ struct FileTypeStats: Sendable {
                 let split = npmRoots.count == 1 && !others.isEmpty && others.allSatisfy {
                     !FolderExclusions(paths: [$0.resolvingSymlinksInPath().path]).blocksCleanup(npx.resolvingSymlinksInPath())
                 }
+                async let managedStores = SpaceTargetCache.discoverManagedStores(home: cacheHome, exclusions: exclusions)
+                async let generatedCaches = GeneratedCacheCandidate.discover(home: cacheHome, excludedFolders: exclusions)
                 async let projectPlan = quickPlanner(split ? others : roots, exclusions, cacheHome)
                 async let npmPlan = split ? quickPlanner(npmRoots, exclusions, cacheHome) : DeveloperCleanupReview(scopes: [], items: [])
                 async let inventory = FleetManagedCheckout.idleRetired(home: cacheHome, roots: roots, exclusions: exclusions)
@@ -1050,10 +1052,18 @@ struct FileTypeStats: Sendable {
                     quickReview.managedInventory = retired
                     await showInitialCleanupReview(quickReview, runID: runID)
                 }
+                let extraCaches = try await managedStores
+                let allCaches = caches + extraCaches
+                var expanded = npm.reclaimable(on: device, caches: allCaches, exclusions: exclusions)
+                expanded.managedInventory = retired
+                if allCaches.count > caches.count { await showInitialCleanupReview(expanded, runID: runID) }
+                let generated = try await generatedCaches
+                expanded = expanded.addingGenerated(generated)
+                if !generated.isEmpty { await showInitialCleanupReview(expanded, runID: runID) }
                 let sized = try GitWorktreeManager.measure(retired)
                 let remaining = try await projectPlan
                 let projects = split ? DeveloperCleanupReview.projectScopes(npm.scopes + remaining.scopes) : remaining
-                var measured = projects.reclaimable(on: device, caches: caches, exclusions: exclusions)
+                var measured = projects.reclaimable(on: device, caches: allCaches, exclusions: exclusions).addingGenerated(generated)
                 measured.projectsMeasured = true
                 measured.managedInventory = sized
                 let candidates = measured.idleWorktrees.filter { $0.device == device && FleetManagedCheckout.manages($0.url) }

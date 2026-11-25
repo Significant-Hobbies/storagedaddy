@@ -7,7 +7,7 @@ final class PackageCacheCleanerTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let executable = root.appendingPathComponent("pnpm")
-        try Data("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PWD/arguments\"\nprintf '%s\\n' \"$PWD/store\"\n".utf8).write(to: executable)
+        try Data("#!/bin/sh\ntest \"$1 $2\" = 'store path' || exit 3\nprintf '%s\\n' \"$PWD/store\"\n".utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
         let store = try PackageCacheTool.pnpm.cacheDirectory(executable: executable, home: root)
         XCTAssertEqual(store.lastPathComponent, "store")
@@ -16,11 +16,11 @@ final class PackageCacheCleanerTests: XCTestCase {
         let expected = try FileManager.default.attributesOfItem(atPath: root.path)[.systemFileNumber] as? NSNumber
         XCTAssertNotNil(actual)
         XCTAssertEqual(actual, expected)
-        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("arguments"), encoding: .utf8), "store\npath\n")
+
     }
 
     func testExactNativeCommandsAndHomebrewClassification() async throws {
-        XCTAssertEqual(PackageCacheTool.allCases.map(\.command), ["yarn cache clean", "uv cache clean", "npm cache clean --force", "brew cleanup -s", "pip3 cache purge", "pnpm store prune", "go clean -cache"])
+        XCTAssertEqual(PackageCacheTool.allCases.map(\.command), ["yarn cache clean", "uv cache clean", "npm cache clean --force", "brew cleanup -s", "pip3 cache purge", "pnpm store prune", "go clean -cache", "lume prune"])
         XCTAssertTrue(CleanupGuidance.isSuggestedCache(category: .packageCaches, path: "/Users/fixture/Library/Caches/Homebrew", home: "/Users/fixture"))
         XCTAssertFalse(CleanupGuidance.canDeletePermanently(path: "/Users/fixture/Library/Caches/Homebrew", home: "/Users/fixture"))
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

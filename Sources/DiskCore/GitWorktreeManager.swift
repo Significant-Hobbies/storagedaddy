@@ -134,6 +134,57 @@ public actor GitWorktreeManager {
         return Set(rows.filter { !$0.main && !$0.bare && $0.locked == nil && $0.prunable == nil }.map { systemAliases($0.path) })
     }
 
+    /// Quick cleanup follows Git registrations from a selected repository. Never
+    /// enumerate the temporary directory or scan an unrelated sibling checkout.
+    package static func additionalProjectRoots(for roots: [URL], exclusions: [String], promptAvoidance: [String],
+                                               temporaryRoots: [URL] = [FileManager.default.temporaryDirectory, URL(fileURLWithPath: "/private/tmp")]) throws -> [URL] {
+        let covered = FolderExclusions(paths: roots.map(\.path))
+        let excluded = FolderExclusions(paths: exclusions + promptAvoidance)
+        let temp = temporaryRoots.compactMap { try? canonical($0) }
+        var additional: [URL] = []
+        for selected in roots {
+            try Task.checkCancellation()
+            guard let repo = try? canonical(selected) else { continue }
+            var marker = stat()
+            guard lstat(repo.appendingPathComponent(".git").path, &marker) == 0,
+                  marker.st_mode & S_IFMT == S_IFDIR || marker.st_mode & S_IFMT == S_IFREG,
+                  let common = try? gitPath(at: repo, option: "--git-common-dir"),
+                  let links = registeredLinks(at: repo) else { continue }
+            for path in links.sorted() {
+                try Task.checkCancellation()
+                let checkout = URL(fileURLWithPath: path)
+                guard !covered.blocksCleanup(checkout), !excluded.blocksCleanup(checkout), !isSensitivePath(checkout),
+                      let physical = try? canonical(checkout), physical.path == checkout.path,
+                      !additional.contains(where: { $0.path == path || path.hasPrefix($0.path + "/") || $0.path.hasPrefix(path + "/") })
+                else { continue }
+                // Siblings must live beside the already-selected repo. For temporary
+                // checkouts, every component below the system temp root must belong
+                // to this user. World-writable /tmp itself is never a scan root.
+                let boundary = temp.first { path.hasPrefix($0.path + "/") }
+                let adjacent = checkout.deletingLastPathComponent().path == repo.deletingLastPathComponent().path
+                guard adjacent || boundary != nil else { continue }
+                var directory = checkout
+                let stop = boundary ?? repo.deletingLastPathComponent()
+                var owned = true
+                while directory.path != stop.path {
+                    var info = stat()
+                    guard lstat(directory.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR,
+                          info.st_uid == getuid(), info.st_mode & 0o022 == 0 else { owned = false; break }
+                    directory.deleteLastPathComponent()
+                }
+                guard owned, lstat(checkout.appendingPathComponent(".git").path, &marker) == 0,
+                      marker.st_uid == getuid(), marker.st_mode & S_IFMT == S_IFREG,
+                      let admin = try? gitPath(at: checkout, option: "--git-dir"),
+                      admin.deletingLastPathComponent().path == common.appendingPathComponent("worktrees").path,
+                      let verifiedCommon = try? gitPath(at: checkout, option: "--git-common-dir"),
+                      verifiedCommon.path == common.path,
+                      let top = try? gitPath(at: checkout, option: "--show-toplevel"), top.path == path else { continue }
+                additional.append(checkout)
+            }
+        }
+        return additional
+    }
+
     package static func measure(_ candidates: [GitWorktreeCandidate]) throws -> [GitWorktreeCandidate] {
         guard !candidates.isEmpty else { return [] }
         let locations = candidates.map { $0.url.path }

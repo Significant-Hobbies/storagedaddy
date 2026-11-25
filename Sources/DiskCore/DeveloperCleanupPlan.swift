@@ -29,7 +29,7 @@ public struct DeveloperCleanupPlan: Sendable {
     private let scan: ScanResult
     private let exclusions: [String]
     private let promptAvoidanceFolders: [String]
-    private let partialNpx: [Int: NpxPackageCleanup]
+    private let partialPackages: [Int: InstalledPackageCleanup]
     private let quickCleanup: Bool
     private let home: String
 
@@ -90,7 +90,7 @@ public struct DeveloperCleanupPlan: Sendable {
         let idle = linked.filter { openFiles?.user(of: $0.url.path) == nil && !FleetManagedCheckout.isReserved($0.url) }
         let measuredWorktrees = try GitWorktreeManager.measure(idle)
         let npxProcesses = isNpxScope && !roots.isEmpty ? try CleanupActiveUse.npxProcessSnapshot() : nil
-        var partialNpx: [Int: NpxPackageCleanup] = [:]
+        var partialPackages: [Int: InstalledPackageCleanup] = [:]
         var items: [Item] = []
         for node in roots {
             try Task.checkCancellation()
@@ -100,7 +100,7 @@ public struct DeveloperCleanupPlan: Sendable {
                 if quickCleanup && FleetManagedCheckout.containsReservedProject(url) {
                     throw DiskAnalysisError.unsafePath(path: url.path, reason: "Fleet has an active registration or an uncleared lease for this workspace.")
                 }
-                if quickCleanup && !isNpxScope && CleanupGuidance.isProjectDependencies(path: url.path) {
+                if quickCleanup && !isNpxScope && (CleanupGuidance.isProjectDependencies(path: url.path) || CleanupActiveUse.metroProject(for: url) != nil) {
                     try Self.checkDependencyOwner(url, openFiles: openFiles)
                 }
                 if let npxProcesses {
@@ -121,9 +121,9 @@ public struct DeveloperCleanupPlan: Sendable {
                 } else if CleanupGuidance.isSuggestedCache(category: .modelCaches, path: url.path, home: home) {
                     reason = "Review these downloaded models in Developer Insights before removing them."
                 } else if node.isScanIncomplete == true {
-                    if isNpxScope, !repositories.contains(node.id), openFiles?.user(of: url.path) == nil,
-                       let partial = try NpxPackageCleanup.prepare(node: node, scan: scan, home: home, exclusions: exclusions) {
-                        partialNpx[node.id] = partial
+                    if quickCleanup, CleanupGuidance.isProjectDependencies(path: url.path), !repositories.contains(node.id), openFiles?.user(of: url.path) == nil,
+                       let partial = try InstalledPackageCleanup.prepare(node: node, scan: scan, home: home, exclusions: exclusions) {
+                        partialPackages[node.id] = partial
                         reason = nil
                     } else { reason = "Some contents could not be checked. This folder is kept." }
                 }
@@ -139,15 +139,15 @@ public struct DeveloperCleanupPlan: Sendable {
                 }
                 else { reason = nil }
             } catch { reason = error.localizedDescription }
-            items.append(Item(id: node.id, path: url.path, allocatedBytes: partialNpx[node.id]?.bytes ?? node.allocatedBytes,
+            items.append(Item(id: node.id, path: url.path, allocatedBytes: partialPackages[node.id]?.bytes ?? node.allocatedBytes,
                               canDeletePermanently: (quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path)) || CleanupGuidance.canDeletePermanently(path: url.path, home: home),
-                              keptReason: reason, recoveryPath: partialNpx[node.id]?.recovery.path, verifiedPackages: partialNpx[node.id]?.ids.count ?? 0, device: node.device, inode: node.inode))
+                              keptReason: reason, recoveryPath: partialPackages[node.id]?.recovery.path, verifiedPackages: partialPackages[node.id]?.ids.count ?? 0, device: node.device, inode: node.inode))
         }
         return Self(idleWorktrees: measuredWorktrees, items: items.sorted {
             if ($0.keptReason == nil) != ($1.keptReason == nil) { return $0.keptReason == nil }
             if $0.allocatedBytes != $1.allocatedBytes { return $0.allocatedBytes > $1.allocatedBytes }
             return $0.path < $1.path
-        }, scan: scan, exclusions: exclusions, promptAvoidanceFolders: promptAvoidanceFolders, partialNpx: partialNpx, quickCleanup: quickCleanup, home: home)
+        }, scan: scan, exclusions: exclusions, promptAvoidanceFolders: promptAvoidanceFolders, partialPackages: partialPackages, quickCleanup: quickCleanup, home: home)
     }
 
     public func clean(ids: Set<Int>, permanently: Bool,
@@ -166,7 +166,7 @@ public struct DeveloperCleanupPlan: Sendable {
                 try Task.checkCancellation()
                 progress?(index + 1, selected.count)
                 let url = URL(fileURLWithPath: item.path)
-                if let partial = partialNpx[item.id] {
+                if let partial = partialPackages[item.id] {
                     guard permanently else { throw CocoaError(.fileWriteNoPermission) }
                     try await partial.clean(parent: scan.nodes[item.id], scan: scan, home: home,
                                             exclusions: exclusions, avoidance: promptAvoidanceFolders)
@@ -195,7 +195,7 @@ public struct DeveloperCleanupPlan: Sendable {
                 if quickCleanup && FleetManagedCheckout.containsReservedProject(url) {
                     throw DiskAnalysisError.unsafePath(path: url.path, reason: "Fleet has an active registration or an uncleared lease for this workspace.")
                 }
-                if quickCleanup && isDependencies && !url.path.hasPrefix(URL(fileURLWithPath: home).appendingPathComponent(".npm/_npx").path + "/") {
+                if quickCleanup && (isDependencies || CleanupActiveUse.metroProject(for: url) != nil) && !url.path.hasPrefix(URL(fileURLWithPath: home).appendingPathComponent(".npm/_npx").path + "/") {
                     try Self.checkDependencyOwner(url, openFiles: openFiles?.isFresh == true ? openFiles : nil)
                 }
                 if permanently && item.canDeletePermanently {
@@ -224,7 +224,7 @@ public struct DeveloperCleanupPlan: Sendable {
         return outcome
     }
 
-    private static func checkDependencyOwner(_ url: URL, openFiles: CleanupActiveUse.OpenFiles?) throws {
+    static func checkDependencyOwner(_ url: URL, openFiles: CleanupActiveUse.OpenFiles?) throws {
         let project = url.deletingLastPathComponent()
         let evidence = try openFiles ?? CleanupActiveUse.captureOpenFiles(for: [project.path])
         if let user = evidence.user(of: project.path) {
@@ -232,9 +232,18 @@ public struct DeveloperCleanupPlan: Sendable {
         }
         var ancestor = project
         while ancestor.path != "/" && !ancestor.path.isEmpty {
-            if FileManager.default.fileExists(atPath: ancestor.appendingPathComponent(".git").path) {
-                guard GitCheckoutProbe.runLocal(at: project, arguments: ["--no-lazy-fetch", "ls-files", "--cached", "-z", "--", "node_modules"]) == "" else {
-                    throw GitWorktreeError.unsafe("Dependencies are tracked by Git or the index could not be checked.")
+            let markerURL = ancestor.appendingPathComponent(".git")
+            var metadata = stat()
+            if lstat(markerURL.path, &metadata) == 0 {
+                if metadata.st_mode & S_IFMT == S_IFREG {
+                    guard GitWorktreeManager.registeredLinks(at: ancestor)?.contains(GitWorktreeManager.systemAliases(ancestor.path)) == true else {
+                        throw GitWorktreeError.unsafe("Checkout registration is locked or could not be verified.")
+                    }
+                } else if metadata.st_mode & S_IFMT != S_IFDIR {
+                    throw GitWorktreeError.unsafe("Checkout metadata could not be verified.")
+                }
+                guard GitCheckoutProbe.runLocal(at: project, arguments: ["--no-lazy-fetch", "ls-files", "--cached", "-z", "--", url.lastPathComponent]) == "" else {
+                    throw GitWorktreeError.unsafe("\(url.lastPathComponent) contains files tracked by Git, or the index could not be checked.")
                 }
                 break
             }

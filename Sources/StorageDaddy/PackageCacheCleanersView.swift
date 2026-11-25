@@ -113,6 +113,9 @@ extension ExplorerModel {
                     // Re-resolve the cache immediately before executing the reviewed command.
                     let current = try tool.cacheDirectory(executable: executable, home: home)
                     guard current == cache, !exclusions.blocksCleanup(current) else { throw NSError(domain: "CacheCleaner", code: 3, userInfo: [NSLocalizedDescriptionKey: "The cache location or exclusions changed. Refresh tools and review again."]) }
+                    if tool == .pnpm || tool == .lume {
+                        return try tool.pruneReviewedStore(executable: executable, directory: cache, home: home)
+                    }
                     if tool == .brew {
                         let prefix = try PackageToolCommand.run(executable: executable, arguments: ["--prefix"], directory: home, timeout: 20)
                         let path = prefix.output.trimmingCharacters(in: .whitespacesAndNewlines)

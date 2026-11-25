@@ -112,7 +112,9 @@ public enum CleanupGuidance {
         let suffix: String
         let manifest: String
         let marker: String
-        if path.hasSuffix("/.next/cache") {
+        if path.hasSuffix("/.metro-cache") {
+            return isRegenerableFolder(path: path)
+        } else if path.hasSuffix("/.next/cache") {
             suffix = "/.next/cache"
             manifest = "package.json"
             marker = ".next/build-manifest.json"

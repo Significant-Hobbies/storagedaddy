@@ -4,6 +4,68 @@ import Testing
 @testable import StorageDaddy
 
 struct DeveloperCleanupReviewTests {
+    @Test func managedStorePrunesOnlyUnlinkedPnpmBlobsAndKeepsVMsOutsideImageCache() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        defer { try? fm.removeItem(at: home) }
+        let bin = home.appendingPathComponent(".local/bin")
+        let store = home.appendingPathComponent("Library/pnpm/store/v11/v10")
+        let blobs = store.appendingPathComponent("files/ab")
+        let cache = home.appendingPathComponent(".lume/cache")
+        let registry = cache.appendingPathComponent("ghcr")
+        let guest = home.appendingPathComponent(".lume/installed/disk.img")
+        for dir in [bin, blobs, registry, guest.deletingLastPathComponent()] {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        let image = registry.appendingPathComponent("fixture-image")
+        let free = blobs.appendingPathComponent(String(repeating: "a", count: 126))
+        let linked = blobs.appendingPathComponent(String(repeating: "b", count: 126))
+        let installed = home.appendingPathComponent("installed.js")
+        for file in [image, guest, free, linked] { try Data(repeating: 7, count: 65_536).write(to: file) }
+        try fm.linkItem(at: linked, to: installed)
+        let pnpm = """
+        #!/bin/sh
+        if [ "$1 $2" = 'store path' ]; then echo "$PWD/Library/pnpm/store/v11/v10"; exit; fi
+        test "$1" = --store-dir && test "$2" -ef "$PWD/Library/pnpm/store/v11/v10" || exit 2
+        case "$3" in --config.cache-dir=*) ;; *) exit 3 ;; esac
+        test "$4 $5" = 'store prune' || exit 4
+        /bin/rm "$PWD/Library/pnpm/store/v11/v10/files/ab/\(free.lastPathComponent)"
+        """
+        let lume = """
+        #!/bin/sh
+        if [ "$1 $2" = 'config get' ]; then
+          printf '%s\\n' 'Cache directory: ~/.lume/cache' 'Configured VM storage locations:' '  - home: ~/.lume (default)'
+          exit
+        fi
+        test "$1" = prune || exit 5
+        /bin/rm "$PWD/.lume/installed/disk.img" 2>/dev/null && exit 6
+        /bin/rm "$PWD/.lume/cache/ghcr/fixture-image"
+        """
+        for (name, script) in [("pnpm", pnpm), ("lume", lume)] {
+            let file = bin.appendingPathComponent(name)
+            try Data(script.utf8).write(to: file)
+            try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+        }
+        let blocked = try SpaceTargetCache.discoverManagedStores(home: home, exclusions: [image.path, free.path])
+        #expect(blocked.isEmpty)
+        let caches = try SpaceTargetCache.discoverManagedStores(home: home, exclusions: [])
+        #expect(caches.count == 2)
+        let pnpmRow = try #require(caches.first { $0.tool == .pnpm })
+        var metadata = stat()
+        #expect(lstat(free.path, &metadata) == 0)
+        #expect(pnpmRow.bytes == Int64(metadata.st_blocks) * 512)
+        let review = DeveloperCleanupReview(scopes: [], items: []).reclaimable(on: pnpmRow.device, caches: caches)
+        let ids = Set(review.items.map(\.id))
+        #expect(ids.count == 2)
+        let outcome = await review.clean(ids: ids, permanently: true) { _, _ in }
+        #expect(outcome.deleted == ids, "Kept reasons: \(outcome.kept)")
+        #expect(!fm.fileExists(atPath: free.path))
+        #expect(!fm.fileExists(atPath: image.path))
+        #expect(fm.fileExists(atPath: installed.path))
+        #expect(fm.fileExists(atPath: linked.path))
+        #expect(fm.fileExists(atPath: guest.path))
+    }
+
     @Test func targetCacheRechecksExclusionsAndFolderIdentityAndUsesReviewedCommand() async throws {
         let fm = FileManager.default
         let home = fm.temporaryDirectory.appendingPathComponent("target-cache-\(UUID())").resolvingSymlinksInPath()

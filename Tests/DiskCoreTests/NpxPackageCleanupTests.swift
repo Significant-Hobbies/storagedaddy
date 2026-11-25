@@ -3,6 +3,47 @@ import XCTest
 @testable import DiskCore
 
 final class NpxPackageCleanupTests: XCTestCase {
+    func testProjectPnpmRecoveryKeepsProtectedPackageAndRequiresMatchingInstallLock() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        defer { try? fm.removeItem(at: home) }
+        let project = home.appendingPathComponent("project")
+        let store = project.appendingPathComponent("node_modules/.pnpm")
+        let safe = store.appendingPathComponent("tool@1.0.0/node_modules/tool")
+        let kept = store.appendingPathComponent("peer@1.0.0/node_modules/peer")
+        for folder in [safe, kept] {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: folder.appendingPathComponent("package.json"))
+        }
+        try Data("{}".utf8).write(to: project.appendingPathComponent("package.json"))
+        try Data(repeating: 1, count: 100_000).write(to: safe.appendingPathComponent("code.js"))
+        try Data("test sentinel".utf8).write(to: kept.appendingPathComponent("credentials.js"))
+        let digest = Data(repeating: 1, count: 64).base64EncodedString()
+        let lock = Data("""
+        lockfileVersion: '9.0'
+        packages:
+          tool@1.0.0:
+            resolution: {integrity: sha512-\(digest)}
+          peer@1.0.0:
+            resolution: {integrity: sha512-\(digest)}
+        """.utf8)
+        try lock.write(to: project.appendingPathComponent("pnpm-lock.yaml"))
+        try Data("different".utf8).write(to: store.appendingPathComponent("lock.yaml"))
+        let unmatched = try await DeveloperCleanupPlan.prepare(root: project, home: home.path, quickCleanup: true)
+        XCTAssertNotNil(try XCTUnwrap(unmatched.items.first).keptReason)
+        try lock.write(to: store.appendingPathComponent("lock.yaml"))
+        let plan = try await DeveloperCleanupPlan.prepare(root: project, home: home.path, quickCleanup: true)
+        let item = try XCTUnwrap(plan.items.first)
+        XCTAssertNil(item.keptReason)
+        XCTAssertEqual(item.verifiedPackages, 1)
+        let recovery = URL(fileURLWithPath: try XCTUnwrap(item.recoveryPath))
+        let result = await plan.clean(ids: [item.id], permanently: true)
+        XCTAssertEqual(result.deleted, [item.id], String(describing: result.kept))
+        XCTAssertTrue(fm.fileExists(atPath: recovery.appendingPathComponent("node_modules/.pnpm/peer@1.0.0/node_modules/peer/credentials.js").path))
+        XCTAssertFalse(fm.fileExists(atPath: recovery.appendingPathComponent("node_modules/.pnpm/tool@1.0.0/node_modules/tool").path))
+        XCTAssertTrue(fm.fileExists(atPath: project.appendingPathComponent("pnpm-lock.yaml").path))
+    }
+
     func testIdlePackagesCanBeCleanedWhileSkippedPeerStaysIntactInRecovery() async throws {
         let fm = FileManager.default
         let home = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)

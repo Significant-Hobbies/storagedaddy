@@ -41,6 +41,33 @@ final class GitWorktreeManagerTests: XCTestCase {
         return try XCTUnwrap(all.first { $0.url.lastPathComponent == "linked" })
     }
 
+    func testQuickReviewExtendsOnlyToVerifiedSiblingsAndOwnedTemporaryCheckouts() async throws {
+        let fixture = try fixture()
+        let fm = FileManager.default
+        let root = URL(fileURLWithPath: GitWorktreeManager.systemAliases(fixture.root.path))
+        let main = root.appendingPathComponent("main")
+        let peer = root.appendingPathComponent("linked")
+        let unrelated = root.appendingPathComponent("other")
+        let temp = root.appendingPathComponent("temp")
+        let tempProject = temp.appendingPathComponent("bench/project")
+        let outside = root.appendingPathComponent("private-area/project")
+        for folder in [unrelated, tempProject.deletingLastPathComponent(), outside.deletingLastPathComponent()] {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        try git(main, ["worktree", "add", "-q", "--detach", tempProject.path, "HEAD"])
+        try git(main, ["worktree", "add", "-q", "--detach", outside.path, "HEAD"])
+        func links(_ exclusions: [String] = [], _ avoidance: [String] = []) throws -> Set<String> {
+            Set(try GitWorktreeManager.additionalProjectRoots(for: [main], exclusions: exclusions, promptAvoidance: avoidance,
+                                                             temporaryRoots: [temp]).map(\.path))
+        }
+        XCTAssertEqual(try links(), [peer.path, tempProject.path])
+        XCTAssertEqual(try links([peer.path], [temp.path]), [])
+        try git(main, ["worktree", "lock", peer.path])
+        XCTAssertEqual(try links(), [tempProject.path])
+        try fm.setAttributes([.posixPermissions: 0o777], ofItemAtPath: tempProject.deletingLastPathComponent().path)
+        XCTAssertEqual(try links(), [])
+    }
+
     func testQuickCleanupSurfacesOnlyIdleLinkedCheckoutsAndPreservesTrackedDependencies() async throws {
         let fixture = try fixture()
         let project = fixture.linked
@@ -57,6 +84,32 @@ final class GitWorktreeManagerTests: XCTestCase {
         let outcome = await plan.clean(ids: [item.id], permanently: true)
         XCTAssertTrue(outcome.deleted.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: modules.appendingPathComponent("tracked.js").path))
+    }
+
+    func testTargetReviewDeletesOnlyVerifiedUntrackedMetroCache() async throws {
+        let fixture = try fixture()
+        let project = fixture.linked.resolvingSymlinksInPath()
+        let cache = project.appendingPathComponent(".metro-cache")
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let output = cache.appendingPathComponent("bundler-cache")
+        try Data(repeating: 42, count: 32768).write(to: output)
+        try Data("{}".utf8).write(to: project.appendingPathComponent("package.json"))
+        let unverified = try await DeveloperCleanupPlan.prepare(root: project, quickCleanup: true)
+        XCTAssertTrue(unverified.items.isEmpty)
+        try Data("module.exports = {};".utf8).write(to: project.appendingPathComponent("metro.config.js"))
+        let verified = try await DeveloperCleanupPlan.prepare(root: project, quickCleanup: true)
+        let row = try XCTUnwrap(verified.items.first)
+        XCTAssertNil(row.keptReason)
+        try git(project, ["add", "-f", ".metro-cache/bundler-cache"])
+        let blocked = await verified.clean(ids: [row.id], permanently: true)
+        XCTAssertTrue(blocked.deleted.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.path))
+        try git(project, ["reset", "-q", "HEAD", "--", ".metro-cache/bundler-cache"])
+        let final = try await DeveloperCleanupPlan.prepare(root: project, quickCleanup: true)
+        let candidate = try XCTUnwrap(final.items.first)
+        let cleaned = await final.clean(ids: [candidate.id], permanently: true)
+        XCTAssertEqual(cleaned.deleted, [candidate.id], String(describing: cleaned.kept))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: project.appendingPathComponent("metro.config.js").path))
     }
 
     func testRetiredInventoryFindsRegisteredIdleCheckoutsWithoutScanningTheirContents() throws {

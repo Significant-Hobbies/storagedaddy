@@ -7,6 +7,10 @@ struct DeveloperCleanupView: View {
     @StateObject private var worktreeReview = GitWorktreeReviewModel()
     @State private var worktreesExpanded = true
     @State private var presentedOutcome = false
+    @State private var showingLargeItems = false
+    @State private var startWithCodex = false
+    @State private var resumeAfterLargeReview = false
+    @State private var inspectAfterDismissal: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -17,6 +21,15 @@ struct DeveloperCleanupView: View {
             if let target = model.spaceTarget {
                 Text("\(DiskFormat.bytes(target.available)) available on the startup disk")
                     .font(.headline)
+                let remaining = max(0, target.total / 5 + (target.total % 5 == 0 ? 0 : 1) - target.available)
+                if remaining > 0 {
+                    Text("\(DiskFormat.bytes(remaining)) more free space would bring this disk to 80% used.")
+                        .font(.callout).foregroundStyle(Tints.secondaryText)
+                }
+                HStack {
+                    Button("Review large items…") { openLargeReview(usingCodex: false) }
+                    Button("Find more with Codex…") { openLargeReview(usingCodex: true) }
+                }.disabled(!model.canEditCleanupReview)
                 if model.searchingForMoreCleanup {
                     Text("You can clean these items now. Checking more project folders and worktrees…")
                         .font(.callout).foregroundStyle(Tints.secondaryText)
@@ -171,9 +184,31 @@ struct DeveloperCleanupView: View {
             presentedOutcome = false
         }
         .sheet(isPresented: $worktreeReview.presented) { GitWorktreeReviewSheet(model: worktreeReview) }
+        .sheet(isPresented: $showingLargeItems, onDismiss: {
+            model.busy = false
+            if let url = inspectAfterDismissal {
+                inspectAfterDismissal = nil
+                model.start(url)
+            } else if resumeAfterLargeReview, let previous = model.spaceTarget {
+                model.openSpaceTarget(previous, preservingSelection: true)
+            }
+        }) {
+            LargeStorageReviewSheet(startWithCodex: startWithCodex, onScan: { inspectAfterDismissal = $0 },
+                                    onChange: { resumeAfterLargeReview = true; model.dashboard.refresh() })
+                .environmentObject(model)
+        }
         .onDisappear {
             if presentedOutcome { model.finishViewingDeveloperCleanupResult() }
         }
+    }
+
+    private func openLargeReview(usingCodex: Bool) {
+        guard model.storageOperationBlockReason(scheduled: false, allowingDiscovery: true) == nil else { return }
+        resumeAfterLargeReview = model.searchingForMoreCleanup
+        if resumeAfterLargeReview { model.freezeCleanupReview() }
+        model.busy = true
+        startWithCodex = usingCodex
+        showingLargeItems = true
     }
 
     private var subtitle: String {
@@ -210,8 +245,10 @@ struct DeveloperCleanupView: View {
             plan.id == planID && plan.scopes.indices.contains(item.id.scope) ? plan.scopes[item.id.scope].worktree : nil
         } != nil
         let name: String
-        if isWorktree { name = "Merged worktree · " + url.lastPathComponent }
-        else if let cache { name = cache.tool == .go ? "Go build cache" : "\(cache.tool.title) package cache" }
+        if let plan = model.developerCleanupPlan, plan.id == planID, plan.scopes.indices.contains(item.id.scope),
+           let generated = plan.scopes[item.id.scope].generated { name = generated.title }
+        else if isWorktree { name = "Merged worktree · " + url.lastPathComponent }
+        else if let cache { name = cache.displayName }
         else if model.spaceTarget != nil {
             let parent = url.deletingLastPathComponent()
             switch url.lastPathComponent {
@@ -247,6 +284,9 @@ struct DeveloperCleanupView: View {
                     if outcome != nil && FileManager.default.fileExists(atPath: recovery + "/node_modules") {
                         Button("Show retained files") { NSWorkspace.shared.open(URL(fileURLWithPath: recovery)) }
                     }
+                }
+                if let cache, cache.tool == .pnpm || cache.tool == .lume {
+                    Text(cache.tool.consequence).font(.caption).foregroundStyle(Tints.secondaryText)
                 }
                 if let cache { Text(cache.tool.command).font(.caption.monospaced()).foregroundStyle(Tints.secondaryText) }
                 if let reason { Text(reason).font(.caption).foregroundStyle(Tints.yellow) }

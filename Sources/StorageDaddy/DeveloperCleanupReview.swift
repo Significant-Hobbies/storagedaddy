@@ -38,14 +38,16 @@ struct DeveloperCleanupReview: Sendable {
         fileprivate let plan: DeveloperCleanupPlan?
         let worktree: FleetManagedCheckout.Preview?
         let cache: SpaceTargetCache?
+        let generated: GeneratedCacheCandidate?
         let error: String?
         var path: String { url.standardizedFileURL.path }
         var id: String { path }
 
-        init(url: URL, plan: DeveloperCleanupPlan? = nil, cache: SpaceTargetCache? = nil, worktree: FleetManagedCheckout.Preview? = nil, error: String? = nil) {
+        init(url: URL, plan: DeveloperCleanupPlan? = nil, cache: SpaceTargetCache? = nil, generated: GeneratedCacheCandidate? = nil, worktree: FleetManagedCheckout.Preview? = nil, error: String? = nil) {
             self.url = url
             self.plan = plan
             self.cache = cache
+            self.generated = generated
             self.worktree = worktree
             self.error = error
         }
@@ -76,6 +78,23 @@ struct DeveloperCleanupReview: Sendable {
         }
         return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes }, withheld: withheld,
                     exclusions: exclusions, startupDevice: device)
+    }
+
+    func addingGenerated(_ candidates: [GeneratedCacheCandidate]) -> Self {
+        var locations = scopes
+        var ready = items
+        for cache in candidates where cache.device == startupDevice && cache.device != 0 && cache.allocatedBytes > 0 {
+            let path = FolderExclusions(paths: [cache.url.path])
+            guard !ready.contains(where: { path.blocksCleanup(URL(fileURLWithPath: $0.path)) }),
+                  !withheld.contains(where: { path.blocksCleanup(URL(fileURLWithPath: $0.item.path)) }) else { continue }
+            let id = Item.ID(scope: locations.count, node: 0)
+            locations.append(Scope(url: cache.url, generated: cache))
+            ready.append(Item(id: id, path: cache.url.path, allocatedBytes: cache.allocatedBytes, keptReason: nil,
+                              canDeletePermanently: true, device: cache.device, inode: cache.inode))
+        }
+        return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes },
+                    withheld: withheld, exclusions: exclusions, checkedWorktrees: checkedWorktrees,
+                    projectsMeasured: projectsMeasured, managedInventory: managedInventory, startupDevice: startupDevice)
     }
 
     func addingWorktrees(_ worktrees: [FleetManagedCheckout.Preview]) -> Self {
@@ -167,7 +186,8 @@ struct DeveloperCleanupReview: Sendable {
             }
         }
         var scopes: [Scope] = []
-        for root in roots {
+        let linked = quickCleanup ? try GitWorktreeManager.additionalProjectRoots(for: roots, exclusions: excludedFolders, promptAvoidance: promptAvoidance) : []
+        for root in roots + linked {
             try Task.checkCancellation()
             let path = root.standardizedFileURL.path
             let access = root.startAccessingSecurityScopedResource()
@@ -207,6 +227,19 @@ struct DeveloperCleanupReview: Sendable {
         for (index, scope) in scopes.enumerated() {
             if Task.isCancelled { outcome.cancelled = true; break }
             guard let batch = selection[index] else { continue }
+            if let generated = scope.generated, let id = batch.first {
+                guard permanently else { outcome.kept[id] = "This cache requires permanent cleanup."; continue }
+                progress(processed + 1, ids.count)
+                do {
+                    try await generated.clean(excludedFolders: exclusions)
+                    outcome.deleted.insert(id)
+                } catch is CancellationError {
+                    outcome.cancelled = true
+                    break
+                } catch { outcome.kept[id] = error.localizedDescription }
+                processed += 1
+                continue
+            }
             if let preview = scope.worktree, let id = batch.first {
                 guard permanently else { outcome.kept[id] = "Worktree removal requires explicit permanent cleanup."; continue }
                 progress(processed + 1, ids.count)

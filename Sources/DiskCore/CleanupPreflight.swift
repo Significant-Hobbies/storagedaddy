@@ -180,6 +180,10 @@ public enum CleanupPreflight {
         }
     }
 
+    static func validateUnchangedTree(reviewed: ScanResult, current: ScanResult) throws {
+        try compare(before: records(in: reviewed, rootID: 0), after: records(in: current, rootID: 0))
+    }
+
     private struct Record: Equatable {
         let isDirectory: Bool
         let isSymlink: Bool

@@ -4,7 +4,7 @@ import Foundation
 /// Uses each manager's own cleanup rules. In particular Homebrew cleanup can
 /// remove old installed versions, so a directory named Homebrew is not parity.
 public enum PackageCacheTool: String, CaseIterable, Identifiable, Sendable {
-    case yarn, uv, npm, brew, pip, pnpm, go
+    case yarn, uv, npm, brew, pip, pnpm, go, lume
     public var id: String { rawValue }
     public var title: String { self == .brew ? "Homebrew" : self == .pip ? "pip3" : rawValue }
     public var arguments: [String] {
@@ -15,11 +15,13 @@ public enum PackageCacheTool: String, CaseIterable, Identifiable, Sendable {
         case .pip: ["cache", "purge"]
         case .pnpm: ["store", "prune"]
         case .go: ["clean", "-cache"]
+        case .lume: ["prune"]
         }
     }
     public var command: String { ([title == "Homebrew" ? "brew" : title] + arguments).joined(separator: " ") }
     public var consequence: String {
         switch self {
+        case .lume: "Removes downloaded VM images from the Lume cache. Existing virtual machines stay installed. Pulling an image again requires a download."
         case .go: "Clears compiled Go build artifacts. The next build recompiles them."
         case .brew: "Permanently removes cached downloads, old installed versions, stale logs and temporary files. Homebrew may also remove unused installed dependencies. Rollback versions and offline installers may be lost."
         case .uv: "Permanently clears uv’s cache using uv’s locking and link rules. Future installs may download or rebuild packages."
@@ -30,7 +32,7 @@ public enum PackageCacheTool: String, CaseIterable, Identifiable, Sendable {
 
     public func executable(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL? {
         let name = self == .pip ? "pip3" : rawValue
-        let pnpmRoots = self == .pnpm ? [
+        let pnpmRoots = self == .pnpm ? ["/opt/homebrew/bin", "/usr/local/bin",
                      home.appendingPathComponent(".local/share/mise/shims").path,
                      home.appendingPathComponent(".local/share/mise/installs/node/lts/bin").path,
                      home.appendingPathComponent("Library/pnpm").path] : []
@@ -51,8 +53,40 @@ public enum PackageCacheTool: String, CaseIterable, Identifiable, Sendable {
         case .brew: args = ["--cache"]
         case .go: args = ["env", "GOCACHE"]
         case .pnpm: args = ["store", "path"]
+        case .lume: args = ["config", "get"]
         }
-        let result = try PackageToolCommand.run(executable: executable, arguments: args, directory: home, timeout: 20)
+        let result: PackageToolCommandResult
+        if self == .lume || self == .pnpm {
+            let profile = #"(version 1)(allow default)(deny network*)(deny file-write*)(allow file-write* (literal "/dev/null"))"#
+            result = try PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/sandbox-exec"),
+                arguments: ["-p", profile, executable.path] + args, directory: home, timeout: 20,
+                requireCompleteOutput: true, mergeStandardError: false, nodeToolPath: self == .pnpm)
+        } else {
+            result = try PackageToolCommand.run(executable: executable, arguments: args, directory: home, timeout: 20)
+        }
+        if self == .lume {
+            let lines = result.output.components(separatedBy: .newlines)
+            let cache = home.appendingPathComponent(".lume/cache").standardizedFileURL
+            let location = lines.filter { $0.hasPrefix("Cache directory: ") }
+            // The native prune command targets every cached image. Only the default
+            // image cache is supported, and registered VM storage must stay outside it.
+            guard result.status == 0, location.count == 1,
+                  ["Cache directory: ~/.lume/cache", "Cache directory: " + cache.path].contains(location[0]),
+                  let heading = lines.firstIndex(of: "Configured VM storage locations:") else {
+                throw CocoaError(.fileReadUnknown)
+            }
+            let stores = lines.dropFirst(heading + 1).filter { !$0.isEmpty }
+            guard !stores.isEmpty else { throw CocoaError(.fileReadUnknown) }
+            for store in stores {
+                guard store.hasPrefix("  - "), let colon = store.range(of: ": ") else { throw CocoaError(.fileReadUnknown) }
+                var path = String(store[colon.upperBound...])
+                if path.hasSuffix(" (default)") { path.removeLast(" (default)".count) }
+                if path.hasPrefix("~/") { path = home.appendingPathComponent(String(path.dropFirst(2))).path }
+                guard path.hasPrefix("/"), !FolderExclusions(paths: [cache.path]).contains(
+                    URL(fileURLWithPath: path).resolvingSymlinksInPath().path) else { throw CocoaError(.fileReadUnknown) }
+            }
+            return cache
+        }
         guard result.status == 0,
               let line = result.output.split(separator: "\n").map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }).last(where: { $0.hasPrefix("/") }),
               line != "/", !line.contains("\0") else {
@@ -60,6 +94,36 @@ public enum PackageCacheTool: String, CaseIterable, Identifiable, Sendable {
         }
         return URL(fileURLWithPath: line).standardizedFileURL
     }
+    /// Scope native prune to the reviewed directory. pnpm normally also purges its
+    /// separate metadata cache, so give it a private scratch cache for this command.
+    public func pruneReviewedStore(executable: URL, directory: URL, home: URL) throws -> PackageToolCommandResult {
+        guard self == .lume || self == .pnpm, directory.path == directory.resolvingSymlinksInPath().path,
+              try cacheDirectory(executable: executable, home: home).path == directory.path else {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try CleanupActiveUse.validateCacheIsIdle(directory)
+        let fm = FileManager.default
+        let scratch = fm.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("StorageDaddy-prune-" + UUID().uuidString)
+        try fm.createDirectory(at: scratch, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? fm.removeItem(at: scratch) }
+        let profile = #"(version 1)(allow default)(deny network*)(deny file-write*)(allow file-write* (subpath (param "STORE")) (subpath (param "SCRATCH")) (literal "/dev/null"))"#
+        let options = self == .pnpm ? ["--store-dir", directory.path, "--config.cache-dir=" + scratch.path] : []
+        if self == .lume {
+            let children = try fm.contentsOfDirectory(atPath: directory.path)
+            guard children.contains("ghcr"), Set(children).isSubset(of: ["ghcr", ".DS_Store"]),
+                  directory.appendingPathComponent("ghcr").resolvingSymlinksInPath().path == directory.appendingPathComponent("ghcr").path else {
+                throw CocoaError(.fileWriteNoPermission)
+            }
+        }
+        guard let storePath = realpath(directory.path, nil), let scratchPath = realpath(scratch.path, nil) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        defer { free(storePath); free(scratchPath) }
+        return try PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/sandbox-exec"),
+            arguments: ["-D", "STORE=" + String(cString: storePath), "-D", "SCRATCH=" + String(cString: scratchPath), "-p", profile,
+                        executable.path] + options + arguments, directory: home, nodeToolPath: self == .pnpm)
+    }
+
 }
 
 public struct PackageToolCommandResult: Sendable {
@@ -72,7 +136,7 @@ public enum PackageToolCommand {
     /// after the display bound; a verbose manager cannot deadlock the pipe.
     public static func run(executable: URL, arguments: [String], directory: URL, timeout: TimeInterval = 300,
                            maximumOutputBytes: Int = 262_144, requireCompleteOutput: Bool = false, mergeStandardError: Bool = true,
-                           locale: String? = nil, goBuildCache: URL? = nil) throws -> PackageToolCommandResult {
+                           locale: String? = nil, goBuildCache: URL? = nil, nodeToolPath: Bool = false) throws -> PackageToolCommandResult {
         try Task.checkCancellation()
         let process = Process(), pipe = Pipe()
         process.executableURL = executable
@@ -87,6 +151,11 @@ public enum PackageToolCommand {
         environment["HOMEBREW_NO_ANALYTICS"] = "1"
         environment["COREPACK_ENABLE_NETWORK"] = "0"
         environment["COREPACK_ENABLE_DOWNLOAD_PROMPT"] = "0"
+        if nodeToolPath {
+            // Finder starts GUI apps with a minimal PATH. pnpm's executable can
+            // be a Node shebang even when located through its absolute path.
+            environment["PATH"] = (environment["PATH"] ?? "/usr/bin:/bin") + ":/opt/homebrew/bin:/usr/local/bin"
+        }
         if let goBuildCache { environment["GOCACHE"] = goBuildCache.path }
         if let locale { environment["LC_ALL"] = locale }
         process.environment = environment
