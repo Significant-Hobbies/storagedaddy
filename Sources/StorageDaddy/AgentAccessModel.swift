@@ -44,6 +44,14 @@ struct AgentReviewRequest: Codable, Identifiable {
     var requestedAt = Date()
     var outcome = "Waiting for native review"
     var pending = true
+
+    mutating func reconcileAfterRestart() {
+        let interrupted = ["Checking native Cleanup preflight.", "Staged for native confirmation",
+                           "Sent to native Cleanup preflight. Nothing removed; verify staging and choose the cleanup action there."]
+        if !pending && interrupted.contains(outcome) {
+            outcome = "Interrupted by restart. Inspect the item and request a fresh review."
+        }
+    }
 }
 
 struct AgentAuditEntry: Codable, Identifiable {
@@ -103,7 +111,10 @@ private struct AgentPolicy: Codable {
                 let policy = try AgentSecurity.load(AgentPolicy.self, from: file)
                 guard policy.sessions.count <= 100, policy.reviews.count <= 700, policy.audit.count <= 200, policy.approvedRoots.count <= 32,
                       policy.sessions.allSatisfy({ AgentSecurity.validHash($0.tokenHash) }) else { throw AgentSecurity.failure("Agent policy exceeds its limits.") }
-                sessions = policy.sessions; reviews = policy.reviews; audit = policy.audit; approvedRoots = policy.approvedRoots; oauthRegistrations = Array((policy.oauthRegistrations ?? []).prefix(100))
+                sessions = policy.sessions
+                reviews = policy.reviews
+                for index in reviews.indices { reviews[index].reconcileAfterRestart() }
+                audit = policy.audit; approvedRoots = policy.approvedRoots; oauthRegistrations = Array((policy.oauthRegistrations ?? []).prefix(100))
             } catch { self.error = "Saved agent access could not be read. Access remains off. \(error.localizedDescription)"; policyHealthy = false }
         }
         // Always starts off. Restoring the app never starts an implicit listener.

@@ -109,6 +109,8 @@ struct AgentAccessIntegrationTests {
         #expect(FileManager.default.fileExists(atPath: modules.path))
         f.agents.review(try #require(f.agents.reviews.first).id)
         try await waitForReview(f)
+        let restarted = AgentAccessModel(explorer: ExplorerModel(), directory: f.agentDirectory, httpPort: f.port)
+        #expect(restarted.reviews.first?.outcome.contains("Interrupted by restart") == true)
         let selection = try #require(f.explorer.nativeCleanupSelection())
         let recovery = f.directory.appendingPathComponent("fixture-trash")
         f.explorer.performNativeCleanup(selection, moveToTrash: { url in
