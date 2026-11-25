@@ -19,7 +19,7 @@ struct SpaceTargetCache: Sendable {
     var displayName: String {
         switch tool {
         case .lume: return "Lume downloaded VM images"
-        case .pnpm: return "pnpm unreferenced packages"
+        case .pnpm: return "pnpm package store"
         case .go: return "Go build cache"
         default: return tool.title + " package cache"
         }
@@ -69,7 +69,7 @@ struct SpaceTargetCache: Sendable {
             let bytes: Int64
             if tool == .pnpm {
                 guard directory.path.hasPrefix(base.path + "/"), directory.lastPathComponent == "v10",
-                      let allocation = try? unreferencedPnpmBytes(in: directory) else { continue }
+                      let allocation = try? singleLinkPnpmBytes(in: directory) else { continue }
                 bytes = allocation
             } else {
                 guard directory.path == base.path,
@@ -80,7 +80,7 @@ struct SpaceTargetCache: Sendable {
                 bytes = allocation
             }
             guard bytes > 0 else { continue }
-            var reason: String?
+            var reason: String? = tool == .pnpm ? "Cloned files may share disk space with installed packages. Review pnpm in Package Caches to prune the store." : nil
             do { try CleanupActiveUse.validateCacheIsIdle(directory) }
             catch { reason = error.localizedDescription }
             result.append(Self(tool: tool, executable: executable, home: home, directory: directory,
@@ -101,7 +101,7 @@ struct SpaceTargetCache: Sendable {
 
     /// pnpm v10 prunes single-link blobs in files/<two hex digits>/. Do not include
     /// linked project files, index metadata, or the total size of the store.
-    private static func unreferencedPnpmBytes(in store: URL) throws -> Int64 {
+    private static func singleLinkPnpmBytes(in store: URL) throws -> Int64 {
         let fm = FileManager.default
         let files = store.appendingPathComponent("files")
         guard let root = identity(files), root.0 == identity(store)?.0 else { return 0 }

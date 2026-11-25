@@ -237,7 +237,7 @@ public struct DeveloperCleanupPlan: Sendable {
             if lstat(markerURL.path, &metadata) == 0 {
                 if metadata.st_mode & S_IFMT == S_IFREG {
                     guard GitWorktreeManager.registeredLinks(at: ancestor)?.contains(GitWorktreeManager.systemAliases(ancestor.path)) == true else {
-                        throw GitWorktreeError.unsafe("Checkout registration is locked or could not be verified.")
+                        throw GitWorktreeError.unsafe("Git could not verify an unlocked linked worktree here. Submodule dependencies require separate review.")
                     }
                 } else if metadata.st_mode & S_IFMT != S_IFDIR {
                     throw GitWorktreeError.unsafe("Checkout metadata could not be verified.")

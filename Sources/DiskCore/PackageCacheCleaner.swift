@@ -25,7 +25,7 @@ public enum PackageCacheTool: String, CaseIterable, Identifiable, Sendable {
         case .go: "Clears compiled Go build artifacts. The next build recompiles them."
         case .brew: "Permanently removes cached downloads, old installed versions, stale logs and temporary files. Homebrew may also remove unused installed dependencies. Rollback versions and offline installers may be lost."
         case .uv: "Permanently clears uv’s cache using uv’s locking and link rules. Future installs may download or rebuild packages."
-        case .pnpm: "Permanently prunes unreferenced packages from pnpm’s store. Installed project dependencies remain; future installs may download packages again."
+        case .pnpm: "Pruning can empty the download store. Installed projects keep their packages. Future installs may download them again, and shared files can reduce the space recovered."
         default: "Permanently clears downloaded packages and cache records. Future installs may need the network; unavailable versions cannot be recovered from Trash."
         }
     }

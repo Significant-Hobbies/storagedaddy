@@ -126,7 +126,7 @@ public struct GeneratedCacheCandidate: Sendable {
 
         // Claim the exact reviewed name atomically so a tool rebuilding a new
         // cache at the original path cannot lose its replacement.
-        let staged = url.deletingLastPathComponent().appendingPathComponent(".StorageDaddy-cleaning-" + UUID().uuidString)
+        let staged = url.deletingLastPathComponent().appendingPathComponent("StorageDaddy interrupted cleanup " + UUID().uuidString)
         guard renamex_np(url.path, staged.path, UInt32(RENAME_EXCL)) == 0 else {
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }

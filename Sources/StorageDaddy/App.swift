@@ -1044,7 +1044,7 @@ struct FileTypeStats: Sendable {
                 catch is CancellationError { throw CancellationError() }
                 catch {
                     retired = []
-                    await reportInventoryFailure(error.localizedDescription, runID: runID)
+                    await reportInventoryFailure("Could not check retired worktrees. " + error.localizedDescription, runID: runID)
                 }
                 try Task.checkCancellation()
                 if !retired.isEmpty {
@@ -1057,7 +1057,13 @@ struct FileTypeStats: Sendable {
                 var expanded = npm.reclaimable(on: device, caches: allCaches, exclusions: exclusions)
                 expanded.managedInventory = retired
                 if allCaches.count > caches.count { await showInitialCleanupReview(expanded, runID: runID) }
-                let generated = try await generatedCaches
+                let generated: [GeneratedCacheCandidate]
+                do { generated = try await generatedCaches }
+                catch is CancellationError { throw CancellationError() }
+                catch {
+                    generated = []
+                    await reportInventoryFailure("Could not check generated caches. " + error.localizedDescription, runID: runID)
+                }
                 expanded = expanded.addingGenerated(generated)
                 if !generated.isEmpty { await showInitialCleanupReview(expanded, runID: runID) }
                 let sized = try GitWorktreeManager.measure(retired)
@@ -1121,7 +1127,7 @@ struct FileTypeStats: Sendable {
 
     private func reportInventoryFailure(_ detail: String, runID: UUID) {
         guard discoveryID == runID else { return }
-        developerCleanupError = "Could not check retired worktrees. " + detail
+        developerCleanupError = [developerCleanupError, detail].compactMap { $0 }.joined(separator: "\n")
     }
 
     private func updateWorktreeProgress(checked: Int, total: Int, runID: UUID) {

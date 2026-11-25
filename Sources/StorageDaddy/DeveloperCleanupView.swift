@@ -30,7 +30,7 @@ struct DeveloperCleanupView: View {
                 HStack {
                     Button("Review large items…") { openLargeReview(usingCodex: false) }
                     Button("Find more with Codex…") { openLargeReview(usingCodex: true) }
-                }.disabled(!model.canEditCleanupReview)
+                }.disabled(!model.canEditCleanupReview || model.storageOperationBlockReason(scheduled: false, allowingDiscovery: true) != nil)
                 if model.searchingForMoreCleanup {
                     Text("You can clean these items now. Checking more project folders and worktrees…")
                         .font(.callout).foregroundStyle(Tints.secondaryText)
