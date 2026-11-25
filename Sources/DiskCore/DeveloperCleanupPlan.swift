@@ -216,7 +216,10 @@ public struct DeveloperCleanupPlan: Sendable {
             } catch is CancellationError {
                 outcome.cancelled = true
                 break
-            } catch { outcome.kept[item.id] = error.localizedDescription }
+            } catch {
+                outcome.kept[item.id] = error.localizedDescription
+                if Task.isCancelled { outcome.cancelled = true; break }
+            }
         }
         return outcome
     }

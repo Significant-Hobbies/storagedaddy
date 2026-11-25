@@ -57,7 +57,7 @@ final class GitWorktreeReviewModel: ObservableObject {
         presented = false; review = nil; managed = nil; explorer?.busy = false
         if refreshOnClose, let explorer, let previous = explorer.spaceTarget {
             explorer.dashboard.refresh()
-            explorer.openSpaceTarget(StartupCapacity(report: SystemInventory.collect()) ?? previous, preservingSelection: true)
+            explorer.openSpaceTarget(previous, preservingSelection: true)
         }
         explorer = nil
     }

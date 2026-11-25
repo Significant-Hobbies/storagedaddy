@@ -242,9 +242,9 @@ struct DeveloperCleanupView: View {
                 Text(StorageLabels.location(item.path)).font(.caption).foregroundStyle(Tints.secondaryText)
                     .lineLimit(1).truncationMode(.middle).help(item.path)
                 if let recovery = item.recoveryPath {
-                    Text("\(item.verifiedPackages) checked packages · Remaining files move to Cleanup Recovery")
+                    Text("\(item.verifiedPackages) lockfile-listed packages · Remaining files move to Cleanup Recovery")
                         .font(.caption).foregroundStyle(Tints.secondaryText).help(recovery)
-                    if outcome?.deleted.contains(item.id) == true {
+                    if outcome != nil && FileManager.default.fileExists(atPath: recovery + "/node_modules") {
                         Button("Show retained files") { NSWorkspace.shared.open(URL(fileURLWithPath: recovery)) }
                     }
                 }
@@ -254,7 +254,7 @@ struct DeveloperCleanupView: View {
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 4) {
                 Text(DiskFormat.bytes(item.allocatedBytes)).monospacedDigit()
-                if reason != nil { Text(cache != nil && outcome != nil ? "Check result" : "Kept").foregroundStyle(Tints.yellow).font(.caption) }
+                if reason != nil { Text((cache != nil || item.recoveryPath != nil) && outcome != nil ? "Check result" : "Kept").foregroundStyle(Tints.yellow).font(.caption) }
                 else if let outcome {
                     Text(outcome.deleted.contains(item.id) ? (item.recoveryPath == nil ? "Deleted" : "Packages cleaned") : outcome.trashed.contains(item.id) ? "In Trash" : "Unchanged")
                         .foregroundStyle(Tints.secondaryText).font(.caption)

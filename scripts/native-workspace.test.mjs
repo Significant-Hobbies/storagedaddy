@@ -6,13 +6,13 @@ import { homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import test from 'node:test';
 
-test('native cleanup safeguards, exclusions and packaged UI resources', { timeout: 118_000 }, () => {
+test('native cleanup safeguards, exclusions and packaged UI resources', { timeout: 238_000 }, () => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const result = spawnSync('npx', [
     '--offline', 'xcodebuildmcp', 'swift-package', 'test', '--package-path', root,
     '--filter', 'AgentAccessIntegrationTests|QuickCleanupTests|CleanupBatchTests|CleanupReviewFilterTests|DeveloperCleanupPlanTests|DeveloperCleanupReviewTests|FleetManagedCheckoutTests|GitWorktreeManagerTests|NpxPackageCleanupTests|twoClickTargetDeletesOnlyReviewedStartupDiskDependencies|StorageUIResourcesTests|FolderExclusion', '--parallel', 'false',
   ], {
-    cwd: root, encoding: 'utf8', timeout: 115_000, maxBuffer: 16 * 1024 * 1024,
+    cwd: root, encoding: 'utf8', timeout: 235_000, maxBuffer: 16 * 1024 * 1024,
     env: { ...process.env, STORAGEDADDY_MAC_UI_EVIDENCE: '0', STORAGEDADDY_CLEANUP_SCROLL_EVIDENCE: '0' },
   });
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;

@@ -30,7 +30,7 @@ sizes and timing are not a whole-disk benchmark.
   Fleet checks retired worktrees for merged history, active leases and unknown ignored
   files before they qualify for permanent removal. You can change the selection before
   confirming. For eligible idle npx installs with protected peers, StorageDaddy moves
-  the installation into local Cleanup Recovery, removes only the fully checked packages,
+  the installation into local Cleanup Recovery, removes only the lockfile-listed packages that passed the scan,
   and leaves npm free to rebuild the original entry. The result shows the measured change in startup-disk free space.
   Other cleanup views also support moving reviewed files to Trash.
 - Installed applications with icons, sizes, last-used metadata, categories

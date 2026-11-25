@@ -98,7 +98,9 @@ struct NpxPackageCleanup: Sendable {
         }
         let kept = recovery.appendingPathComponent("node_modules")
         guard renamex_np(modules.path, kept.path, UInt32(RENAME_EXCL)) == 0 else {
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            let failure = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            _ = rmdir(recovery.path)
+            throw failure
         }
         do {
             var info = stat()
@@ -114,7 +116,7 @@ struct NpxPackageCleanup: Sendable {
             }
         } catch {
             throw NSError(domain: "NpxCleanup", code: 1, userInfo: [NSLocalizedDescriptionKey:
-                "Cleanup stopped. Remaining packages are preserved at " + kept.path + "."])
+                "Cleanup stopped (" + error.localizedDescription + "). Remaining packages are preserved at " + kept.path + "."])
         }
     }
 }
