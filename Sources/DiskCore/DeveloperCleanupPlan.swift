@@ -31,6 +31,15 @@ public struct DeveloperCleanupPlan: Sendable {
     public static func prepare(root: URL, excluding exclusions: [String] = [],
                                promptAvoidanceFolders: [String] = [],
                                home: String = FileManager.default.homeDirectoryForCurrentUser.path) async throws -> Self {
+        try Task.checkCancellation()
+        var scope = root.resolvingSymlinksInPath().standardizedFileURL
+        while !scope.path.isEmpty && scope.path != "/" {
+            if CleanupGuidance.isDependencyContainerName(scope.lastPathComponent) {
+                throw NSError(domain: "DeveloperCleanup", code: 3, userInfo: [NSLocalizedDescriptionKey:
+                    "Choose the project folder that contains node_modules to review its dependencies together."])
+            }
+            scope.deleteLastPathComponent()
+        }
         let scan = try await DiskScanner.scan(root: root, excludedFolders: exclusions,
                                               promptAvoidanceFolders: promptAvoidanceFolders, developerArtifactHome: home)
         try Task.checkCancellation()
@@ -39,14 +48,6 @@ public struct DeveloperCleanupPlan: Sendable {
                 ?? "This folder could not be scanned."
             throw NSError(domain: "DeveloperCleanup", code: 2, userInfo: [NSLocalizedDescriptionKey:
                 message])
-        }
-        var scope = URL(fileURLWithPath: scan.rootPath)
-        while !scope.path.isEmpty && scope.path != "/" {
-            if CleanupGuidance.isProjectDependencies(path: scope.path) {
-                throw NSError(domain: "DeveloperCleanup", code: 3, userInfo: [NSLocalizedDescriptionKey:
-                    "Choose the project folder that contains node_modules to review its dependencies together."])
-            }
-            scope.deleteLastPathComponent()
         }
         let exclusionPolicy = FolderExclusions(paths: exclusions)
         let candidates = scan.nodes.filter { $0.parent != nil && $0.isDirectory && !$0.isSymlink

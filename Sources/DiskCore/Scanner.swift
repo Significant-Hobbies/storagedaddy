@@ -202,7 +202,7 @@ private struct Scanner {
                         insideArtifact = CleanupGuidance.isRegenerableFolder(path: childPath(directory.path, entry.name), home: home)
                     }
                     if !insideArtifact {
-                        guard entry.name != "node_modules" else { continue }
+                        guard !CleanupGuidance.isDependencyContainerName(entry.name) else { continue }
                         guard entry.name == ".worktrees" || entry.name == ".claude" || !entry.name.hasPrefix(".") else { continue }
                         guard !entry.name.hasSuffix(".app"), !entry.name.hasSuffix(".framework"), !entry.name.hasSuffix(".xpc") else { continue }
                     }

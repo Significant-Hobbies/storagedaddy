@@ -8,20 +8,16 @@ struct DeveloperCleanupPlanTests {
         let project = fm.temporaryDirectory.appendingPathComponent("developer-dependency-root-\(UUID())")
         defer { try? fm.removeItem(at: project) }
         let dependencies = project.appendingPathComponent("node_modules")
-        let installedPackage = dependencies.appendingPathComponent("installed-package")
-        let nested = installedPackage.appendingPathComponent("node_modules")
-        try fm.createDirectory(at: nested, withIntermediateDirectories: true)
-        for folder in [project, installedPackage] {
-            try Data("{}".utf8).write(to: folder.appendingPathComponent("package.json"))
+        let manifest = project.appendingPathComponent("package.json")
+        func installPackage(in container: URL) throws -> URL {
+            let package = container.appendingPathComponent("installed-package")
+            let nested = package.appendingPathComponent("node_modules")
+            try fm.createDirectory(at: nested, withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: package.appendingPathComponent("package.json"))
+            try Data("fixture".utf8).write(to: nested.appendingPathComponent("entry.js"))
+            return package
         }
-        try Data("fixture".utf8).write(to: nested.appendingPathComponent("entry.js"))
-
-        let projectPlan = try await DeveloperCleanupPlan.prepare(root: project)
-        let item = try #require(projectPlan.items.first)
-        #expect(projectPlan.items.count == 1)
-        #expect(item.path == dependencies.resolvingSymlinksInPath().path)
-        #expect(item.keptReason == nil && item.canDeletePermanently)
-        for scope in [dependencies, installedPackage] {
+        func expectDenied(_ scope: URL) async {
             do {
                 _ = try await DeveloperCleanupPlan.prepare(root: scope)
                 Issue.record("A dependency scope must not offer its nested dependencies for cleanup")
@@ -29,6 +25,25 @@ struct DeveloperCleanupPlanTests {
                 #expect(error.localizedDescription.contains("project folder"))
             }
         }
+
+        let installedPackage = try installPackage(in: dependencies)
+        try Data("{}".utf8).write(to: manifest)
+        let projectPlan = try await DeveloperCleanupPlan.prepare(root: project)
+        let item = try #require(projectPlan.items.first)
+        #expect(projectPlan.items.count == 1)
+        #expect(item.path == dependencies.resolvingSymlinksInPath().path)
+        #expect(item.keptReason == nil && item.canDeletePermanently)
+        await expectDenied(dependencies)
+        await expectDenied(installedPackage)
+
+        try fm.removeItem(at: manifest)
+        await expectDenied(dependencies)
+        await expectDenied(installedPackage)
+
+        let globalDependencies = project.appendingPathComponent("custom-prefix/lib/node_modules")
+        let globalPackage = try installPackage(in: globalDependencies)
+        await expectDenied(globalDependencies)
+        await expectDenied(globalPackage)
     }
 
     @Test func keepsGitCheckoutAddedInsideDependenciesAfterReview() async throws {

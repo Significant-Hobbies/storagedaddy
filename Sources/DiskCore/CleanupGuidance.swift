@@ -18,6 +18,10 @@ public enum CleanupGuidance {
         name.lowercased() == ".git"
     }
 
+    static func isDependencyContainerName(_ name: String) -> Bool {
+        name == "node_modules"
+    }
+
     /// uv owns cache locking and shared installed environments. Its supported
     /// cleaner keeps the cache root and lock; direct Trash/delete is unsafe.
     public static func requiredNativeCleaner(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String? {
@@ -100,7 +104,7 @@ public enum CleanupGuidance {
 
     /// Project dependencies move as one folder; package contents need no audit.
     public static func isProjectDependencies(path: String) -> Bool {
-        URL(fileURLWithPath: path).lastPathComponent == "node_modules"
+        isDependencyContainerName(URL(fileURLWithPath: path).lastPathComponent)
             && isRegenerableFolder(path: path)
     }
 
