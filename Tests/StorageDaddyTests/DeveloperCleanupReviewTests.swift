@@ -45,6 +45,17 @@ struct DeveloperCleanupReviewTests {
         #expect(becameBusy.kept.values.first?.contains("active uv task") == true)
         #expect(!fm.fileExists(atPath: home.appendingPathComponent("confirmed").path))
         try #require(flock(holder, LOCK_UN) == 0)
+        let originalLock = directory.appendingPathComponent("original-lock")
+        try fm.moveItem(at: lockFile, to: originalLock)
+        try fm.createSymbolicLink(at: lockFile, withDestinationURL: originalLock)
+        let unverifiable = DeveloperCleanupReview(scopes: [], items: []).reclaimable(on: cache.device, caches: caches)
+        #expect(unverifiable.selection(upTo: .max).isEmpty)
+        #expect(unverifiable.withheld.first?.reason.contains("Could not verify") == true)
+        let unverified = await review.clean(ids: selected, permanently: true) { _, _ in }
+        #expect(unverified.kept.values.first?.contains("Could not verify") == true)
+        #expect(!fm.fileExists(atPath: home.appendingPathComponent("confirmed").path))
+        try fm.removeItem(at: lockFile)
+        try fm.moveItem(at: originalLock, to: lockFile)
         let confirmed = await review.clean(ids: selected, permanently: true) { _, _ in }
         #expect(confirmed.kept.isEmpty)
         #expect(confirmed.deleted == selected)
