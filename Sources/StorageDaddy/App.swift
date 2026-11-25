@@ -795,14 +795,14 @@ struct FileTypeStats: Sendable {
 
     init(
         developerCleanupPreferences: UserDefaults? = .standard,
+        developerCleanupPlanner: @escaping @Sendable ([URL], [String]) async throws -> DeveloperCleanupReview = { roots, exclusions in
+            let promptAvoidance = AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
+            return try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: promptAvoidance)
+        },
         quickProjectPlanner: @escaping @Sendable ([URL], [String], URL) async throws -> DeveloperCleanupReview = { roots, exclusions, home in
             let avoid = AutomaticScanPrivacy.promptAvoidancePaths(homeDirectory: home, accessStatus: FullDiskAccessProbe.status(homeDirectory: home))
             return try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: avoid,
                                                             quickCleanup: true, home: home.path)
-        },
-        developerCleanupPlanner: @escaping @Sendable ([URL], [String]) async throws -> DeveloperCleanupReview = { roots, exclusions in
-            let promptAvoidance = AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
-            return try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: promptAvoidance)
         }
     ) {
         self.developerCleanupPreferences = developerCleanupPreferences
