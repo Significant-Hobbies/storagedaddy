@@ -130,7 +130,19 @@ struct GitWorktreeReviewSheet: View {
                     Toggle("I reviewed this checkout and its generated files", isOn: $acknowledged)
                     Button("Remove Worktree…", role: .destructive) { confirming = true }.disabled(!acknowledged || model.working)
                 } else {
-                    Text("Fleet kept this checkout. " + managed.blockers.joined(separator: ", ")).foregroundStyle(Tints.yellow)
+                    Text(managed.status).foregroundStyle(Tints.yellow)
+                    if !managed.ignoredPaths.isEmpty {
+                        DisclosureGroup("Ignored paths kept (\(managed.ignoredPaths.count))") {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(managed.ignoredPaths, id: \.self) { Text($0).textSelection(.enabled) }
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                            }.frame(maxHeight: 150).font(.caption)
+                        }
+                    }
+                    Button("Show checkout in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([managed.candidate.url])
+                    }
                 }
             }
             if let review = model.review {

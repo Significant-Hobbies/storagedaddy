@@ -128,7 +128,13 @@ public actor GitWorktreeManager {
         return candidates
     }
 
-    static func measure(_ candidates: [GitWorktreeCandidate]) throws -> [GitWorktreeCandidate] {
+    static func registeredLinks(at checkout: URL) -> Set<String>? {
+        guard let response = readGit(at: checkout, arguments: ["worktree", "list", "--porcelain", "-z"]),
+              let rows = try? parseList(response) else { return nil }
+        return Set(rows.filter { !$0.main && !$0.bare && $0.locked == nil && $0.prunable == nil }.map { systemAliases($0.path) })
+    }
+
+    package static func measure(_ candidates: [GitWorktreeCandidate]) throws -> [GitWorktreeCandidate] {
         guard !candidates.isEmpty else { return [] }
         let locations = candidates.map { $0.url.path }
         let result = try? PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/du"),

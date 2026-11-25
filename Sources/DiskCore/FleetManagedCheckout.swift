@@ -7,12 +7,14 @@ public enum FleetManagedCheckout {
         let id: String
         let path: String
         let state: String
+        let repo: String?
     }
 
     public struct Preview: Sendable {
         public let candidate: GitWorktreeCandidate
         public let head: String
         public let blockers: [String]
+        public let ignoredPaths: [String]
         public let eligible: Bool
         public var status: String {
             if eligible { return "Merged · ready to remove" }
@@ -33,6 +35,7 @@ public enum FleetManagedCheckout {
         let action: String
         let head: String?
         let blockers: [String]?
+        let unknownIgnored: [String]?
     }
 
     static func registry(home: URL) -> URL {
@@ -46,16 +49,47 @@ public enum FleetManagedCheckout {
             ["retired", "worktrees"].contains(parent.lastPathComponent)
     }
 
-    private static func closed(_ url: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool {
+    private static func closedRecord(_ url: URL, home: URL) -> Record? {
         let root = registry(home: home)
-        guard manages(url, home: home), url.deletingLastPathComponent().lastPathComponent == "retired" else { return false }
+        guard manages(url, home: home), url.deletingLastPathComponent().lastPathComponent == "retired" else { return nil }
         let id = url.lastPathComponent
         let file = root.appendingPathComponent("manifests").appendingPathComponent(id + ".json")
         guard let meta = try? file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]),
               meta.isRegularFile == true, meta.isSymbolicLink == false, let size = meta.fileSize, size <= 1_048_576,
-              let data = try? Data(contentsOf: file), let record = try? JSONDecoder().decode(Record.self, from: data)
-        else { return false }
-        return record.id == id && record.path == url.path && record.state == "closed"
+              let data = try? Data(contentsOf: file), let record = try? JSONDecoder().decode(Record.self, from: data),
+              record.id == id, record.path == url.path, record.state == "closed" else { return nil }
+        return record
+    }
+
+    private static func closed(_ url: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool {
+        closedRecord(url, home: home) != nil
+    }
+
+    /// Inventory only the direct retired checkout directories. One local Git
+    /// listing per repository verifies the registrations without walking their contents.
+    public static func idleRetired(home: URL, roots: [URL], exclusions: [String]) throws -> [GitWorktreeCandidate] {
+        let directory = registry(home: home).appendingPathComponent("retired")
+        let excluded = FolderExclusions(paths: exclusions)
+        guard FolderExclusions(paths: roots.map(\.path)).contains(directory.path),
+              directory.resolvingSymlinksInPath().path == directory.path,
+              !excluded.contains(directory.path),
+              let children = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        else { return [] }
+        var registered: [String: Set<String>] = [:]
+        var candidates: [GitWorktreeCandidate] = []
+        for url in children.sorted(by: { $0.path < $1.path }) {
+            try Task.checkCancellation()
+            var metadata = stat(), marker = stat()
+            guard !excluded.blocksCleanup(url), lstat(url.path, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFDIR,
+                  lstat(url.appendingPathComponent(".git").path, &marker) == 0, marker.st_mode & S_IFMT == S_IFREG,
+                  let repo = closedRecord(url, home: home)?.repo else { continue }
+            if registered[repo] == nil, let paths = GitWorktreeManager.registeredLinks(at: url) { registered[repo] = paths }
+            guard registered[repo]?.contains(url.path) == true else { continue }
+            candidates.append(.init(url: url, allocatedBytes: 0, device: UInt64(metadata.st_dev), inode: UInt64(metadata.st_ino)))
+        }
+        guard !candidates.isEmpty else { return [] }
+        let openFiles = try CleanupActiveUse.captureOpenFiles(for: candidates.map { $0.url.path })
+        return candidates.filter { openFiles.user(of: $0.url.path) == nil }
     }
 
     static func isReserved(_ url: URL) -> Bool { manages(url) && !closed(url) }
@@ -115,8 +149,11 @@ public enum FleetManagedCheckout {
         guard result.id == candidate.url.lastPathComponent, result.path == candidate.url.path, result.state == "closed"
         else { throw GitWorktreeError.changed }
         let blockers = result.blockers ?? []
-        return Preview(candidate: candidate, head: result.head ?? "", blockers: blockers,
-                       eligible: result.action == "delete-worktree" && blockers.isEmpty && result.head?.isEmpty == false)
+        let head = result.head ?? ""
+        let ignored = result.unknownIgnored ?? []
+        return Preview(candidate: candidate, head: head, blockers: blockers, ignoredPaths: ignored,
+                       eligible: result.action == "delete-worktree" && blockers.isEmpty && ignored.isEmpty
+                           && [40, 64].contains(head.count) && head.allSatisfy(\.isHexDigit))
     }
 
     public static func remove(_ reviewed: Preview, exclusions: [String], home: URL = FileManager.default.homeDirectoryForCurrentUser) throws {

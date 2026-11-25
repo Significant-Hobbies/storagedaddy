@@ -91,7 +91,7 @@ struct DeveloperCleanupReview: Sendable {
                               keptReason: nil, canDeletePermanently: true, device: candidate.device, inode: candidate.inode))
         }
         return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes }, withheld: withheld,
-                    exclusions: exclusions, checkedWorktrees: Dictionary(uniqueKeysWithValues: worktrees.map { ($0.candidate.url.path, $0) }), startupDevice: startupDevice)
+                    exclusions: exclusions, checkedWorktrees: Dictionary(uniqueKeysWithValues: worktrees.map { ($0.candidate.url.path, $0) }), projectsMeasured: projectsMeasured, managedInventory: managedInventory, startupDevice: startupDevice)
 
     }
 
@@ -113,10 +113,13 @@ struct DeveloperCleanupReview: Sendable {
     var withheld: [Withheld] = []
     var exclusions: [String] = []
     var checkedWorktrees: [String: FleetManagedCheckout.Preview] = [:]
+    var projectsMeasured = false
+    var managedInventory: [GitWorktreeCandidate] = []
     var startupDevice: UInt64?
     var idleWorktrees: [GitWorktreeCandidate] {
         let rows: [GitWorktreeCandidate] = scopes.compactMap(\.plan).flatMap(\.idleWorktrees)
-        return rows.filter { startupDevice == nil || $0.device == startupDevice }.sorted { first, second in
+        var paths = Set<String>()
+        return (managedInventory + rows).filter { paths.insert($0.url.path).inserted && (startupDevice == nil || $0.device == startupDevice) }.sorted { first, second in
             if first.allocatedBytes == second.allocatedBytes { return first.url.path < second.url.path }
             return first.allocatedBytes > second.allocatedBytes
         }

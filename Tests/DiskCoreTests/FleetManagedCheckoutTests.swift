@@ -23,7 +23,7 @@ final class FleetManagedCheckoutTests: XCTestCase {
         if test "${6-}" = --dry-run; then
           action=delete-worktree
           if test -f blocked; then action=keep; fi
-          printf '{"action":"%s","id":"fixture","path":"%s/retired/fixture","state":"closed","head":"abc","blockers":[]}' "$action" "$5"
+          printf '{"action":"%s","id":"fixture","path":"%s/retired/fixture","state":"closed","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","blockers":[]}' "$action" "$5"
         else
           /bin/rmdir "$PWD/retired/fixture"
           printf '{"action":"delete-worktree"}'

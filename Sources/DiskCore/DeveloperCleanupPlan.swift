@@ -77,7 +77,8 @@ public struct DeveloperCleanupPlan: Sendable {
         let rootIDs = Set(roots.map(\.id))
         let repositories = Set(scan.nodes.lazy.filter { CleanupGuidance.isGitCheckoutMarker($0.name) }
             .flatMap { ancestors(of: $0.id, in: scan).filter(rootIDs.contains) })
-        let linked = quickCleanup && !isNpxScope
+        let managedRetired = FleetManagedCheckout.registry(home: URL(fileURLWithPath: home)).appendingPathComponent("retired")
+        let linked = quickCleanup && !isNpxScope && root.standardizedFileURL.path != managedRetired.path
             ? try GitWorktreeManager.linkedCandidates(in: scan, excluding: rootIDs, exclusions: exclusionPolicy) : []
         let openFiles = try captureOpenFiles(linked.map { $0.url.path } + roots.compactMap { eligible[$0.id] }.flatMap { url in
             [url.path, CleanupActiveUse.metroProject(for: url)?.path, quickCleanup && !isNpxScope ? url.deletingLastPathComponent().path : nil].compactMap { $0 }

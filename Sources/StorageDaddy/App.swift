@@ -1019,9 +1019,19 @@ struct FileTypeStats: Sendable {
                 if !initial.items.isEmpty && !roots.isEmpty {
                     await showInitialCleanupReview(initial, runID: runID)
                 }
+                let retired = (try? FleetManagedCheckout.idleRetired(home: cacheHome, roots: roots, exclusions: exclusions)) ?? []
+                try Task.checkCancellation()
+                if !retired.isEmpty {
+                    var quickReview = initial
+                    quickReview.managedInventory = retired
+                    await showInitialCleanupReview(quickReview, runID: runID)
+                }
+                let sized = try GitWorktreeManager.measure(retired)
                 let projects = try await projectPlan
-                let measured = projects.reclaimable(on: device, caches: caches, exclusions: exclusions)
-                let candidates = projects.idleWorktrees.filter { $0.device == device && $0.allocatedBytes > 0 && FleetManagedCheckout.manages($0.url) }
+                var measured = projects.reclaimable(on: device, caches: caches, exclusions: exclusions)
+                measured.projectsMeasured = true
+                measured.managedInventory = sized
+                let candidates = measured.idleWorktrees.filter { $0.device == device && $0.allocatedBytes > 0 && FleetManagedCheckout.manages($0.url) }
                 if !candidates.isEmpty {
                     await showInitialCleanupReview(measured, runID: runID)
                     var checkedWorktrees: [FleetManagedCheckout.Preview] = []

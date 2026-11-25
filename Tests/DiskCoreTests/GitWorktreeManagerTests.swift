@@ -59,6 +59,27 @@ final class GitWorktreeManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: modules.appendingPathComponent("tracked.js").path))
     }
 
+    func testRetiredInventoryFindsRegisteredIdleCheckoutsWithoutScanningTheirContents() throws {
+        let fixture = try fixture()
+        let home = fixture.root.resolvingSymlinksInPath()
+        let registry = FleetManagedCheckout.registry(home: home)
+        let retired = registry.appendingPathComponent("retired")
+        let manifests = registry.appendingPathComponent("manifests")
+        try FileManager.default.createDirectory(at: retired, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: manifests, withIntermediateDirectories: true)
+        let checkout = retired.appendingPathComponent("done")
+        try git(fixture.main, ["worktree", "move", fixture.linked.path, checkout.path])
+        let record = ["id": "done", "path": checkout.path, "repo": fixture.main.path, "state": "closed"]
+        try JSONEncoder().encode(record).write(to: manifests.appendingPathComponent("done.json"))
+        let rows = try FleetManagedCheckout.idleRetired(home: home, roots: [retired], exclusions: [])
+        XCTAssertEqual(rows.map(\.id), [checkout.path])
+        XCTAssertEqual(rows.first?.allocatedBytes, 0)
+        XCTAssertTrue(try FleetManagedCheckout.idleRetired(home: home, roots: [retired], exclusions: [checkout.path]).isEmpty)
+        let held = try FileHandle(forReadingFrom: checkout.appendingPathComponent(".gitignore"))
+        defer { try? held.close() }
+        XCTAssertTrue(try FleetManagedCheckout.idleRetired(home: home, roots: [retired], exclusions: []).isEmpty)
+    }
+
     func testCleanLinkedRemovalKeepsMainAndBranch() async throws {
         let fixture = try fixture()
         let manager = GitWorktreeManager(activeUse: { _ in })

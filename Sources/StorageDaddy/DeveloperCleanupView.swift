@@ -77,8 +77,9 @@ struct DeveloperCleanupView: View {
                         }.disabled(!model.canEditCleanupReview)
                     }
                     let dependencies = plan.items.filter { $0.path.hasSuffix("/node_modules") }
-                    if !dependencies.isEmpty {
-                        Text("\(dependencies.count) idle node_modules installs · \(bytes(dependencies))")
+                    if plan.projectsMeasured {
+                        let kept = plan.withheld.filter { $0.item.path.hasSuffix("/node_modules") }.count
+                        Text("node_modules · \(dependencies.count) ready (\(bytes(dependencies))) · \(kept) kept")
                             .font(.callout.weight(.semibold))
                     }
                     let worktrees = plan.idleWorktrees
