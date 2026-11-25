@@ -10,7 +10,8 @@ struct AgentSpacePlan {
     let baseline: StartupCapacity
     let root: String?
     let scanIdentity: UUID
-    private let choices: [(id: Int, row: AgentJSON)]
+    private var choices: [(id: Int, row: AgentJSON)] = []
+    private var scanGuidance = "Measure the selected items together before requesting native review."
     var nodeIDs: Set<Int> { Set(choices.map(\.id)) }
 
     @MainActor init(percent: Int, baseline: StartupCapacity, explorer: ExplorerModel) {
@@ -20,8 +21,15 @@ struct AgentSpacePlan {
         root = scan?.rootPath
         scanIdentity = explorer.filenameSearchIdentity
         var disk = stat()
-        guard !explorer.scanIsHistorical, !explorer.isScanning, !explorer.exclusionResultsStale, let scan,
-              stat("/System/Volumes/Data", &disk) == 0 else { choices = []; return }
+        if reading(baseline)["targetReached"].bool == true { scanGuidance = "This disk already meets the target."; return }
+        if explorer.isScanning { scanGuidance = "Wait for the current scan to finish and request a fresh plan."; return }
+        guard let scan else { scanGuidance = "Scan an approved project folder on the startup disk and request a fresh plan."; return }
+        if explorer.scanIsHistorical || explorer.exclusionResultsStale {
+            scanGuidance = "Rescan this folder with the current exclusions and request a fresh plan."; return
+        }
+        guard stat("/System/Volumes/Data", &disk) == 0 else {
+            scanGuidance = "Startup volume identity is unavailable. Retry before selecting items."; return
+        }
         let device = UInt64(UInt32(bitPattern: disk.st_dev))
         let exclusions = FolderExclusions(paths: explorer.excludedFolders)
         var categories: [Int: DeveloperCategory] = [:]
@@ -51,6 +59,11 @@ struct AgentSpacePlan {
             if rows.count == 20 { break }
         }
         choices = rows
+        if rows.isEmpty {
+            scanGuidance = scan.nodes.first?.device == device
+                ? "No eligible candidates in this scan. Try another approved project folder."
+                : "This scan supplied no candidates on the startup data volume. Scan an approved folder on that volume."
+        }
     }
 
     func reading(_ capacity: StartupCapacity) -> AgentJSON {
@@ -60,6 +73,7 @@ struct AgentSpacePlan {
         return .object(["planID": .string(id.uuidString), "targetUsedPercent": .integer(percent),
             "capacityBytes": .integer(capacity.total), "baselineFreeBytes": .integer(baseline.available),
             "freeBytes": .integer(capacity.available), "additionalFreeBytesNeeded": .integer(needed),
+            "measurementNote": .string("Moving files to Trash on the same disk keeps their space allocated. The free-space change includes other disk activity."),
             "targetReached": .bool(needed == 0), "observedFreeBytesChange": .integer(capacity.available - baseline.available)])
     }
 
@@ -67,7 +81,7 @@ struct AgentSpacePlan {
         var fields = reading(baseline).object ?? [:]
         fields["scanRoot"] = root.map(AgentJSON.string) ?? .null
         fields["choices"] = .array(choices.map(\.row))
-        fields["guidance"] = .string("Choices cover the current scan on the startup data volume. Measure the selected items together. Native review checks each removal. Disk free-space changes also include other activity.")
+        fields["guidance"] = .string(scanGuidance)
         return .object(fields)
     }
 }

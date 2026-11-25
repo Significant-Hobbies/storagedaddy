@@ -84,7 +84,7 @@ struct AgentAccessIntegrationTests {
         let node = try #require(scan.nodes.first { $0.name == "node_modules" })
         f.explorer.developerGroups = [DeveloperGroup(category: .nodeModules, allocatedBytes: node.allocatedBytes,
             logicalBytes: node.logicalBytes, fileCount: 1, rootIDs: [node.id])]
-        let target: AgentJSON = .object(["targetUsedPercent": .integer(80)])
+        let target: AgentJSON = .object(["targetUsedPercent": .integer(1)])
         let socket = f.agents.socketPath, token = f.token
         func rpc(_ name: String, _ arguments: AgentJSON) async throws -> AgentJSON {
             let message = AgentBridgeRequest(operation: "rpc", token: token, payload: .object([
@@ -101,6 +101,8 @@ struct AgentAccessIntegrationTests {
         let id = try #require(plan["planID"].string)
         #expect(plan["choices"].array?.first?["nodeID"].int == node.id)
         #expect(plan["observedFreeBytesChange"].int == 0)
+        let wrongTarget = try await rpc("plan_space_target", .object(["targetUsedPercent": .integer(80), "planID": .string(id)]))
+        #expect(wrongTarget["result"]["isError"].bool == true)
         let args: AgentJSON = .object(["nodeIDs": .array([.integer(node.id)]), "reason": .string("Reinstall from manifest"), "planID": .string(id)])
         let request = try await rpc("move_to_trash", args)
         #expect(request["result"]["isError"].bool == false)
@@ -121,11 +123,23 @@ struct AgentAccessIntegrationTests {
         #expect(stale["result"]["isError"].bool == true)
         #expect(f.agents.reviews.count == 1)
         let measured = try payload(await rpc("plan_space_target", .object([
-            "targetUsedPercent": .integer(80), "planID": .string(id)])))
+            "targetUsedPercent": .integer(1), "planID": .string(id)])))
         #expect(measured["requests"].array?.first?["outcome"].string == "Moved to Trash")
         let before = try #require(plan["baselineFreeBytes"].int)
         let after = try #require(measured["freeBytes"].int)
         #expect(measured["observedFreeBytesChange"].int == after - before)
+    }
+
+    @Test func diskTargetUsesExactBytesAndExplainsMissingScan() throws {
+        let model = ExplorerModel()
+        let capacity = try #require(StartupCapacity(total: 101, available: 20))
+        let plan = AgentSpacePlan(percent: 80, baseline: capacity, explorer: model)
+        #expect(plan.proposal["additionalFreeBytesNeeded"].int == 1)
+        #expect(plan.proposal["guidance"].string?.contains("Scan an approved") == true)
+        let after = plan.reading(try #require(StartupCapacity(total: 101, available: 21)))
+        #expect(after["targetReached"].bool == true)
+        #expect(after["observedFreeBytesChange"].int == 1)
+        #expect(after["measurementNote"].string?.contains("Trash") == true)
     }
 
     @Test func showCleanupOpensRegularReviewFromDeveloperCleanup() async throws {

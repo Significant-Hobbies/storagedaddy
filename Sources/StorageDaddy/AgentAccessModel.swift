@@ -230,6 +230,9 @@ private struct AgentPolicy: Codable {
         // Native cleanup rechecks preflight, request grants and permanent eligibility.
         // RPC only queues requests and never removes files.
         pendingStaging[node.id] = request.id
+        reviews[i].pending = false
+        reviews[i].outcome = "Checking native Cleanup preflight."
+        save()
         m.stage(node.id, authorization: { [weak self] in
             guard let self else { return false }
             return self.pendingStaging[node.id] == request.id && self.policyHealthy &&
@@ -238,13 +241,14 @@ private struct AgentPolicy: Codable {
         }, didStage: { [weak self] in
             self?.pendingStaging.removeValue(forKey: node.id)
             self?.stagedRequests[node.id] = request.id
+            self?.setOutcome("Staged for native confirmation", requestID: request.id)
         }, didFinish: { [weak self] in
-            if self?.pendingStaging[node.id] == request.id { self?.pendingStaging.removeValue(forKey: node.id) }
+            if self?.pendingStaging[node.id] == request.id {
+                self?.pendingStaging.removeValue(forKey: node.id)
+                self?.setOutcome("Native preflight ended without staging", requestID: request.id)
+            }
         })
         m.openQuickCleanup()
-        reviews[i].pending = false
-        reviews[i].outcome = "Sent to native Cleanup preflight. Nothing removed; verify staging and choose the cleanup action there."
-        save()
     }
 
     private func overlapsNativeStaging(_ nodeID: Int, in model: ExplorerModel) -> Bool {
@@ -252,22 +256,33 @@ private struct AgentPolicy: Codable {
     }
 
     func recordCleanupOutcome(nodeID: Int, outcome: String) {
-        guard let request = stagedRequests[nodeID],
-              let index = reviews.firstIndex(where: { $0.id == request }) else { return }
+        guard let request = stagedRequests.removeValue(forKey: nodeID) else { return }
+        setOutcome(outcome, requestID: request)
+    }
+
+    private func setOutcome(_ outcome: String, requestID: UUID) {
+        guard let index = reviews.firstIndex(where: { $0.id == requestID }) else { return }
         reviews[index].outcome = outcome
         save()
     }
 
     func unstageRequest(_ nodeID: Int) {
-        pendingStaging.removeValue(forKey: nodeID)
-        stagedRequests.removeValue(forKey: nodeID)
+        let pending = pendingStaging.removeValue(forKey: nodeID)
+        let staged = stagedRequests.removeValue(forKey: nodeID)
+        if let request = pending ?? staged { setOutcome("Removed from native review without cleanup", requestID: request) }
     }
 
     func clearStagedRequests() {
-        let ownedIDs = Array(stagedRequests.keys)
+        let requestIDs = Set(pendingStaging.values).union(stagedRequests.values)
+        guard !requestIDs.isEmpty else { return }
+        let nodeIDs = Array(stagedRequests.keys)
         pendingStaging.removeAll()
         stagedRequests.removeAll()
-        for id in ownedIDs { explorer?.unstage(id) }
+        for i in reviews.indices where requestIDs.contains(reviews[i].id) {
+            reviews[i].outcome = "Removed from native review without cleanup"
+        }
+        for nodeID in nodeIDs { explorer?.unstage(nodeID) }
+        save()
     }
 
     func allowsPermanentCleanup(of nodeID: Int) -> Bool {
@@ -291,7 +306,7 @@ private struct AgentPolicy: Codable {
             }
         }
         for (nodeID, requestID) in stagedRequests {
-            guard m.staged.contains(nodeID) else { stagedRequests.removeValue(forKey: nodeID); continue }
+            guard m.staged.contains(nodeID) else { unstageRequest(nodeID); continue }
             guard let request = reviews.first(where: { $0.id == requestID }) else { m.unstage(nodeID); stagedRequests.removeValue(forKey: nodeID); valid = false; continue }
             let permitted = policyHealthy && sessions.contains { $0.id == request.sessionID && $0.permissions.contains(request.permanent ? "request_permanent" : "request_trash") }
             let matches = m.scan.map { scan in scan.nodes.indices.contains(nodeID) && scan.nodes[nodeID].device == request.device && scan.nodes[nodeID].inode == request.inode && scan.url(for: nodeID).path == request.path } ?? false
