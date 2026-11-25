@@ -84,7 +84,7 @@ public enum FleetManagedCheckout {
                   lstat(url.appendingPathComponent(".git").path, &marker) == 0, marker.st_mode & S_IFMT == S_IFREG,
                   let repo = closedRecord(url, home: home)?.repo else { continue }
             if registered[repo] == nil, let paths = GitWorktreeManager.registeredLinks(at: url) { registered[repo] = paths }
-            guard registered[repo]?.contains(url.path) == true else { continue }
+            guard registered[repo]?.contains(GitWorktreeManager.systemAliases(url.path)) == true else { continue }
             candidates.append(.init(url: url, allocatedBytes: 0, device: UInt64(metadata.st_dev), inode: UInt64(metadata.st_ino)))
         }
         guard !candidates.isEmpty else { return [] }

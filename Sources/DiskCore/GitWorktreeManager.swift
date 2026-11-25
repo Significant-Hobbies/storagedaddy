@@ -314,7 +314,7 @@ public actor GitWorktreeManager {
         guard physical == systemAliases(path) else { throw GitWorktreeError.unsafe("the path traverses a symbolic link") }
         return URL(fileURLWithPath: physical)
     }
-    private static func systemAliases(_ path: String) -> String {
+    static func systemAliases(_ path: String) -> String {
         [("/var", "/private/var"), ("/tmp", "/private/tmp")].reduce(path) { value, alias in
             value == alias.0 || value.hasPrefix(alias.0 + "/") ? alias.1 + value.dropFirst(alias.0.count) : value
         }
