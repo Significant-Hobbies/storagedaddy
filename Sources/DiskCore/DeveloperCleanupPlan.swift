@@ -100,7 +100,7 @@ public struct DeveloperCleanupPlan: Sendable {
                 if quickCleanup && FleetManagedCheckout.containsReservedProject(url) {
                     throw DiskAnalysisError.unsafePath(path: url.path, reason: "Fleet has an active registration or an uncleared lease for this workspace.")
                 }
-                if quickCleanup && !isNpxScope && (CleanupGuidance.isProjectDependencies(path: url.path) || CleanupActiveUse.metroProject(for: url) != nil) {
+                if quickCleanup && !isNpxScope {
                     try Self.checkDependencyOwner(url, openFiles: openFiles)
                 }
                 if let npxProcesses {
@@ -195,7 +195,7 @@ public struct DeveloperCleanupPlan: Sendable {
                 if quickCleanup && FleetManagedCheckout.containsReservedProject(url) {
                     throw DiskAnalysisError.unsafePath(path: url.path, reason: "Fleet has an active registration or an uncleared lease for this workspace.")
                 }
-                if quickCleanup && (isDependencies || CleanupActiveUse.metroProject(for: url) != nil) && !url.path.hasPrefix(URL(fileURLWithPath: home).appendingPathComponent(".npm/_npx").path + "/") {
+                if quickCleanup && !url.path.hasPrefix(URL(fileURLWithPath: home).appendingPathComponent(".npm/_npx").path + "/") {
                     try Self.checkDependencyOwner(url, openFiles: openFiles?.isFresh == true ? openFiles : nil)
                 }
                 if permanently && item.canDeletePermanently {

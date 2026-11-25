@@ -86,6 +86,25 @@ final class GitWorktreeManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: modules.appendingPathComponent("tracked.js").path))
     }
 
+    func testQuickBuildCachePreservesFilesAddedToGitAfterReview() async throws {
+        let project = try fixture().linked
+        let cache = project.appendingPathComponent(".next/cache")
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let file = cache.appendingPathComponent("keep")
+        for url in [file, project.appendingPathComponent("package.json"), project.appendingPathComponent(".next/build-manifest.json")] {
+            try Data("{}".utf8).write(to: url)
+        }
+        let review = try await DeveloperCleanupPlan.prepare(root: project, quickCleanup: true)
+        let item = try XCTUnwrap(review.items.first { $0.path == cache.path })
+        XCTAssertNil(item.keptReason)
+        try git(project, ["add", "-f", ".next/cache/keep"])
+        let outcome = await review.clean(ids: [item.id], permanently: true)
+        XCTAssertTrue(outcome.deleted.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        let refreshed = try await DeveloperCleanupPlan.prepare(root: project, quickCleanup: true)
+        XCTAssertTrue(refreshed.items.first { $0.path == cache.path }?.keptReason?.contains("tracked") == true)
+    }
+
     func testTargetReviewDeletesOnlyVerifiedUntrackedMetroCache() async throws {
         let fixture = try fixture()
         let project = fixture.linked.resolvingSymlinksInPath()
