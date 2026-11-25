@@ -85,7 +85,14 @@ struct AgentAccessIntegrationTests {
         f.explorer.developerGroups = [DeveloperGroup(category: .nodeModules, allocatedBytes: node.allocatedBytes,
             logicalBytes: node.logicalBytes, fileCount: 1, rootIDs: [node.id])]
         let target: AgentJSON = .object(["targetUsedPercent": .integer(80)])
-        let response = await call("plan_space_target", arguments: target, fixture: f)
+        let socket = f.agents.socketPath, token = f.token
+        func rpc(_ name: String, _ arguments: AgentJSON) async throws -> AgentJSON {
+            let message = AgentBridgeRequest(operation: "rpc", token: token, payload: .object([
+                "jsonrpc": .string("2.0"), "id": .integer(1), "method": .string("tools/call"),
+                "params": .object(["name": .string("storagedaddy_" + name), "arguments": arguments])]))
+            return try await Task.detached { try AgentSocketClient.request(message, path: socket) }.value
+        }
+        let response = try await rpc("plan_space_target", target)
         func payload(_ response: AgentJSON) throws -> AgentJSON {
             let value = try #require(response["result"]["content"].array?.first?["text"].string)
             return try JSONDecoder().decode(AgentJSON.self, from: Data(value.utf8))
@@ -95,7 +102,7 @@ struct AgentAccessIntegrationTests {
         #expect(plan["choices"].array?.first?["nodeID"].int == node.id)
         #expect(plan["observedFreeBytesChange"].int == 0)
         let args: AgentJSON = .object(["nodeIDs": .array([.integer(node.id)]), "reason": .string("Reinstall from manifest"), "planID": .string(id)])
-        let request = await call("move_to_trash", arguments: args, fixture: f)
+        let request = try await rpc("move_to_trash", args)
         #expect(request["result"]["isError"].bool == false)
         #expect(FileManager.default.fileExists(atPath: modules.path))
         f.agents.review(try #require(f.agents.reviews.first).id)
@@ -110,11 +117,11 @@ struct AgentAccessIntegrationTests {
         #expect(FileManager.default.fileExists(atPath: recovery.appendingPathComponent("index.js").path))
         #expect(!FileManager.default.fileExists(atPath: modules.path))
         f.explorer.scan = try await DiskScanner.scan(root: f.root)
-        let stale = await call("move_to_trash", arguments: args, fixture: f)
+        let stale = try await rpc("move_to_trash", args)
         #expect(stale["result"]["isError"].bool == true)
         #expect(f.agents.reviews.count == 1)
-        let measured = try payload(await call("plan_space_target", arguments: .object([
-            "targetUsedPercent": .integer(80), "planID": .string(id)]), fixture: f))
+        let measured = try payload(await rpc("plan_space_target", .object([
+            "targetUsedPercent": .integer(80), "planID": .string(id)])))
         #expect(measured["requests"].array?.first?["outcome"].string == "Moved to Trash")
         let before = try #require(plan["baselineFreeBytes"].int)
         let after = try #require(measured["freeBytes"].int)
@@ -155,10 +162,7 @@ struct AgentAccessIntegrationTests {
     }
 
     private func waitForReview(_ f: Fixture) async throws {
-        for _ in 0..<500 {
-            if !f.explorer.busy { return }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await f.explorer.waitForCurrentStorageOperation()
         #expect(!f.explorer.busy)
     }
 
