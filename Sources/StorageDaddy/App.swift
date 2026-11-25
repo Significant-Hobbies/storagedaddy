@@ -1957,7 +1957,10 @@ struct FileTypeStats: Sendable {
                         moved += 1
                     }
                     if !cleanupRefreshPaths.contains(scan.rootPath) { cleanupRefreshPaths.append(scan.rootPath) }
-                    if authorization.isReviewed { unstage(id) }
+                    if authorization.isReviewed {
+                        agentAccess.recordCleanupOutcome(nodeID: id, outcome: permanent.contains(id) ? "Permanently deleted" : "Moved to Trash")
+                        unstage(id)
+                    }
                     remaining.remove(id)
                     quickCleanupCandidateIDs.removeAll { $0 == id }
                     guard cleanupAuthorizationIsCurrent(authorization, remaining: remaining) else { throw CancellationError() }
@@ -1972,7 +1975,10 @@ struct FileTypeStats: Sendable {
                         return
                     }
                     quickCleanupFailures[id] = error.localizedDescription
-                    if authorization.isReviewed { unstage(id) }
+                    if authorization.isReviewed {
+                        agentAccess.recordCleanupOutcome(nodeID: id, outcome: "Cleanup did not finish: " + error.localizedDescription)
+                        unstage(id)
+                    }
                     remaining.remove(id); skipped += 1
                     quickCleanupCandidateIDs.removeAll { $0 == id }
                 }

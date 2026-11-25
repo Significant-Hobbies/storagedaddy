@@ -40,6 +40,7 @@ struct AgentReviewRequest: Codable, Identifiable {
     var device: UInt64
     var inode: UInt64
     var scanStarted: Date
+    var planID: UUID?
     var requestedAt = Date()
     var outcome = "Waiting for native review"
     var pending = true
@@ -79,6 +80,7 @@ private struct AgentPolicy: Codable {
     private var oauthRegistrations: [AgentOAuth.Registration] = []
     private let directory: URL
     private let httpPort: UInt16
+    private var spacePlans: [UUID: AgentSpacePlan] = [:]
     private var scanOwner: (sessionID: UUID, version: UUID)?
     private var pendingStaging: [Int: UUID] = [:]
     private var policyHealthy = true
@@ -108,7 +110,7 @@ private struct AgentPolicy: Codable {
     }
 
     func setEnabled(_ value: Bool) {
-        if !value { enabled = false; listening = false; server.stop(); httpServer.stop(); oauth = nil; pairings = []; return }
+        if !value { spacePlans.removeAll(); enabled = false; listening = false; server.stop(); httpServer.stop(); oauth = nil; pairings = []; return }
         guard policyHealthy else { return }
         do {
             try server.start(path: socketPath) { [weak self] request in
@@ -164,6 +166,7 @@ private struct AgentPolicy: Codable {
     }
     func revoke(_ id: UUID) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        spacePlans.removeValue(forKey: id)
         sessions[index].revokedAt = Date()
         for i in reviews.indices where reviews[i].sessionID == id && reviews[i].pending {
             reviews[i].pending = false; reviews[i].outcome = "Refused: session revoked"
@@ -246,6 +249,13 @@ private struct AgentPolicy: Codable {
 
     private func overlapsNativeStaging(_ nodeID: Int, in model: ExplorerModel) -> Bool {
         model.hasAncestor(nodeID, in: model.staged) || model.staged.contains { model.hasAncestor($0, in: [nodeID]) }
+    }
+
+    func recordCleanupOutcome(nodeID: Int, outcome: String) {
+        guard let request = stagedRequests[nodeID],
+              let index = reviews.firstIndex(where: { $0.id == request }) else { return }
+        reviews[index].outcome = outcome
+        save()
     }
 
     func unstageRequest(_ nodeID: Int) {
@@ -347,6 +357,30 @@ private struct AgentPolicy: Codable {
                             "scanFreeBytes": m.volumeFree.map(AgentJSON.integer) ?? .null, "approvedScanRoots": .array(approvedRoots.map(AgentJSON.string)),
                             "requests": try .encode(reviews.filter { $0.sessionID == sessionID }), "procedures": .array([.string("skill://storagedaddy/free-up-space"), .string("skill://storagedaddy/investigate-growth")])])
         }
+        if name == "storagedaddy_plan_space_target" {
+            guard let percent = a["targetUsedPercent"].int, (1...100).contains(percent) else {
+                throw AgentSecurity.failure("Choose a whole percentage from 1 through 100.")
+            }
+            let prior = spacePlans[sessionID]
+            if args["planID"] != nil, prior == nil || prior?.id.uuidString != a["planID"].string || prior?.percent != percent {
+                throw AgentSecurity.failure("This plan expired or its target changed. Request a new plan.")
+            }
+            let capacity = await Task.detached(priority: .utility) { StartupCapacity(report: SystemInventory.collect()) }.value
+            guard let capacity, enabled, sessions.contains(where: { $0.id == sessionID && $0.revokedAt == nil && $0.permissions.contains(tool.permission) }) else {
+                throw AgentSecurity.failure("Startup capacity or agent access is unavailable.")
+            }
+            if args["planID"] != nil, let prior {
+                guard spacePlans[sessionID]?.id == prior.id, capacity.total == prior.baseline.total else {
+                    throw AgentSecurity.failure("The plan or disk capacity changed. Request a new plan.")
+                }
+                var result = prior.reading(capacity).object ?? [:]
+                result["requests"] = try .encode(reviews.filter { $0.sessionID == sessionID && $0.planID == prior.id })
+                return .object(result)
+            }
+            let plan = AgentSpacePlan(percent: percent, baseline: capacity, explorer: m)
+            spacePlans[sessionID] = plan
+            return plan.proposal
+        }
         if name == "storagedaddy_read_skill", let skill = a["name"].string, let text = AgentMCP.skill(skill) { return .object(["procedure": .string(text)]) }
         if name == "storagedaddy_scan_history" {
             await m.refreshSnapshotHistory()
@@ -425,6 +459,13 @@ private struct AgentPolicy: Codable {
             guard let ids = a["nodeIDs"].array, !ids.isEmpty, ids.count <= 20, ids.allSatisfy({ $0.int != nil }),
                   let reason = a["reason"].string, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, reason.count <= 1000,
                   waitingReviewCount + ids.count <= 500 else { throw AgentSecurity.failure("Provide 1–20 scan node IDs and a brief reason, or review the waiting queue first.") }
+            if args["planID"] != nil {
+                guard let plan = spacePlans[sessionID], plan.id.uuidString == a["planID"].string,
+                      !m.isScanning, !m.exclusionResultsStale, !m.scanIsHistorical, plan.scanIdentity == m.filenameSearchIdentity,
+                      Set(ids.compactMap(\.int)).isSubset(of: plan.nodeIDs) else {
+                    throw AgentSecurity.failure("These choices are outside the reviewed plan or the scan changed. Request a new plan.")
+                }
+            }
             var proposed: [AgentReviewRequest] = []
             for id in Set(ids.compactMap(\.int)).sorted() {
                 guard scan.nodes.indices.contains(id), scan.nodes[id].parent != nil else { throw AgentSecurity.failure("Scan roots and unknown nodes cannot be requested.") }
@@ -437,7 +478,7 @@ private struct AgentPolicy: Codable {
                       !FolderExclusions(paths: m.excludedFolders).blocksCleanup(URL(fileURLWithPath: canonical)) else {
                     appendAudit(session: session.name, action: name + " · Protected location refused", blocked: true); save(); throw AgentSecurity.failure("A protected or excluded path was refused. Nothing was removed.")
                 }
-                let request = AgentReviewRequest(sessionID: sessionID, agent: session.name, reason: reason, permanent: name.hasSuffix("delete_permanently"), path: path, device: node.device, inode: node.inode, scanStarted: scan.started)
+                let request = AgentReviewRequest(sessionID: sessionID, agent: session.name, reason: reason, permanent: name.hasSuffix("delete_permanently"), path: path, device: node.device, inode: node.inode, scanStarted: scan.started, planID: a["planID"].string.flatMap(UUID.init(uuidString:)))
                 proposed.append(request)
             }
             reviews.append(contentsOf: proposed)

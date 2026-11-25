@@ -72,6 +72,55 @@ struct AgentAccessIntegrationTests {
         return try #require(JSONDecoder().decode(AgentJSON.self, from: data)["access_token"].string)
     }
 
+    @Test func chatSpaceTargetPinsReviewedChoicesAndRemeasuresTheDisk() async throws {
+        let f = try await fixture()
+        defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
+        let modules = f.root.appendingPathComponent("node_modules")
+        try FileManager.default.createDirectory(at: modules, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: f.root.appendingPathComponent("package.json"))
+        try Data(repeating: 7, count: 65536).write(to: modules.appendingPathComponent("index.js"))
+        let scan = try await DiskScanner.scan(root: f.root)
+        f.explorer.scan = scan
+        let node = try #require(scan.nodes.first { $0.name == "node_modules" })
+        f.explorer.developerGroups = [DeveloperGroup(category: .nodeModules, allocatedBytes: node.allocatedBytes,
+            logicalBytes: node.logicalBytes, fileCount: 1, rootIDs: [node.id])]
+        let target: AgentJSON = .object(["targetUsedPercent": .integer(80)])
+        let response = await call("plan_space_target", arguments: target, fixture: f)
+        func payload(_ response: AgentJSON) throws -> AgentJSON {
+            let value = try #require(response["result"]["content"].array?.first?["text"].string)
+            return try JSONDecoder().decode(AgentJSON.self, from: Data(value.utf8))
+        }
+        let plan = try payload(response)
+        let id = try #require(plan["planID"].string)
+        #expect(plan["choices"].array?.first?["nodeID"].int == node.id)
+        #expect(plan["observedFreeBytesChange"].int == 0)
+        let args: AgentJSON = .object(["nodeIDs": .array([.integer(node.id)]), "reason": .string("Reinstall from manifest"), "planID": .string(id)])
+        let request = await call("move_to_trash", arguments: args, fixture: f)
+        #expect(request["result"]["isError"].bool == false)
+        #expect(FileManager.default.fileExists(atPath: modules.path))
+        f.agents.review(try #require(f.agents.reviews.first).id)
+        try await waitForReview(f)
+        let selection = try #require(f.explorer.nativeCleanupSelection())
+        let recovery = f.directory.appendingPathComponent("fixture-trash")
+        f.explorer.performNativeCleanup(selection, moveToTrash: { url in
+            try FileManager.default.moveItem(at: url, to: recovery)
+            return recovery
+        })
+        try await waitForReview(f)
+        #expect(FileManager.default.fileExists(atPath: recovery.appendingPathComponent("index.js").path))
+        #expect(!FileManager.default.fileExists(atPath: modules.path))
+        f.explorer.scan = try await DiskScanner.scan(root: f.root)
+        let stale = await call("move_to_trash", arguments: args, fixture: f)
+        #expect(stale["result"]["isError"].bool == true)
+        #expect(f.agents.reviews.count == 1)
+        let measured = try payload(await call("plan_space_target", arguments: .object([
+            "targetUsedPercent": .integer(80), "planID": .string(id)]), fixture: f))
+        #expect(measured["requests"].array?.first?["outcome"].string == "Moved to Trash")
+        let before = try #require(plan["baselineFreeBytes"].int)
+        let after = try #require(measured["freeBytes"].int)
+        #expect(measured["observedFreeBytesChange"].int == after - before)
+    }
+
     @Test func showCleanupOpensRegularReviewFromDeveloperCleanup() async throws {
         let f = try await fixture(role: .admin)
         defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
