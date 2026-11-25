@@ -59,8 +59,10 @@ struct DeveloperCleanupView: View {
                     result(outcome).onAppear { presentedOutcome = true }
                 }
                 if plan.items.isEmpty {
-                    StorageEmptyView("No supported developer folders found", systemImage: "folder", description:
-                        Text("Add the locations that hold your projects, linked worktrees, or developer caches."))
+                    let reason = plan.scopes.count == 1 ? plan.scopes.first?.error : nil
+                    StorageEmptyView(reason == nil ? "No supported developer folders found" : "Scan location unavailable",
+                        systemImage: "folder", description:
+                            Text(reason ?? "Add the locations that hold your projects, linked worktrees, or developer caches."))
                 } else {
                     if model.developerCleanupOutcome == nil { selectionControls(plan) }
                     ScrollView {

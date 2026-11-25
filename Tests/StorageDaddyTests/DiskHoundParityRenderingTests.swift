@@ -12,9 +12,6 @@ struct DiskHoundParityRenderingTests {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("Developer Cleanup Demo \(UUID())")
         defer { try? fm.removeItem(at: root) }
-        let defaults = UserDefaults.standard
-        let previous = defaults.object(forKey: "developerCleanupFolders")
-        defer { defaults.set(previous, forKey: "developerCleanupFolders") }
 
         let projects = root.appendingPathComponent("Projects")
         let worktrees = root.appendingPathComponent("Linked Worktrees")
@@ -31,7 +28,7 @@ struct DiskHoundParityRenderingTests {
         try Data().write(to: native.appendingPathComponent("Package.swift"))
         try Data(repeating: 1, count: 1_048_576).write(to: build.appendingPathComponent("object.o"))
 
-        let model = ExplorerModel()
+        let model = ExplorerModel(developerCleanupPreferences: nil)
         model.workspace = .cleanup
         model.showingDeveloperCleanup = true
         #expect(model.showsDeveloperCleanupReview)
@@ -56,9 +53,20 @@ struct DiskHoundParityRenderingTests {
         model.setDeveloperCleanupDeletesPermanently(false, planID: plan.id)
         let assets = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Assets")
+        let invalidScope = ExplorerModel(developerCleanupPreferences: nil)
+        invalidScope.workspace = .cleanup
+        invalidScope.showingDeveloperCleanup = true
+        invalidScope.findDeveloperCleanup(in: [dependencies])
+        await invalidScope.waitForCurrentStorageOperation()
+        try Task.checkCancellation()
+        let invalidPlan = try #require(invalidScope.developerCleanupPlan)
+        #expect(invalidPlan.items.isEmpty)
+        #expect(invalidPlan.scopes.first?.error?.contains("project folder") == true)
         for width in [880, 1100, 1440] {
             try capture(AnyView(ExplorerView(runsLaunchActions: false).environmentObject(model)
                 .environment(\.storageArtworkDirectory, assets)), name: "developer-cleanup-\(width)", width: width)
+            try capture(AnyView(ExplorerView(runsLaunchActions: false).environmentObject(invalidScope)
+                .environment(\.storageArtworkDirectory, assets)), name: "developer-cleanup-invalid-scope-\(width)", width: width)
         }
         let permanentItem = plan.items.first { $0.canDeletePermanently }
         let item = try #require(permanentItem)
