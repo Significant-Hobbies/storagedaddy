@@ -287,6 +287,7 @@ struct FileTypeStats: Sendable {
         didSet {
             UserDefaults.standard.set(excludedFolders, forKey: "excludedFolders")
             macTools?.setExcludedFolders(excludedFolders)
+            if developerCleanupSelectionKeys != nil { developerCleanupSelectionKeys = [] }
             developerCleanupPlan = nil
             developerCleanupOutcome = nil
             // Existing results remain historical; clear prior cleanup approvals.
@@ -771,7 +772,11 @@ struct FileTypeStats: Sendable {
     }
 
     @Published var showingDeveloperCleanup = false
-    @Published private(set) var developerCleanupPlan: DeveloperCleanupReview?
+    @Published private(set) var developerCleanupPlan: DeveloperCleanupReview? {
+        didSet { restoreDeveloperCleanupSelection() }
+    }
+    @Published private(set) var developerCleanupSelectedIDs: Set<DeveloperCleanupReview.Item.ID> = []
+    private var developerCleanupSelectionKeys: Set<DeveloperCleanupReview.SelectionKey>?
     @Published private(set) var developerCleanupOutcome: DeveloperCleanupReview.Outcome?
     @Published private(set) var developerCleanupError: String?
     @Published private(set) var developerCleanupFolders = UserDefaults.standard.stringArray(forKey: "developerCleanupFolders")
@@ -798,6 +803,34 @@ struct FileTypeStats: Sendable {
         showingDeveloperCleanup = false
         showWelcome = false
         workspace = .cleanup
+    }
+
+    func setDeveloperCleanupSelection(_ ids: Set<DeveloperCleanupReview.Item.ID>, planID: UUID) {
+        guard canStartDeveloperCleanup, developerCleanupOutcome == nil,
+              let plan = developerCleanupPlan, plan.id == planID else { return }
+        let selected = plan.items.filter { ids.contains($0.id) && $0.keptReason == nil }
+        guard selected.count == ids.count else { return }
+        rememberDeveloperCleanupSelection(selected, in: plan)
+    }
+
+    private func restoreDeveloperCleanupSelection() {
+        guard let plan = developerCleanupPlan else {
+            developerCleanupSelectedIDs.removeAll()
+            return
+        }
+        let ready = plan.items.filter { $0.keptReason == nil }
+        let selected: [DeveloperCleanupReview.Item]
+        if let keys = developerCleanupSelectionKeys {
+            selected = ready.filter { plan.selectionKey(for: $0).map(keys.contains) ?? false }
+        } else {
+            selected = ready
+        }
+        rememberDeveloperCleanupSelection(selected, in: plan)
+    }
+
+    private func rememberDeveloperCleanupSelection(_ items: [DeveloperCleanupReview.Item], in plan: DeveloperCleanupReview) {
+        developerCleanupSelectedIDs = Set(items.map(\.id))
+        developerCleanupSelectionKeys = Set(items.compactMap { plan.selectionKey(for: $0) })
     }
 
     func finishViewingDeveloperCleanupResult() {
@@ -833,6 +866,7 @@ struct FileTypeStats: Sendable {
     func removeDeveloperCleanupFolder(_ path: String) {
         guard canStartDeveloperCleanup else { return }
         developerCleanupFolders.removeAll { $0 == path }
+        developerCleanupSelectionKeys = developerCleanupSelectionKeys?.filter { $0.scopePath != path }
         developerCleanupPlan = nil
         developerCleanupOutcome = nil
         developerCleanupError = nil
@@ -872,7 +906,8 @@ struct FileTypeStats: Sendable {
 
     func confirmDeveloperCleanup(planID: UUID, ids: Set<DeveloperCleanupReview.Item.ID>, permanently: Bool) {
         guard canStartDeveloperCleanup, !ids.isEmpty, let plan = developerCleanupPlan,
-              plan.id == planID, developerCleanupOutcome == nil else { return }
+              plan.id == planID, developerCleanupOutcome == nil,
+              ids.isSubset(of: developerCleanupSelectedIDs) else { return }
         developerCleanupError = nil
         busy = true
         progress = "Checking what is in use…"
@@ -892,6 +927,8 @@ struct FileTypeStats: Sendable {
             developerCleanupOutcome = outcome
             let removed = outcome.deleted.union(outcome.trashed)
             if !removed.isEmpty {
+                let retained = developerCleanupSelectedIDs.subtracting(removed)
+                rememberDeveloperCleanupSelection(plan.items.filter { retained.contains($0.id) }, in: plan)
                 dashboard.refresh()
                 if let scan {
                     let scanned = FolderExclusions(paths: [scan.rootPath])

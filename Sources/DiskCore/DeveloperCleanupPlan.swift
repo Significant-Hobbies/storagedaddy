@@ -8,6 +8,8 @@ public struct DeveloperCleanupPlan: Sendable {
         public let allocatedBytes: Int64
         public let canDeletePermanently: Bool
         public let keptReason: String?
+        package let device: UInt64
+        package let inode: UInt64
     }
 
     public struct Outcome: Sendable {
@@ -85,7 +87,7 @@ public struct DeveloperCleanupPlan: Sendable {
             } catch { reason = error.localizedDescription }
             items.append(Item(id: node.id, path: url.path, allocatedBytes: node.allocatedBytes,
                               canDeletePermanently: CleanupGuidance.canDeletePermanently(path: url.path, home: home),
-                              keptReason: reason))
+                              keptReason: reason, device: node.device, inode: node.inode))
         }
         return Self(items: items.sorted {
             if ($0.keptReason == nil) != ($1.keptReason == nil) { return $0.keptReason == nil }

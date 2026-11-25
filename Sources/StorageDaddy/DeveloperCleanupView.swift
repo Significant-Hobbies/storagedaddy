@@ -4,7 +4,6 @@ import SwiftUI
 
 struct DeveloperCleanupView: View {
     @EnvironmentObject private var model: ExplorerModel
-    @State private var selected: Set<DeveloperCleanupReview.Item.ID> = []
     @State private var permanently = true
     @State private var presentedOutcome = false
 
@@ -68,7 +67,7 @@ struct DeveloperCleanupView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(plan.items) { item in
-                                row(item)
+                                row(item, planID: plan.id)
                                 Divider().padding(.leading, 16)
                             }
                         }.storagePanel()
@@ -88,7 +87,6 @@ struct DeveloperCleanupView: View {
         .buttonStyle(SMMacButtonStyle(.secondary))
         .onChange(of: model.developerCleanupPlan?.id, initial: true) { _, _ in
             presentedOutcome = false
-            selected = Set(model.developerCleanupPlan?.items.filter { $0.keptReason == nil }.map(\.id) ?? [])
         }
         .onDisappear {
             if presentedOutcome { model.finishViewingDeveloperCleanupResult() }
@@ -105,23 +103,29 @@ struct DeveloperCleanupView: View {
 
     private func selectionControls(_ plan: DeveloperCleanupReview) -> some View {
         HStack(spacing: 12) {
-            Button("Select All") { selected = Set(plan.items.filter { $0.keptReason == nil }.map(\.id)) }
-            Button("Clear") { selected.removeAll() }
+            Button("Select All") {
+                model.setDeveloperCleanupSelection(Set(plan.items.filter { $0.keptReason == nil }.map(\.id)), planID: plan.id)
+            }
+            Button("Clear") { model.setDeveloperCleanupSelection([], planID: plan.id) }
             Spacer()
             Toggle("Permanently delete eligible dependencies", isOn: $permanently)
         }.disabled(model.busy)
     }
 
-    private func row(_ item: DeveloperCleanupReview.Item) -> some View {
+    private func row(_ item: DeveloperCleanupReview.Item, planID: UUID) -> some View {
         let outcome = model.developerCleanupOutcome
         let reason = outcome?.kept[item.id] ?? item.keptReason
         let name = URL(fileURLWithPath: item.path).lastPathComponent
         let method = permanently && item.canDeletePermanently ? "Delete permanently" : "Move to Trash"
         return HStack(alignment: .top, spacing: 12) {
             if outcome == nil && reason == nil {
-                Toggle("Include \(item.path)", isOn: Binding(get: { selected.contains(item.id) }, set: { include in
+                Toggle("Include \(item.path)", isOn: Binding(get: {
+                    model.developerCleanupSelectedIDs.contains(item.id)
+                }, set: { include in
+                    var selected = model.developerCleanupSelectedIDs
                     if include { selected.insert(item.id) }
                     else { selected.remove(item.id) }
+                    model.setDeveloperCleanupSelection(selected, planID: planID)
                 })).labelsHidden().disabled(model.busy)
             } else {
                 Image(systemName: reason != nil ? "lock" : "folder")
@@ -152,6 +156,7 @@ struct DeveloperCleanupView: View {
     }
 
     private func confirmation(_ plan: DeveloperCleanupReview) -> some View {
+        let selected = model.developerCleanupSelectedIDs
         let items = plan.items.filter { selected.contains($0.id) }
         let permanentCount = permanently ? items.filter(\.canDeletePermanently).count : 0
         let count = items.count

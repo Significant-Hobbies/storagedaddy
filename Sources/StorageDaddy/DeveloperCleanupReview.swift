@@ -17,6 +17,19 @@ struct DeveloperCleanupReview: Sendable {
         var canDeletePermanently: Bool { artifact.canDeletePermanently }
     }
 
+    struct SelectionKey: Hashable {
+        let scopePath: String
+        let folderPath: String
+        let device: UInt64
+        let inode: UInt64
+    }
+
+    func selectionKey(for item: Item) -> SelectionKey? {
+        guard item.artifact.device != 0, item.artifact.inode != 0 else { return nil }
+        return SelectionKey(scopePath: scopes[item.id.scope].path, folderPath: item.path,
+                            device: item.artifact.device, inode: item.artifact.inode)
+    }
+
     struct Scope: Identifiable, Sendable {
         fileprivate let url: URL
         fileprivate let plan: DeveloperCleanupPlan?
