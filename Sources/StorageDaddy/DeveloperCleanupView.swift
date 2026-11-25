@@ -9,6 +9,7 @@ struct DeveloperCleanupView: View {
     @State private var presentedOutcome = false
     @State private var showingLargeItems = false
     @State private var startWithCodex = false
+    @State private var capacityAfterLargeReview: StartupCapacity?
     @State private var resumeAfterLargeReview = false
     @State private var inspectAfterDismissal: URL?
 
@@ -190,11 +191,15 @@ struct DeveloperCleanupView: View {
                 inspectAfterDismissal = nil
                 model.start(url)
             } else if resumeAfterLargeReview, let previous = model.spaceTarget {
-                model.openSpaceTarget(previous, preservingSelection: true)
+                model.openSpaceTarget(capacityAfterLargeReview ?? previous, preservingSelection: true)
             }
         }) {
             LargeStorageReviewSheet(startWithCodex: startWithCodex, onScan: { inspectAfterDismissal = $0 },
-                                    onChange: { resumeAfterLargeReview = true; model.dashboard.refresh() })
+                                    onChange: { capacity in
+                                        capacityAfterLargeReview = capacity
+                                        resumeAfterLargeReview = true
+                                        model.dashboard.refresh()
+                                    })
                 .environmentObject(model)
         }
         .onDisappear {
@@ -204,6 +209,7 @@ struct DeveloperCleanupView: View {
 
     private func openLargeReview(usingCodex: Bool) {
         guard model.storageOperationBlockReason(scheduled: false, allowingDiscovery: true) == nil else { return }
+        capacityAfterLargeReview = nil
         resumeAfterLargeReview = model.searchingForMoreCleanup
         if resumeAfterLargeReview { model.freezeCleanupReview() }
         model.busy = true

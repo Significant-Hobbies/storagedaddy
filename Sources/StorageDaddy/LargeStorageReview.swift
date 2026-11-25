@@ -49,7 +49,7 @@ struct LargeStorageReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
     let startWithCodex: Bool
     let onScan: (URL) -> Void
-    let onChange: () -> Void
+    let onChange: (StartupCapacity?) -> Void
     @State private var entries: [LargeStorageEntry] = []
     @State private var pending: LargeStorageEntry?
     @State private var loading = true
@@ -166,15 +166,16 @@ struct LargeStorageReviewSheet: View {
         Task {
             defer { removing = false }
             do {
-                let gain = try await Task.detached(priority: .userInitiated) {
+                let (before, after) = try await Task.detached(priority: .userInitiated) {
                     let before = StartupCapacity(report: SystemInventory.collect())
                     try vm.remove(exclusions: exclusions)
                     let after = StartupCapacity(report: SystemInventory.collect())
-                    return before.flatMap { b in after.flatMap { a in b.total == a.total ? a.available - b.available : nil } }
+                    return (before, after)
                 }.value
+                let gain = before.flatMap { b in after.flatMap { a in b.total == a.total ? a.available - b.available : nil } }
                 entries.removeAll { $0.id == entry.id }
                 notice = "Deleted " + vm.name + "." + (gain.map { " Free space " + ($0 >= 0 ? "increased" : "decreased") + " by " + DiskFormat.bytes(abs($0)) + "." } ?? "")
-                onChange()
+                onChange(after)
             } catch { notice = error.localizedDescription }
         }
     }
