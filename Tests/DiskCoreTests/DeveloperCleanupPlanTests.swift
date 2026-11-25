@@ -3,6 +3,60 @@ import Testing
 @testable import DiskCore
 
 struct DeveloperCleanupPlanTests {
+    @Test func keepsNestedDependenciesWithinTheirReviewedProjectContainer() async throws {
+        let fm = FileManager.default
+        let project = fm.temporaryDirectory.appendingPathComponent("developer-dependency-root-\(UUID())")
+        defer { try? fm.removeItem(at: project) }
+        let dependencies = project.appendingPathComponent("node_modules")
+        let installedPackage = dependencies.appendingPathComponent("installed-package")
+        let nested = installedPackage.appendingPathComponent("node_modules")
+        try fm.createDirectory(at: nested, withIntermediateDirectories: true)
+        for folder in [project, installedPackage] {
+            try Data("{}".utf8).write(to: folder.appendingPathComponent("package.json"))
+        }
+        try Data("fixture".utf8).write(to: nested.appendingPathComponent("entry.js"))
+
+        let projectPlan = try await DeveloperCleanupPlan.prepare(root: project)
+        let item = try #require(projectPlan.items.first)
+        #expect(projectPlan.items.count == 1)
+        #expect(item.path == dependencies.resolvingSymlinksInPath().path)
+        #expect(item.keptReason == nil && item.canDeletePermanently)
+        for scope in [dependencies, installedPackage] {
+            do {
+                _ = try await DeveloperCleanupPlan.prepare(root: scope)
+                Issue.record("A dependency scope must not offer its nested dependencies for cleanup")
+            } catch {
+                #expect(error.localizedDescription.contains("project folder"))
+            }
+        }
+    }
+
+    @Test func keepsGitCheckoutAddedInsideDependenciesAfterReview() async throws {
+        let fm = FileManager.default
+        let project = fm.temporaryDirectory.appendingPathComponent("developer-late-repository-\(UUID())")
+        defer { try? fm.removeItem(at: project) }
+        let dependencies = project.appendingPathComponent("node_modules")
+        let checkout = dependencies.appendingPathComponent("installed-package/nested")
+        try fm.createDirectory(at: checkout, withIntermediateDirectories: true)
+        let manifest = project.appendingPathComponent("package.json")
+        let source = checkout.appendingPathComponent("source.js")
+        try Data("{}".utf8).write(to: manifest)
+        try Data("synthetic local source".utf8).write(to: source)
+        let plan = try await DeveloperCleanupPlan.prepare(root: project)
+        let item = try #require(plan.items.first)
+        try #require(item.keptReason == nil && item.canDeletePermanently)
+
+        let git = checkout.appendingPathComponent(".git")
+        try fm.createDirectory(at: git, withIntermediateDirectories: true)
+        try Data("ref: refs/heads/main\n".utf8).write(to: git.appendingPathComponent("HEAD"))
+        let outcome = await plan.clean(ids: [item.id], permanently: true)
+        #expect(outcome.deleted.isEmpty && outcome.trashed.isEmpty)
+        #expect(outcome.kept[item.id]?.contains("Git checkout") == true)
+        #expect(fm.fileExists(atPath: git.path))
+        #expect(fm.fileExists(atPath: source.path))
+        #expect(fm.fileExists(atPath: manifest.path))
+    }
+
     @Test func discoversMetroCachesInClaudeWorktreesAndKeepsBusyProjects() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("developer-metro-\(UUID())")

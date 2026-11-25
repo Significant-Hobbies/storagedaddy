@@ -25,6 +25,7 @@ public struct DeveloperCleanupPlan: Sendable {
     public let items: [Item]
     private let scan: ScanResult
     private let exclusions: [String]
+    private let promptAvoidanceFolders: [String]
     private let home: String
 
     public static func prepare(root: URL, excluding exclusions: [String] = [],
@@ -39,6 +40,14 @@ public struct DeveloperCleanupPlan: Sendable {
             throw NSError(domain: "DeveloperCleanup", code: 2, userInfo: [NSLocalizedDescriptionKey:
                 message])
         }
+        var scope = URL(fileURLWithPath: scan.rootPath)
+        while !scope.path.isEmpty && scope.path != "/" {
+            if CleanupGuidance.isProjectDependencies(path: scope.path) {
+                throw NSError(domain: "DeveloperCleanup", code: 3, userInfo: [NSLocalizedDescriptionKey:
+                    "Choose the project folder that contains node_modules to review its dependencies together."])
+            }
+            scope.deleteLastPathComponent()
+        }
         let exclusionPolicy = FolderExclusions(paths: exclusions)
         let candidates = scan.nodes.filter { $0.parent != nil && $0.isDirectory && !$0.isSymlink
             && CleanupGuidance.isFocusedDeveloperName($0.name) }
@@ -51,7 +60,7 @@ public struct DeveloperCleanupPlan: Sendable {
             return !ancestors(of: node.id, in: scan).contains { eligible[$0] != nil }
         }
         let rootIDs = Set(roots.map(\.id))
-        let repositories = Set(scan.nodes.lazy.filter { $0.name == ".git" }
+        let repositories = Set(scan.nodes.lazy.filter { CleanupGuidance.isGitCheckoutMarker($0.name) }
             .flatMap { ancestors(of: $0.id, in: scan).filter(rootIDs.contains) })
         let openFiles = try captureOpenFiles(roots.compactMap { eligible[$0.id] }.flatMap { url in
             [url.path, CleanupActiveUse.metroProject(for: url)?.path].compactMap { $0 }
@@ -93,7 +102,7 @@ public struct DeveloperCleanupPlan: Sendable {
             if ($0.keptReason == nil) != ($1.keptReason == nil) { return $0.keptReason == nil }
             if $0.allocatedBytes != $1.allocatedBytes { return $0.allocatedBytes > $1.allocatedBytes }
             return $0.path < $1.path
-        }, scan: scan, exclusions: exclusions, home: home)
+        }, scan: scan, exclusions: exclusions, promptAvoidanceFolders: promptAvoidanceFolders, home: home)
     }
 
     public func clean(ids: Set<Int>, permanently: Bool,
@@ -115,7 +124,9 @@ public struct DeveloperCleanupPlan: Sendable {
                     openFiles = try Self.captureOpenFiles(dependencies)
                 }
                 try await CleanupPreflight.validate(ids: [item.id], in: scan, excludedFolders: exclusions,
-                    regenerableIDs: [item.id], home: home, openFiles: isDependencies ? openFiles : nil)
+                    regenerableIDs: [item.id], home: home, openFiles: isDependencies ? openFiles : nil,
+                    requireNoNestedGitCheckout: ["node_modules", ".metro-cache"].contains(url.lastPathComponent),
+                    promptAvoidanceFolders: promptAvoidanceFolders)
                 try Task.checkCancellation()
                 if policy.blocksCleanup(url) { throw CleanupPreflightError.excludedFolder(url.path) }
                 if CleanupActiveUse.metroProject(for: url) != nil,

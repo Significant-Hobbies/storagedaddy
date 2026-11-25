@@ -14,6 +14,10 @@ public enum CleanupGuidance {
         focusedDeveloperNames.contains(name) || packageCacheNames.contains(name.lowercased())
     }
 
+    static func isGitCheckoutMarker(_ name: String) -> Bool {
+        name.lowercased() == ".git"
+    }
+
     /// uv owns cache locking and shared installed environments. Its supported
     /// cleaner keeps the cache root and lock; direct Trash/delete is unsafe.
     public static func requiredNativeCleaner(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String? {

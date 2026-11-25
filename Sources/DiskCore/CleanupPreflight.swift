@@ -38,7 +38,8 @@ public enum CleanupPreflight {
 
     static func validate(ids: [Int], in scan: ScanResult, acknowledgedIncomplete: [Int: CleanupIncompleteReview] = [:], excludedFolders: [String],
                          regenerableIDs: Set<Int>, home: String = FileManager.default.homeDirectoryForCurrentUser.path,
-                         openFiles: CleanupActiveUse.OpenFiles?) async throws {
+                         openFiles: CleanupActiveUse.OpenFiles?, requireNoNestedGitCheckout: Bool = false,
+                         promptAvoidanceFolders: [String] = []) async throws {
         try Task.checkCancellation()
         guard !ids.isEmpty else { return }
 
@@ -102,11 +103,25 @@ public enum CleanupPreflight {
         var activeUseURLs = candidateURLs.map(\.url)
 
         // Reinstallable project dependencies are reviewed as a whole folder.
-        // Keep root identity/path checks without walking every package again.
-        for candidate in candidateURLs where candidate.node.isDirectory && !dependencies.contains(candidate.node.id) {
+        // Developer Cleanup also rechecks its promise to keep nested checkouts.
+        for candidate in candidateURLs where candidate.node.isDirectory {
+            let isDependencies = dependencies.contains(candidate.node.id)
+            guard !isDependencies || requireNoNestedGitCheckout else { continue }
             try Task.checkCancellation()
 
-            let result = try await DiskScanner.scan(root: candidate.url)
+            let result = try await DiskScanner.scan(root: candidate.url,
+                excludedFolders: requireNoNestedGitCheckout ? excludedFolders : [],
+                promptAvoidanceFolders: requireNoNestedGitCheckout ? promptAvoidanceFolders : [])
+            if requireNoNestedGitCheckout {
+                if result.nodes.contains(where: { CleanupGuidance.isGitCheckoutMarker($0.name) }) {
+                    throw DiskAnalysisError.unsafePath(path: candidate.url.path, reason: "Contains a Git checkout. This folder is kept.")
+                }
+                guard !result.nodes.isEmpty, result.skipped == 0, result.errors.isEmpty,
+                      result.nodes.first?.isScanIncomplete != true else {
+                    throw DiskAnalysisError.unsafePath(path: candidate.url.path, reason: "The Git checkout check could not finish. This folder is kept.")
+                }
+            }
+            guard !isDependencies else { continue }
             activeUseURLs.append(contentsOf: ToolStorage.dataRoots(in: result))
             for node in result.nodes where node.name.lowercased() == ".gortex" || node.name.lowercased() == ".selltraces" {
                 try ToolStorage.validateCleanup(path: result.url(for: node.id).path)
