@@ -77,8 +77,9 @@ public enum FleetManagedCheckout {
         else { return [] }
         var registered: [String: Set<String>] = [:]
         var candidates: [GitWorktreeCandidate] = []
-        for url in children.sorted(by: { $0.path < $1.path }) {
+        for child in children.sorted(by: { $0.path < $1.path }) {
             try Task.checkCancellation()
+            let url = directory.appendingPathComponent(child.lastPathComponent)
             var metadata = stat(), marker = stat()
             guard !excluded.blocksCleanup(url), lstat(url.path, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFDIR,
                   lstat(url.appendingPathComponent(".git").path, &marker) == 0, marker.st_mode & S_IFMT == S_IFREG,
