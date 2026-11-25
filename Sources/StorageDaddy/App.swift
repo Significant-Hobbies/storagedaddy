@@ -813,6 +813,7 @@ struct FileTypeStats: Sendable {
     }
 
     @Published private(set) var spaceTarget: StartupCapacity?
+    private(set) var capacityBeforeCleanup: StartupCapacity?
     @Published private(set) var spaceTargetResult: StartupCapacity?
     private var permanentBeforeTarget = true
 
@@ -824,7 +825,7 @@ struct FileTypeStats: Sendable {
         developerCleanupDeletesPermanently = true
         showingDeveloperCleanup = true
         workspace = .cleanup
-        let roots: [URL]
+        var roots: [URL]
         if developerCleanupFolders.isEmpty {
             let avoid = AutomaticScanPrivacy.promptAvoidancePaths(homeDirectory: home, accessStatus: FullDiskAccessProbe.status(homeDirectory: home))
             roots = ["Desktop", "Developer", "Projects", "Code", "src", "repos"].compactMap {
@@ -835,6 +836,12 @@ struct FileTypeStats: Sendable {
             }
         } else {
             roots = developerCleanupFolders.map { URL(fileURLWithPath: $0) }
+        }
+        let npx = home.appendingPathComponent(".npm/_npx").standardizedFileURL
+        if npx.path == npx.resolvingSymlinksInPath().path,
+           FileManager.default.fileExists(atPath: npx.path),
+           !FolderExclusions(paths: roots.map(\.path)).blocksCleanup(npx) {
+            roots.append(npx)
         }
         developerCleanupPlan = nil
         developerCleanupOutcome = nil
@@ -966,7 +973,7 @@ struct FileTypeStats: Sendable {
             let worker = Task.detached(priority: .userInitiated) {
                 guard let cacheHome else { return try await planner(roots, exclusions) }
                 let avoid = AutomaticScanPrivacy.promptAvoidancePaths(homeDirectory: cacheHome, accessStatus: FullDiskAccessProbe.status(homeDirectory: cacheHome))
-                async let projectPlan = DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: avoid, quickCleanup: true)
+                async let projectPlan = DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: avoid, quickCleanup: true, home: cacheHome.path)
                 var data = stat()
                 let device = stat("/System/Volumes/Data", &data) == 0 ? UInt64(UInt32(bitPattern: data.st_dev)) : nil
                 let caches = try SpaceTargetCache.discover(home: cacheHome, exclusions: exclusions)
@@ -1002,6 +1009,11 @@ struct FileTypeStats: Sendable {
                           self.developerCleanupOutcome == nil else { return }
                     self.progress = "Cleaning folder \(index) of \(count)…"
                 }
+            }
+            if spaceTarget != nil {
+                capacityBeforeCleanup = await Task.detached(priority: .userInitiated) {
+                    StartupCapacity(report: SystemInventory.collect())
+                }.value
             }
             let worker = Task.detached(priority: .userInitiated) {
                 await plan.clean(ids: ids, permanently: permanently, progress: reportProgress)

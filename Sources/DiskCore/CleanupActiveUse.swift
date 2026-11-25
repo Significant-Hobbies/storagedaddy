@@ -53,10 +53,14 @@ enum CleanupActiveUse {
         if !entries.isEmpty {
             // Only interpreted locally for process/path and CLI-name matches.
             // Arguments are never logged, persisted or displayed.
-            let processes = try probe(executable: "/bin/ps", arguments: ["-ww", "-U", String(getuid()), "-o", "pid=,command="],
-                                      maximumOutputBytes: 8 * 1024 * 1024)
+            let processes = try npxProcessSnapshot()
             try NpxCacheReview.validate(entries: entries, processOutput: processes)
         }
+    }
+
+    static func npxProcessSnapshot() throws -> String {
+        try probe(executable: "/bin/ps", arguments: ["-ww", "-U", String(getuid()), "-o", "pid=,command="],
+                                      maximumOutputBytes: 8 * 1024 * 1024)
     }
 
     static func metroProject(for cache: URL) -> URL? {

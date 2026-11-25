@@ -157,7 +157,7 @@ struct DeveloperCleanupView: View {
         let cache = model.developerCleanupPlan.flatMap { plan in
             plan.id == planID && plan.scopes.indices.contains(item.id.scope) ? plan.scopes[item.id.scope].cache : nil
         }
-        let name = cache.map { "\($0.tool.title) package cache" } ?? (model.spaceTarget != nil ?
+        let name = cache.map { $0.tool == .go ? "Go build cache" : "\($0.tool.title) package cache" } ?? (model.spaceTarget != nil ?
             url.deletingLastPathComponent().lastPathComponent + " / " + url.lastPathComponent : url.lastPathComponent)
         let deletesPermanently = model.developerCleanupDeletesPermanently && item.canDeletePermanently
         let method = deletesPermanently ? "Delete permanently" : "Move to Trash"
@@ -235,6 +235,11 @@ struct DeveloperCleanupView: View {
                 .font(.callout).foregroundStyle(Tints.secondaryText)
             if model.spaceTarget != nil {
                 if let capacity = model.spaceTargetResult {
+                    if let before = model.capacityBeforeCleanup, before.total == capacity.total {
+                        let delta = capacity.available - before.available
+                        Text(delta >= 0 ? "Available space increased by \(DiskFormat.bytes(delta))." :
+                                "Available space decreased by \(DiskFormat.bytes(-delta)) during cleanup.")
+                    }
                     Text("\(DiskFormat.bytes(capacity.available)) available now · \(capacity.usedPercent)% used")
                 } else {
                     Text("Current startup disk usage is unavailable.")

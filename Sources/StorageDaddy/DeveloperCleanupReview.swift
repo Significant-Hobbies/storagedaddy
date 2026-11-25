@@ -105,7 +105,8 @@ struct DeveloperCleanupReview: Sendable {
 
     /// Each plan owns its original scan and validates only items from that scan.
     /// Treat overlapping inputs as an invalid scope so no artifact is selected twice.
-    static func prepare(roots: [URL], excludedFolders: [String], promptAvoidance: [String], quickCleanup: Bool = false) async throws -> Self {
+    static func prepare(roots: [URL], excludedFolders: [String], promptAvoidance: [String], quickCleanup: Bool = false,
+                        home: String = FileManager.default.homeDirectoryForCurrentUser.path) async throws -> Self {
         let canonical = roots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
         let identities = canonical.map(FolderIdentity.init)
         for (index, root) in canonical.enumerated() {
@@ -137,7 +138,7 @@ struct DeveloperCleanupReview: Sendable {
             let avoidance = promptAvoidance.filter { path != $0 && !path.hasPrefix($0 + "/") }
             do {
                 let plan = try await DeveloperCleanupPlan.prepare(root: root, excluding: excludedFolders,
-                                                                   promptAvoidanceFolders: avoidance, quickCleanup: quickCleanup)
+                                                                   promptAvoidanceFolders: avoidance, home: home, quickCleanup: quickCleanup)
                 scopes.append(Scope(url: root, plan: plan, error: nil))
             } catch is CancellationError { throw CancellationError() }
             catch { scopes.append(Scope(url: root, plan: nil, error: error.localizedDescription)) }

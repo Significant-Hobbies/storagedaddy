@@ -53,8 +53,17 @@ public struct DeveloperCleanupPlan: Sendable {
         let exclusionPolicy = FolderExclusions(paths: exclusions)
         let candidates = scan.nodes.filter { $0.parent != nil && $0.isDirectory && !$0.isSymlink
             && (CleanupGuidance.isFocusedDeveloperName($0.name) || (quickCleanup && ["cache", "Intermediates.noindex"].contains($0.name))) }
+        let npxRoot = URL(fileURLWithPath: home).appendingPathComponent(".npm/_npx").standardizedFileURL
+        let isNpxScope = quickCleanup && root.standardizedFileURL.path == npxRoot.path
         let eligible = Dictionary(uniqueKeysWithValues: candidates.compactMap { node -> (Int, URL)? in
             let url = scan.url(for: node.id)
+            if isNpxScope {
+                let entry = url.deletingLastPathComponent()
+                guard url.lastPathComponent == "node_modules", entry.deletingLastPathComponent().path == npxRoot.path,
+                      entry.lastPathComponent.range(of: #"^[a-f0-9]{16}$"#, options: .regularExpression) != nil,
+                      CleanupGuidance.isProjectDependencies(path: url.path) else { return nil }
+                return (node.id, url)
+            }
             if quickCleanup {
                 return CleanupGuidance.isProjectDependencies(path: url.path) || CleanupGuidance.isQuickBuildCache(path: url.path) ? (node.id, url) : nil
             }
@@ -71,12 +80,16 @@ public struct DeveloperCleanupPlan: Sendable {
             [url.path, CleanupActiveUse.metroProject(for: url)?.path, quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path) ? url.deletingLastPathComponent().path : nil].compactMap { $0 }
         })
 
+        let npxProcesses = isNpxScope && !roots.isEmpty ? try CleanupActiveUse.npxProcessSnapshot() : nil
         var items: [Item] = []
         for node in roots {
             try Task.checkCancellation()
             guard let url = eligible[node.id] else { continue }
             let reason: String?
             do {
+                if let npxProcesses {
+                    try NpxCacheReview.validate(entries: [url.deletingLastPathComponent()], processOutput: npxProcesses)
+                }
                 try ToolStorage.validateCleanup(path: url.path)
                 if exclusionPolicy.blocksCleanup(url) { throw CleanupPreflightError.excludedFolder(url.path) }
                 try CleanupSafety.validate(url: url, expected: node, root: URL(fileURLWithPath: scan.rootPath),

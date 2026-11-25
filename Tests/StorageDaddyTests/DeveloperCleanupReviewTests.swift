@@ -67,6 +67,34 @@ struct DeveloperCleanupReviewTests {
         #expect(replaced.deleted.isEmpty)
     }
 
+    @Test func goBuildCleanupPinsTheReviewedCache() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        defer { try? fm.removeItem(at: home) }
+        let bin = home.appendingPathComponent(".local/bin")
+        let directory = home.appendingPathComponent("Library/Caches/go-build")
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: bin, withIntermediateDirectories: true)
+        let entry = directory.appendingPathComponent("object")
+        try Data(repeating: 1, count: 8192).write(to: entry)
+        let go = bin.appendingPathComponent("go")
+        let script = """
+        #!/bin/sh
+        case "$1 $2" in
+          'env GOCACHE') echo "$PWD/Library/Caches/go-build" ;;
+          'clean -cache') test "$GOCACHE" -ef "$PWD/Library/Caches/go-build" && touch "$PWD/confirmed" ;;
+          *) exit 1 ;;
+        esac
+        """
+        try Data(script.utf8).write(to: go)
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: go.path)
+        #expect(try SpaceTargetCache.discover(home: home, exclusions: [entry.path]).isEmpty)
+        let cache = try #require(SpaceTargetCache.discover(home: home, exclusions: []).first)
+        #expect(cache.tool == .go)
+        try cache.clean()
+        #expect(fm.fileExists(atPath: home.appendingPathComponent("confirmed").path))
+    }
+
     @MainActor @Test(.timeLimit(.minutes(2))) func deselectionsAndNewFoldersStayUncheckedAcrossReviews() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("developer-selection-\(UUID())")

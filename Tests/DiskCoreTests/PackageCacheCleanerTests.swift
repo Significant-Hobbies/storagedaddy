@@ -20,7 +20,7 @@ final class PackageCacheCleanerTests: XCTestCase {
     }
 
     func testExactNativeCommandsAndHomebrewClassification() async throws {
-        XCTAssertEqual(PackageCacheTool.allCases.map(\.command), ["yarn cache clean", "uv cache clean", "npm cache clean --force", "brew cleanup -s", "pip3 cache purge", "pnpm store prune"])
+        XCTAssertEqual(PackageCacheTool.allCases.map(\.command), ["yarn cache clean", "uv cache clean", "npm cache clean --force", "brew cleanup -s", "pip3 cache purge", "pnpm store prune", "go clean -cache"])
         XCTAssertTrue(CleanupGuidance.isSuggestedCache(category: .packageCaches, path: "/Users/fixture/Library/Caches/Homebrew", home: "/Users/fixture"))
         XCTAssertFalse(CleanupGuidance.canDeletePermanently(path: "/Users/fixture/Library/Caches/Homebrew", home: "/Users/fixture"))
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
