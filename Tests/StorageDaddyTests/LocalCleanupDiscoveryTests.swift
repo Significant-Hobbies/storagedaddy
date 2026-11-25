@@ -38,7 +38,7 @@ import Testing
         let modules = { (path: String) in path.hasSuffix("/node_modules") }
         print("Completed review", start.duration(to: .now), "items", selected.count, "allocated bytes",
               selected.reduce(Int64.zero) { $0 + $1.allocatedBytes }, "linked worktrees", plan.idleWorktrees.count,
-              "Fleet checks", plan.checkedWorktrees.count, "Fleet approved", plan.checkedWorktrees.values.filter(\\.eligible).count,
+              "Fleet checks", plan.checkedWorktrees.count, "Fleet approved", plan.checkedWorktrees.values.filter { $0.eligible }.count,
               "node_modules ready", selected.filter { modules($0.path) }.count,
               "node_modules kept", plan.withheld.filter { modules($0.item.path) }.count)
         #expect(model.developerCleanupOutcome == nil)
