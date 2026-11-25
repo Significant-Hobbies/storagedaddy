@@ -31,18 +31,24 @@ struct ExplorerView: View {
                             Button("rescan", action: m.rescan).accessibilityLabel("Rescan")
                         }.font(.callout).foregroundStyle(Tints.secondaryText).padding(12)
                     }
-                    if !m.busy, let path = m.cleanupRefreshPaths.first {
+                    if !m.busy, let path = m.cleanupRefreshPath {
                         HStack(spacing: 12) {
                             Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(Tints.mint)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Refresh after cleanup").fontWeight(.semibold)
-                                Text("Rescan \(StorageLabels.location(path)) for current totals. Trash uses space until emptied.")
-                                    .font(.caption).foregroundStyle(Tints.secondaryText).lineLimit(2)
+                                Text("Rescan \(StorageLabels.location(path)) to update the totals.")
+                                    .font(.caption).foregroundStyle(Tints.secondaryText).lineLimit(2).help(path)
                             }
                             Spacer(minLength: 8)
-                            Button("rescan now", action: m.rescanAfterCleanup).accessibilityLabel("Rescan now")
-                                .disabled(!m.staged.isEmpty)
+                            Button("Rescan Now", action: m.rescanAfterCleanup)
+                                .disabled(!m.staged.isEmpty || m.moves.busy)
                                 .help(m.staged.isEmpty ? "Refresh this location" : "Finish or remove your remaining cleanup selections before rescanning.")
+                            Button(action: m.dismissCleanupRefresh) {
+                                Image(systemName: "xmark")
+                            }
+                            .buttonStyle(SMMacButtonStyle(.quiet))
+                            .accessibilityLabel("Dismiss cleanup reminder")
+                            .help("Dismiss cleanup reminder")
                         }.padding(12).overlay(Rectangle().stroke(Tints.mint.opacity(0.25)))
                     }
                     if !m.busy, m.workspace == .explore, m.showWelcome || (!accessIntroductionSeen && m.scan == nil) { accessIntroduction }
