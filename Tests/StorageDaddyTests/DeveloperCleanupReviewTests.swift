@@ -4,7 +4,7 @@ import Testing
 @testable import StorageDaddy
 
 struct DeveloperCleanupReviewTests {
-    @Test func managedStorePrunesOnlyUnlinkedPnpmBlobsAndKeepsVMsOutsideImageCache() async throws {
+    @Test func automaticCleanupWithholdsSharedPnpmAndProtectsGuestsWhileExplicitPruneUsesReviewedStore() async throws {
         let fm = FileManager.default
         let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
         defer { try? fm.removeItem(at: home) }
@@ -56,9 +56,13 @@ struct DeveloperCleanupReviewTests {
         #expect(pnpmRow.bytes == Int64(metadata.st_blocks) * 512)
         let review = DeveloperCleanupReview(scopes: [], items: []).reclaimable(on: pnpmRow.device, caches: caches)
         let ids = Set(review.items.map(\.id))
-        #expect(ids.count == 2)
+        #expect(ids.count == 1)
+        #expect(review.withheld.contains { $0.item.path == store.path })
         let outcome = await review.clean(ids: ids, permanently: true) { _, _ in }
         #expect(outcome.deleted == ids, "Kept reasons: \(outcome.kept)")
+        #expect(fm.fileExists(atPath: free.path))
+        let explicit = try pnpmRow.tool.pruneReviewedStore(executable: pnpmRow.executable, directory: store, home: home)
+        #expect(explicit.status == 0)
         #expect(!fm.fileExists(atPath: free.path))
         #expect(!fm.fileExists(atPath: image.path))
         #expect(fm.fileExists(atPath: installed.path))
