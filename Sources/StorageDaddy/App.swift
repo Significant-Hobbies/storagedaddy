@@ -817,7 +817,7 @@ struct FileTypeStats: Sendable {
     private var permanentBeforeTarget = true
 
     func openSpaceTarget(_ capacity: StartupCapacity, home: URL = FileManager.default.homeDirectoryForCurrentUser) {
-        guard canStartDeveloperCleanup, capacity.bytesToEightyPercent > 0 else { return }
+        guard canStartDeveloperCleanup else { return }
         if spaceTarget == nil { permanentBeforeTarget = developerCleanupDeletesPermanently }
         spaceTarget = capacity
         spaceTargetResult = nil
@@ -890,8 +890,8 @@ struct FileTypeStats: Sendable {
             developerCleanupSelectedIDs.removeAll()
             return
         }
-        if let spaceTarget {
-            developerCleanupSelectedIDs = plan.selection(upTo: spaceTarget.bytesToEightyPercent)
+        if spaceTarget != nil {
+            developerCleanupSelectedIDs = Set(plan.items.map(\.id))
             return
         }
         let ready = plan.items.filter { $0.keptReason == nil }
@@ -964,12 +964,13 @@ struct FileTypeStats: Sendable {
         task = Task {
             defer { busy = false }
             let worker = Task.detached(priority: .userInitiated) {
-                let plan = try await planner(roots, exclusions)
-                guard let cacheHome else { return plan }
+                guard let cacheHome else { return try await planner(roots, exclusions) }
+                let avoid = AutomaticScanPrivacy.promptAvoidancePaths(homeDirectory: cacheHome, accessStatus: FullDiskAccessProbe.status(homeDirectory: cacheHome))
+                async let projectPlan = DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: avoid, quickCleanup: true)
                 var data = stat()
                 let device = stat("/System/Volumes/Data", &data) == 0 ? UInt64(UInt32(bitPattern: data.st_dev)) : nil
                 let caches = try SpaceTargetCache.discover(home: cacheHome, exclusions: exclusions)
-                return plan.reclaimable(on: device, caches: caches)
+                return try await projectPlan.reclaimable(on: device, caches: caches)
             }
             do {
                 let plan = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }

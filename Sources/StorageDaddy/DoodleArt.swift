@@ -275,7 +275,6 @@ struct StartupCapacity: Sendable {
         }
     }
 
-    var bytesToEightyPercent: Int64 { max(0, total / 5 + (total % 5 == 0 ? 0 : 1) - available) }
     var used: Int64 { total - available }
     var usedFraction: Double { Double(used) / Double(total) }
     var usedPercent: Int { Int((usedFraction * 100).rounded()) }

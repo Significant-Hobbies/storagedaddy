@@ -4,7 +4,7 @@ import Foundation
 /// Uses each manager's own cleanup rules. In particular Homebrew cleanup can
 /// remove old installed versions, so a directory named Homebrew is not parity.
 public enum PackageCacheTool: String, CaseIterable, Identifiable, Sendable {
-    case yarn, uv, npm, brew, pip, pnpm
+    case yarn, uv, npm, brew, pip, pnpm, go
     public var id: String { rawValue }
     public var title: String { self == .brew ? "Homebrew" : self == .pip ? "pip3" : rawValue }
     public var arguments: [String] {
@@ -14,11 +14,13 @@ public enum PackageCacheTool: String, CaseIterable, Identifiable, Sendable {
         case .brew: ["cleanup", "-s"]
         case .pip: ["cache", "purge"]
         case .pnpm: ["store", "prune"]
+        case .go: ["clean", "-cache"]
         }
     }
     public var command: String { ([title == "Homebrew" ? "brew" : title] + arguments).joined(separator: " ") }
     public var consequence: String {
         switch self {
+        case .go: "Clears compiled Go build artifacts. The next build recompiles them."
         case .brew: "Permanently removes cached downloads, old installed versions, stale logs and temporary files. Homebrew may also remove unused installed dependencies. Rollback versions and offline installers may be lost."
         case .uv: "Permanently clears uv’s cache using uv’s locking and link rules. Future installs may download or rebuild packages."
         case .pnpm: "Permanently prunes unreferenced packages from pnpm’s store. Installed project dependencies remain; future installs may download packages again."
@@ -33,6 +35,7 @@ public enum PackageCacheTool: String, CaseIterable, Identifiable, Sendable {
                      home.appendingPathComponent(".local/share/mise/installs/node/lts/bin").path,
                      home.appendingPathComponent("Library/pnpm").path] : []
         let roots = [home.appendingPathComponent(".local/bin").path] + pnpmRoots
+            + (self == .go ? ["/usr/local/go/bin", home.appendingPathComponent(".local/share/mise/shims").path] : [])
             + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
             + (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
         return roots.map { URL(fileURLWithPath: $0).appendingPathComponent(name) }
@@ -46,6 +49,7 @@ public enum PackageCacheTool: String, CaseIterable, Identifiable, Sendable {
         case .uv, .pip: args = ["cache", "dir"]
         case .npm: args = ["config", "get", "cache"]
         case .brew: args = ["--cache"]
+        case .go: args = ["env", "GOCACHE"]
         case .pnpm: args = ["store", "path"]
         }
         let result = try PackageToolCommand.run(executable: executable, arguments: args, directory: home, timeout: 20)
@@ -68,7 +72,7 @@ public enum PackageToolCommand {
     /// after the display bound; a verbose manager cannot deadlock the pipe.
     public static func run(executable: URL, arguments: [String], directory: URL, timeout: TimeInterval = 300,
                            maximumOutputBytes: Int = 262_144, requireCompleteOutput: Bool = false, mergeStandardError: Bool = true,
-                           locale: String? = nil) throws -> PackageToolCommandResult {
+                           locale: String? = nil, goBuildCache: URL? = nil) throws -> PackageToolCommandResult {
         try Task.checkCancellation()
         let process = Process(), pipe = Pipe()
         process.executableURL = executable
@@ -83,6 +87,7 @@ public enum PackageToolCommand {
         environment["HOMEBREW_NO_ANALYTICS"] = "1"
         environment["COREPACK_ENABLE_NETWORK"] = "0"
         environment["COREPACK_ENABLE_DOWNLOAD_PROMPT"] = "0"
+        if let goBuildCache { environment["GOCACHE"] = goBuildCache.path }
         if let locale { environment["LC_ALL"] = locale }
         process.environment = environment
         try process.run()

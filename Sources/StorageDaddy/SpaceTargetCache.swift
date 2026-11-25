@@ -14,11 +14,13 @@ struct SpaceTargetCache: Sendable {
     let bytes: Int64
     let exclusions: [String]
 
+    var deferredReason: String? = nil
+
     static func discover(home: URL, exclusions: [String]) throws -> [Self] {
         var result: [Self] = []
-        for tool in [PackageCacheTool.uv, .npm] {
+        for (tool, paths): (PackageCacheTool, [String]) in [(.go, ["Library/Caches/go-build"]), (.npm, [".npm"]), (.pip, ["Library/Caches/pip", ".cache/pip"]), (.uv, [".cache/uv", "Library/Caches/uv"])] {
             try Task.checkCancellation()
-            let expected = (tool == .uv ? [".cache/uv", "Library/Caches/uv"] : [".npm"])
+            let expected = paths
                 .map { home.appendingPathComponent($0).standardizedFileURL }
             guard expected.contains(where: { FileManager.default.fileExists(atPath: $0.path) }),
                   let executable = tool.executable(home: home),
@@ -27,8 +29,14 @@ struct SpaceTargetCache: Sendable {
                   directory.path == directory.resolvingSymlinksInPath().path,
                   !FolderExclusions(paths: exclusions).blocksCleanup(directory) else { continue }
             let measured = tool == .npm ? directory.appendingPathComponent("_cacache") : directory
-            guard let identity = identity(measured),
-                  let report = try? PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/du"),
+            guard let identity = identity(measured) else { continue }
+            if let reason = lockReason(tool: tool, directory: directory) {
+                result.append(Self(tool: tool, executable: executable, home: home, directory: directory,
+                                   measured: measured, device: identity.0, inode: identity.1, bytes: 0,
+                                   exclusions: exclusions, deferredReason: reason))
+                continue
+            }
+            guard let report = try? PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/du"),
                       arguments: ["-skx", measured.path], directory: home, timeout: 120),
                   report.status == 0, let first = report.output.split(whereSeparator: { $0.isWhitespace }).first,
                   let kib = Int64(first), kib > 0, kib <= Int64.max / 1024 else { continue }
@@ -41,7 +49,9 @@ struct SpaceTargetCache: Sendable {
 
     /// Probe uv's existing advisory lock without creating or changing the lock file.
     /// The manager still owns locking when it runs after this point-in-time check.
-    var lockReason: String? {
+    var lockReason: String? { deferredReason ?? Self.lockReason(tool: tool, directory: directory) }
+
+    private static func lockReason(tool: PackageCacheTool, directory: URL) -> String? {
         guard tool == .uv else { return nil }
         let path = directory.appendingPathComponent(".lock").path
         let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
@@ -67,9 +77,9 @@ struct SpaceTargetCache: Sendable {
         if let lockReason {
             throw NSError(domain: "SpaceTargetCache", code: 1, userInfo: [NSLocalizedDescriptionKey: lockReason])
         }
-        let option = tool == .uv ? "--cache-dir" : "--cache"
-        let result = try PackageToolCommand.run(executable: executable, arguments: tool.arguments + [option, directory.path],
-                                                directory: home)
+        let options = tool == .go ? [] : [tool == .npm ? "--cache" : "--cache-dir", directory.path]
+        let result = try PackageToolCommand.run(executable: executable, arguments: tool.arguments + options,
+                                                directory: home, goBuildCache: tool == .go ? directory : nil)
         guard result.status == 0 else {
             throw NSError(domain: "SpaceTargetCache", code: Int(result.status), userInfo: [NSLocalizedDescriptionKey:
                 "\(tool.title) exited with status \(result.status). Cleanup may be partial."])

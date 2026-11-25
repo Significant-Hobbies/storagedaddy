@@ -18,7 +18,7 @@ public enum DiskScanner {
 
     static func scan(
         root: URL, backend: ScanBackend = .parallel, parallelism: Int = 0, excludedFolders: [String],
-        promptAvoidanceFolders: [String] = [], developerArtifactHome: String?,
+        promptAvoidanceFolders: [String] = [], developerArtifactHome: String?, quickCleanup: Bool = false,
         progress: (@Sendable (ScanProgress) -> Void)? = nil
     ) async throws -> ScanResult {
         // Resolve ancestor aliases (for example /var -> /private/var), preserving
@@ -29,7 +29,7 @@ public enum DiskScanner {
             var scanner = Scanner(root: canonical, backend: backend, parallelism: parallelism,
                                   exclusions: FolderExclusions(paths: excludedFolders),
                                   promptAvoidance: FolderExclusions(paths: promptAvoidanceFolders, resolveAliases: false),
-                                  developerArtifactHome: developerArtifactHome, cancellation: cancellation, progress: progress)
+                                  developerArtifactHome: developerArtifactHome, quickCleanup: quickCleanup, cancellation: cancellation, progress: progress)
             return try scanner.run()
         }
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { cancellation.cancel(); worker.cancel() }
@@ -55,6 +55,7 @@ private struct Scanner {
     private let promptAvoidance: FolderExclusions
     private let parallelism: Int
     private let developerArtifactHome: String?
+    private let quickCleanup: Bool
     private let cancellation: ScanCancellation
     private var sharedAllocations: [(id: Int, bytes: Int64, identity: AllocationIdentity)] = []
     private var fileAllocationDetails: [FileAllocationDetail] = []
@@ -79,7 +80,7 @@ private struct Scanner {
     private var livePendingBytes: Int64 = 0
 
     init(root: URL, backend: ScanBackend, parallelism: Int, exclusions: FolderExclusions,
-         promptAvoidance: FolderExclusions, developerArtifactHome: String?,
+         promptAvoidance: FolderExclusions, developerArtifactHome: String?, quickCleanup: Bool,
          cancellation: ScanCancellation, progress: (@Sendable (ScanProgress) -> Void)?) {
         self.exclusions = exclusions
         self.promptAvoidance = promptAvoidance
@@ -88,6 +89,7 @@ private struct Scanner {
         self.backend = backend
         self.parallelism = max(0, min(64, parallelism))
         self.developerArtifactHome = developerArtifactHome
+        self.quickCleanup = quickCleanup
         self.cancellation = cancellation
         self.progress = progress
         self.diskReadStart = ProcessMemory.diskReadBytes()
@@ -198,12 +200,26 @@ private struct Scanner {
                     guard entry.isDirectory, !entry.isSymlink else { continue }
                     // Agent metadata also lives here. Descend only into the checkout container.
                     guard !isClaudeDirectory || entry.name == "worktrees" else { continue }
-                    if CleanupGuidance.isFocusedDeveloperName(entry.name) {
+                    if quickCleanup {
+                        let path = childPath(directory.path, entry.name)
+                        if directory.path.hasSuffix("/.next") {
+                            guard entry.name == "cache" else { continue }
+                        } else if directory.path.hasSuffix("/.build") {
+                            guard entry.name == "out" else { continue }
+                        } else if directory.path.hasSuffix("/.build/out") {
+                            guard entry.name == "Intermediates.noindex" else { continue }
+                        }
+                        insideArtifact = entry.name == "node_modules" && CleanupGuidance.isProjectDependencies(path: path)
+                            || CleanupGuidance.isQuickBuildCache(path: path)
+                        if !insideArtifact && [".build", ".next"].contains(entry.name) {
+                            guard CleanupGuidance.isRegenerableFolder(path: path, home: home) else { continue }
+                        }
+                    } else if CleanupGuidance.isFocusedDeveloperName(entry.name) {
                         insideArtifact = CleanupGuidance.isRegenerableFolder(path: childPath(directory.path, entry.name), home: home)
                     }
                     if !insideArtifact {
                         guard !CleanupGuidance.isDependencyContainerName(entry.name) else { continue }
-                        guard entry.name == ".worktrees" || entry.name == ".claude" || !entry.name.hasPrefix(".") else { continue }
+                        guard (quickCleanup && [".next", ".build"].contains(entry.name)) || entry.name == ".worktrees" || entry.name == ".claude" || !entry.name.hasPrefix(".") else { continue }
                         guard !entry.name.hasSuffix(".app"), !entry.name.hasSuffix(".framework"), !entry.name.hasSuffix(".xpc") else { continue }
                     }
                 }

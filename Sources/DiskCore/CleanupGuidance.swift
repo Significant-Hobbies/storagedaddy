@@ -108,6 +108,27 @@ public enum CleanupGuidance {
             && isRegenerableFolder(path: path)
     }
 
+    static func isQuickBuildCache(path: String) -> Bool {
+        let suffix: String
+        let manifest: String
+        let marker: String
+        if path.hasSuffix("/.next/cache") {
+            suffix = "/.next/cache"
+            manifest = "package.json"
+            marker = ".next/build-manifest.json"
+        } else if path.hasSuffix("/.build/out/Intermediates.noindex") {
+            suffix = "/.build/out/Intermediates.noindex"
+            manifest = "Package.swift"
+            marker = ".build/workspace-state.json"
+        } else { return false }
+        guard !isInstalledRuntime(path: path) else { return false }
+        let project = URL(fileURLWithPath: String(path.dropLast(suffix.count)))
+        return [manifest, marker].allSatisfy {
+            var metadata = stat()
+            return lstat(project.appendingPathComponent($0).path, &metadata) == 0 && metadata.st_mode & S_IFMT == S_IFREG
+        }
+    }
+
     /// Only Node dependency trees and bounded download caches may bypass Trash.
     /// Installed runtimes, manifests and other data keep their recovery path.
     public static func canDeletePermanently(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {

@@ -8,12 +8,12 @@ struct DeveloperCleanupView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            SMWorkspaceHeader(model.spaceTarget == nil ? "Developer Cleanup" : "Review cleanup for 80%", subtitle: subtitle) {
+            SMWorkspaceHeader(model.spaceTarget == nil ? "Developer Cleanup" : "Review cleanup", subtitle: subtitle) {
                 Button("Other Cleanup", action: model.openQuickCleanup)
                     .disabled(model.busy)
             }
             if let target = model.spaceTarget {
-                Text("Free \(DiskFormat.bytes(target.bytesToEightyPercent)) to reach 80% used")
+                Text("\(DiskFormat.bytes(target.available)) available on the startup disk")
                     .font(.headline)
                 if let plan = model.developerCleanupPlan, !plan.scopes.isEmpty {
                     let unavailable = plan.scopes.filter { $0.error != nil }.count
@@ -68,7 +68,7 @@ struct DeveloperCleanupView: View {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 8) {
                                 ForEach(plan.withheld) { entry in
-                                    Text(StorageLabels.location(entry.item.path) + " · " + DiskFormat.bytes(entry.item.allocatedBytes))
+                                    Text(StorageLabels.location(entry.item.path) + (entry.item.allocatedBytes > 0 ? " · " + DiskFormat.bytes(entry.item.allocatedBytes) : ""))
                                     Text(entry.reason).foregroundStyle(Tints.secondaryText)
                                 }
                             }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
@@ -128,7 +128,7 @@ struct DeveloperCleanupView: View {
     }
 
     private var subtitle: String {
-        if model.spaceTarget != nil { return "Package caches and rebuildable dependencies · startup disk only" }
+        if model.spaceTarget != nil { return "Tool caches, build caches and project dependencies · startup disk only" }
         if let root = model.developerCleanupFolders.first, model.developerCleanupFolders.count == 1 {
             return StorageLabels.location(root)
         }
@@ -212,13 +212,8 @@ struct DeveloperCleanupView: View {
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(count) selected · \(allocation) on disk").font(.callout.weight(.semibold))
-                if let target = model.spaceTarget {
-                    let gap = max(0, target.bytesToEightyPercent - items.reduce(0) { $0 + $1.allocatedBytes })
-                    Text(gap > 0 ? "At least \(DiskFormat.bytes(gap)) more needed. Shared blocks may reduce savings." :
-                            "Selected allocation covers the target. Actual space freed can vary.")
-                }
                 if model.spaceTarget != nil {
-                    Text("Permanent deletion removes local edits and cached packages. Reinstalls may need a download.")
+                    Text("Deletes the selected files permanently. Packages may need downloading and build caches will be rebuilt.")
                 } else if permanentCount > 0 {
                     Text("\(permanentCount) permanent · \(count - permanentCount) to Trash. Permanent deletion cannot be undone.")
                 } else {
@@ -240,8 +235,7 @@ struct DeveloperCleanupView: View {
                 .font(.callout).foregroundStyle(Tints.secondaryText)
             if model.spaceTarget != nil {
                 if let capacity = model.spaceTargetResult {
-                    Text(capacity.bytesToEightyPercent == 0 ? "Target reached · \(capacity.usedPercent)% used" :
-                            "\(capacity.usedPercent)% used · \(DiskFormat.bytes(capacity.bytesToEightyPercent)) still needed")
+                    Text("\(DiskFormat.bytes(capacity.available)) available now · \(capacity.usedPercent)% used")
                 } else {
                     Text("Current startup disk usage is unavailable.")
                 }

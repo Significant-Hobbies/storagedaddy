@@ -26,11 +26,12 @@ public struct DeveloperCleanupPlan: Sendable {
     private let scan: ScanResult
     private let exclusions: [String]
     private let promptAvoidanceFolders: [String]
+    private let quickCleanup: Bool
     private let home: String
 
     public static func prepare(root: URL, excluding exclusions: [String] = [],
                                promptAvoidanceFolders: [String] = [],
-                               home: String = FileManager.default.homeDirectoryForCurrentUser.path) async throws -> Self {
+                               home: String = FileManager.default.homeDirectoryForCurrentUser.path, quickCleanup: Bool = false) async throws -> Self {
         try Task.checkCancellation()
         var scope = root.resolvingSymlinksInPath().standardizedFileURL
         while !scope.path.isEmpty && scope.path != "/" {
@@ -41,7 +42,7 @@ public struct DeveloperCleanupPlan: Sendable {
             scope.deleteLastPathComponent()
         }
         let scan = try await DiskScanner.scan(root: root, excludedFolders: exclusions,
-                                              promptAvoidanceFolders: promptAvoidanceFolders, developerArtifactHome: home)
+                                              promptAvoidanceFolders: promptAvoidanceFolders, developerArtifactHome: home, quickCleanup: quickCleanup)
         try Task.checkCancellation()
         if scan.nodes.isEmpty {
             let message = scan.incompleteEvidence?.first.map { "This folder was \($0.reason)." }
@@ -51,9 +52,12 @@ public struct DeveloperCleanupPlan: Sendable {
         }
         let exclusionPolicy = FolderExclusions(paths: exclusions)
         let candidates = scan.nodes.filter { $0.parent != nil && $0.isDirectory && !$0.isSymlink
-            && CleanupGuidance.isFocusedDeveloperName($0.name) }
+            && (CleanupGuidance.isFocusedDeveloperName($0.name) || (quickCleanup && ["cache", "Intermediates.noindex"].contains($0.name))) }
         let eligible = Dictionary(uniqueKeysWithValues: candidates.compactMap { node -> (Int, URL)? in
             let url = scan.url(for: node.id)
+            if quickCleanup {
+                return CleanupGuidance.isProjectDependencies(path: url.path) || CleanupGuidance.isQuickBuildCache(path: url.path) ? (node.id, url) : nil
+            }
             return CleanupGuidance.isRegenerableFolder(path: url.path, home: home) ? (node.id, url) : nil
         })
         let roots = candidates.filter { node in
@@ -64,7 +68,7 @@ public struct DeveloperCleanupPlan: Sendable {
         let repositories = Set(scan.nodes.lazy.filter { CleanupGuidance.isGitCheckoutMarker($0.name) }
             .flatMap { ancestors(of: $0.id, in: scan).filter(rootIDs.contains) })
         let openFiles = try captureOpenFiles(roots.compactMap { eligible[$0.id] }.flatMap { url in
-            [url.path, CleanupActiveUse.metroProject(for: url)?.path].compactMap { $0 }
+            [url.path, CleanupActiveUse.metroProject(for: url)?.path, quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path) ? url.deletingLastPathComponent().path : nil].compactMap { $0 }
         })
 
         var items: [Item] = []
@@ -76,7 +80,7 @@ public struct DeveloperCleanupPlan: Sendable {
                 try ToolStorage.validateCleanup(path: url.path)
                 if exclusionPolicy.blocksCleanup(url) { throw CleanupPreflightError.excludedFolder(url.path) }
                 try CleanupSafety.validate(url: url, expected: node, root: URL(fileURLWithPath: scan.rootPath),
-                                           allowingRegenerableChanges: true, home: home)
+                                           allowingRegenerableChanges: !(quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path)), home: home)
                 if let cleaner = CleanupGuidance.requiredNativeCleaner(path: url.path, home: home) {
                     reason = "Use \(cleaner) in Developer Insights. The cache manager owns its lock."
                 } else if CleanupGuidance.isSuggestedCache(category: .packageCaches, path: url.path, home: home)
@@ -85,25 +89,27 @@ public struct DeveloperCleanupPlan: Sendable {
                 } else if CleanupGuidance.isSuggestedCache(category: .modelCaches, path: url.path, home: home) {
                     reason = "Review these downloaded models in Developer Insights before removing them."
                 } else if node.isScanIncomplete == true { reason = "Some contents could not be checked. This folder is kept." }
-                else if repositories.contains(node.id), ["node_modules", ".metro-cache"].contains(node.name) {
+                else if repositories.contains(node.id), quickCleanup || ["node_modules", ".metro-cache"].contains(node.name) {
                     reason = "Contains a Git checkout. This folder is kept."
                 } else if !FileManager.default.isDeletableFile(atPath: url.path) {
                     reason = "macOS does not allow removal with the current permissions."
                 } else if let user = openFiles?.user(of: url.path) { reason = "In use by \(user). Quit it and scan again." }
+                else if quickCleanup, CleanupGuidance.isQuickBuildCache(path: url.path),
+                        let user = openFiles?.user(of: url.deletingLastPathComponent().path) { reason = "Build output in use by \(user). Scan again when it finishes." }
                 else if let project = CleanupActiveUse.metroProject(for: url), let user = openFiles?.user(of: project.path) {
                     reason = "Metro project in use by \(user). Quit it and scan again."
                 }
                 else { reason = nil }
             } catch { reason = error.localizedDescription }
             items.append(Item(id: node.id, path: url.path, allocatedBytes: node.allocatedBytes,
-                              canDeletePermanently: CleanupGuidance.canDeletePermanently(path: url.path, home: home),
+                              canDeletePermanently: (quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path)) || CleanupGuidance.canDeletePermanently(path: url.path, home: home),
                               keptReason: reason, device: node.device, inode: node.inode))
         }
         return Self(items: items.sorted {
             if ($0.keptReason == nil) != ($1.keptReason == nil) { return $0.keptReason == nil }
             if $0.allocatedBytes != $1.allocatedBytes { return $0.allocatedBytes > $1.allocatedBytes }
             return $0.path < $1.path
-        }, scan: scan, exclusions: exclusions, promptAvoidanceFolders: promptAvoidanceFolders, home: home)
+        }, scan: scan, exclusions: exclusions, promptAvoidanceFolders: promptAvoidanceFolders, quickCleanup: quickCleanup, home: home)
     }
 
     public func clean(ids: Set<Int>, permanently: Bool,
@@ -126,7 +132,7 @@ public struct DeveloperCleanupPlan: Sendable {
                 }
                 try await CleanupPreflight.validate(ids: [item.id], in: scan, excludedFolders: exclusions,
                     regenerableIDs: [item.id], home: home, openFiles: isDependencies ? openFiles : nil,
-                    requireNoNestedGitCheckout: ["node_modules", ".metro-cache"].contains(url.lastPathComponent),
+                    requireNoNestedGitCheckout: quickCleanup || ["node_modules", ".metro-cache"].contains(url.lastPathComponent),
                     promptAvoidanceFolders: promptAvoidanceFolders)
                 try Task.checkCancellation()
                 if policy.blocksCleanup(url) { throw CleanupPreflightError.excludedFolder(url.path) }
@@ -135,9 +141,12 @@ public struct DeveloperCleanupPlan: Sendable {
                     throw CleanupPreflightError.changedRecord(path: url.path)
                 }
                 try CleanupSafety.validate(url: url, expected: scan.nodes[item.id], root: root,
-                                           allowingRegenerableChanges: true, home: home)
+                                           allowingRegenerableChanges: !(quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path)), home: home)
+                if quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path) {
+                    try CleanupActiveUse.validate(urls: [url.deletingLastPathComponent()], home: home)
+                }
                 if permanently && item.canDeletePermanently {
-                    guard CleanupGuidance.canDeletePermanently(path: url.path, home: home),
+                    guard (quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path)) || CleanupGuidance.canDeletePermanently(path: url.path, home: home),
                           CleanupGuidance.requiredNativeCleaner(path: url.path, home: home) == nil else {
                         throw CocoaError(.fileWriteNoPermission)
                     }

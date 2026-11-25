@@ -20,23 +20,31 @@ struct DiskHoundParityRenderingTests {
             try Data("{}".utf8).write(to: project.appendingPathComponent("package.json"))
             try Data(repeating: 42, count: size).write(to: dependencies.appendingPathComponent("index.js"))
         }
+        let buildFiles = [
+            "Website/package.json", "Website/.next/build-manifest.json", "Website/.next/cache/webpack/entry",
+            "Website/.next/server/app.js", "Native/Package.swift", "Native/.build/workspace-state.json",
+            "Native/.build/out/Intermediates.noindex/compiled.o", "Native/.build/checkouts/Library/source.swift",
+            "Unverified/package.json", "Unverified/.next/cache/personal-file"
+        ]
+        for path in buildFiles {
+            let file = projects.appendingPathComponent(path)
+            try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(repeating: 42, count: 8192).write(to: file)
+        }
         let model = ExplorerModel(developerCleanupPreferences: nil)
-        let target = try #require(StartupCapacity(total: 100_001, available: 10_000))
-        #expect(target.bytesToEightyPercent == 10_001)
+        let target = try #require(StartupCapacity(total: 100_001, available: 50_000))
+        #expect(target.usedPercent == 50)
         model.openSpaceTarget(target, home: home)
         await model.waitForCurrentStorageOperation()
         let plan = try #require(model.developerCleanupPlan)
         #expect(model.showsDeveloperCleanupReview)
         #expect(model.developerCleanupFolders.isEmpty)
         #expect(plan.scopes.count == 1)
-        #expect(plan.items.count == 2)
+        #expect(plan.items.count == 4)
         #expect(plan.reclaimable(on: nil).items.isEmpty)
-        #expect(plan.selection(upTo: Int64.max).count == 2)
-        let smaller = try #require(plan.items.last)
-        #expect(plan.selection(upTo: 1) == [smaller.id])
         let item = try #require(plan.items.first)
         #expect(item.path.contains("/Larger/"))
-        #expect(model.developerCleanupSelectedIDs == [item.id])
+        #expect(model.developerCleanupSelectedIDs == Set(plan.items.map(\.id)))
         if ProcessInfo.processInfo.environment["STORAGEDADDY_DEVELOPER_CLEANUP_EVIDENCE"] == "1" {
             for width in [880, 1100, 1440] {
                 try capture(AnyView(ExplorerView(runsLaunchActions: false).environmentObject(model)),
@@ -45,10 +53,14 @@ struct DiskHoundParityRenderingTests {
         }
         model.confirmDeveloperCleanup(planID: plan.id, ids: model.developerCleanupSelectedIDs, permanently: true)
         await model.waitForCurrentStorageOperation()
-        #expect(model.developerCleanupOutcome?.deleted == [item.id])
+        #expect(model.developerCleanupOutcome?.deleted == Set(plan.items.map(\.id)))
         #expect(!fm.fileExists(atPath: item.path))
+        for path in buildFiles {
+            let cleaned = path.hasSuffix("/entry") || path.hasSuffix("/compiled.o")
+            #expect(fm.fileExists(atPath: projects.appendingPathComponent(path).path) == !cleaned)
+        }
         #expect(fm.fileExists(atPath: projects.appendingPathComponent("Larger/package.json").path))
-        #expect(fm.fileExists(atPath: projects.appendingPathComponent("Smaller/node_modules/index.js").path))
+        #expect(!fm.fileExists(atPath: projects.appendingPathComponent("Smaller/node_modules/index.js").path))
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["STORAGEDADDY_DEVELOPER_CLEANUP_EVIDENCE"] == "1"),
@@ -88,7 +100,7 @@ struct DiskHoundParityRenderingTests {
         try Task.checkCancellation()
         let plan = try #require(model.developerCleanupPlan)
         #expect(model.scan == nil)
-        #expect(plan.items.count == 2)
+        #expect(plan.items.count == 4)
         #expect(Set(plan.items.map(\.id.scope)).count == 2)
         model.findDeveloperCleanup(in: [projects, worktrees, web], retainingReviewOnFailure: true)
         await model.waitForCurrentStorageOperation()
@@ -123,13 +135,13 @@ struct DiskHoundParityRenderingTests {
         #expect(model.developerCleanupError == nil)
         await model.waitForCurrentStorageOperation()
         try Task.checkCancellation()
-        #expect(model.developerCleanupOutcome?.deleted == [item.id])
+        #expect(model.developerCleanupOutcome?.deleted == Set(plan.items.map(\.id)))
         #expect(!fm.fileExists(atPath: dependencies.path))
         #expect(fm.fileExists(atPath: manifest.path))
         #expect(fm.fileExists(atPath: build.path))
         model.openQuickCleanup()
         model.openDeveloperCleanup()
-        #expect(model.developerCleanupOutcome?.deleted == [item.id])
+        #expect(model.developerCleanupOutcome?.deleted == Set(plan.items.map(\.id)))
         #expect(!model.busy)
         model.finishViewingDeveloperCleanupResult()
         #expect(model.developerCleanupOutcome == nil)

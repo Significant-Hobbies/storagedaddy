@@ -28,7 +28,7 @@ struct DeveloperCleanupReviewTests {
         let caches = try SpaceTargetCache.discover(home: home, exclusions: [])
         let cache = try #require(caches.first)
         let review = DeveloperCleanupReview(scopes: [], items: []).reclaimable(on: cache.device, caches: caches)
-        let selected = review.selection(upTo: 1)
+        let selected = Set(review.items.map(\.id))
         #expect(selected.count == 1)
         #expect(!fm.fileExists(atPath: home.appendingPathComponent("confirmed").path))
         let lockFile = directory.appendingPathComponent(".lock")
@@ -37,7 +37,7 @@ struct DeveloperCleanupReviewTests {
         defer { close(holder) }
         try #require(flock(holder, LOCK_SH | LOCK_NB) == 0)
         let busyReview = DeveloperCleanupReview(scopes: [], items: []).reclaimable(on: cache.device, caches: caches)
-        #expect(busyReview.selection(upTo: .max).isEmpty)
+        #expect(busyReview.items.isEmpty)
         #expect(busyReview.withheld.first?.item.allocatedBytes == cache.bytes)
         #expect(busyReview.withheld.first?.reason.contains("active uv task") == true)
         let becameBusy = await review.clean(ids: selected, permanently: true) { _, _ in }
@@ -49,7 +49,7 @@ struct DeveloperCleanupReviewTests {
         try fm.moveItem(at: lockFile, to: originalLock)
         try fm.createSymbolicLink(at: lockFile, withDestinationURL: originalLock)
         let unverifiable = DeveloperCleanupReview(scopes: [], items: []).reclaimable(on: cache.device, caches: caches)
-        #expect(unverifiable.selection(upTo: .max).isEmpty)
+        #expect(unverifiable.items.isEmpty)
         #expect(unverifiable.withheld.first?.reason.contains("Could not verify") == true)
         let unverified = await review.clean(ids: selected, permanently: true) { _, _ in }
         #expect(unverified.kept.values.first?.contains("Could not verify") == true)

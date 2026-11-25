@@ -144,12 +144,12 @@ struct DashboardView: View {
             HStack(spacing: 16) {
                 DoodleArt(topic: .overview).frame(width: 72, height: 72)
                 VStack(alignment: .trailing, spacing: 8) {
-                    if let capacity = dashboard.report.flatMap(StartupCapacity.init(report:)), capacity.bytesToEightyPercent > 0 {
-                        Button("Review cleanup for 80%") { m.openSpaceTarget(capacity) }
+                    if let capacity = dashboard.report.flatMap(StartupCapacity.init(report:)) {
+                        Button("Find space to clean") { m.openSpaceTarget(capacity) }
                             .buttonStyle(SMMacButtonStyle(.primary))
                             .disabled(!m.canStartDeveloperCleanup)
-                            .help("Measure uv and npm caches and rebuildable dependencies in saved project folders, or accessible development folders when no locations are saved.")
-                        Text("Free \(DiskFormat.bytes(capacity.bytesToEightyPercent)) to reach 80% used")
+                            .help("Measure tool caches, build caches and rebuildable dependencies in saved project folders, or accessible development folders when no locations are saved.")
+                        Text("\(DiskFormat.bytes(capacity.available)) available")
                             .font(.caption).foregroundStyle(Tints.secondaryText)
                     } else {
                         Button("Find Developer Files", action: m.openDeveloperCleanup)
