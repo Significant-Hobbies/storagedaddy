@@ -4,7 +4,6 @@ import SwiftUI
 
 struct DeveloperCleanupView: View {
     @EnvironmentObject private var model: ExplorerModel
-    @State private var permanently = true
     @State private var presentedOutcome = false
 
     var body: some View {
@@ -108,7 +107,10 @@ struct DeveloperCleanupView: View {
             }
             Button("Clear") { model.setDeveloperCleanupSelection([], planID: plan.id) }
             Spacer()
-            Toggle("Permanently delete eligible dependencies", isOn: $permanently)
+            Toggle("Permanently delete eligible dependencies", isOn: Binding(
+                get: { model.developerCleanupDeletesPermanently },
+                set: { model.setDeveloperCleanupDeletesPermanently($0, planID: plan.id) }
+            ))
         }.disabled(model.busy)
     }
 
@@ -116,7 +118,8 @@ struct DeveloperCleanupView: View {
         let outcome = model.developerCleanupOutcome
         let reason = outcome?.kept[item.id] ?? item.keptReason
         let name = URL(fileURLWithPath: item.path).lastPathComponent
-        let method = permanently && item.canDeletePermanently ? "Delete permanently" : "Move to Trash"
+        let deletesPermanently = model.developerCleanupDeletesPermanently && item.canDeletePermanently
+        let method = deletesPermanently ? "Delete permanently" : "Move to Trash"
         return HStack(alignment: .top, spacing: 12) {
             if outcome == nil && reason == nil {
                 Toggle("Include \(item.path)", isOn: Binding(get: {
@@ -145,7 +148,7 @@ struct DeveloperCleanupView: View {
                     Text(outcome.deleted.contains(item.id) ? "Deleted" : outcome.trashed.contains(item.id) ? "In Trash" : "Unchanged")
                         .foregroundStyle(Tints.secondaryText).font(.caption)
                 } else {
-                    Text(method).foregroundStyle(permanently && item.canDeletePermanently ? Tints.coral : Tints.secondaryText).font(.caption)
+                    Text(method).foregroundStyle(deletesPermanently ? Tints.coral : Tints.secondaryText).font(.caption)
                 }
             }
         }.padding(.vertical, 10).padding(.horizontal, 16)
@@ -158,6 +161,7 @@ struct DeveloperCleanupView: View {
     private func confirmation(_ plan: DeveloperCleanupReview) -> some View {
         let selected = model.developerCleanupSelectedIDs
         let items = plan.items.filter { selected.contains($0.id) }
+        let permanently = model.developerCleanupDeletesPermanently
         let permanentCount = permanently ? items.filter(\.canDeletePermanently).count : 0
         let count = items.count
         let allocation = bytes(items)

@@ -52,6 +52,7 @@ struct DiskHoundParityRenderingTests {
         while model.busy && Date() < overlapDeadline { try await Task.sleep(for: .milliseconds(20)) }
         #expect(model.developerCleanupPlan?.id == plan.id)
         #expect(model.developerCleanupError?.contains("overlaps") == true)
+        model.setDeveloperCleanupDeletesPermanently(false, planID: plan.id)
         let assets = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Assets")
         for width in [880, 1100, 1440] {
@@ -60,9 +61,10 @@ struct DiskHoundParityRenderingTests {
         }
         let permanentItem = plan.items.first { $0.canDeletePermanently }
         let item = try #require(permanentItem)
-        model.confirmDeveloperCleanup(planID: UUID(), ids: [item.id], permanently: true)
+        model.confirmDeveloperCleanup(planID: UUID(), ids: [item.id], permanently: false)
         #expect(!model.busy)
         #expect(fm.fileExists(atPath: dependencies.path))
+        model.setDeveloperCleanupDeletesPermanently(true, planID: plan.id)
         model.confirmDeveloperCleanup(planID: plan.id, ids: [item.id], permanently: true)
         #expect(model.developerCleanupError == nil)
         let removalDeadline = Date().addingTimeInterval(10)

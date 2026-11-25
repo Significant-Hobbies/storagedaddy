@@ -44,7 +44,9 @@ struct DeveloperCleanupReviewTests {
         let initial = try await completedReview()
         let original = try item(checked, in: initial)
         #expect(model.developerCleanupSelectedIDs == Set(initial.items.map(\.id)))
+        #expect(model.developerCleanupDeletesPermanently)
         model.setDeveloperCleanupSelection([original.id], planID: initial.id)
+        model.setDeveloperCleanupDeletesPermanently(false, planID: initial.id)
 
         model.findDeveloperCleanup(in: [added, first, second], retainingReviewOnFailure: true)
         let expanded = try await completedReview()
@@ -52,7 +54,9 @@ struct DeveloperCleanupReviewTests {
         #expect(retained.id != original.id)
         #expect(model.developerCleanupSelectedIDs == [retained.id])
         model.setDeveloperCleanupSelection(Set(expanded.items.map(\.id)), planID: initial.id)
+        model.setDeveloperCleanupDeletesPermanently(true, planID: initial.id)
         #expect(model.developerCleanupSelectedIDs == [retained.id])
+        #expect(!model.developerCleanupDeletesPermanently)
 
         model.openQuickCleanup()
         model.openDeveloperCleanup()
@@ -60,6 +64,10 @@ struct DeveloperCleanupReviewTests {
         #expect(revisited.id != expanded.id)
         let revisitedSelection = try item(checked, in: revisited)
         #expect(model.developerCleanupSelectedIDs == [revisitedSelection.id])
+        #expect(!model.developerCleanupDeletesPermanently)
+        model.confirmDeveloperCleanup(planID: revisited.id, ids: [revisitedSelection.id], permanently: true)
+        #expect(!model.busy)
+        #expect(fm.fileExists(atPath: checked.path))
 
         let originalDirectory = second.appendingPathComponent(".original-dependencies")
         try fm.moveItem(at: checked, to: originalDirectory)
@@ -68,7 +76,8 @@ struct DeveloperCleanupReviewTests {
         let rescanned = try await completedReview()
         #expect(rescanned.id != revisited.id)
         #expect(model.developerCleanupSelectedIDs.isEmpty)
-        model.confirmDeveloperCleanup(planID: rescanned.id, ids: [try item(checked, in: rescanned).id], permanently: true)
+        #expect(!model.developerCleanupDeletesPermanently)
+        model.confirmDeveloperCleanup(planID: rescanned.id, ids: [try item(checked, in: rescanned).id], permanently: false)
         #expect(!model.busy)
         #expect(model.developerCleanupOutcome == nil)
         for folder in [unchecked, checked, new, originalDirectory] {

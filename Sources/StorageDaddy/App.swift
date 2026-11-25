@@ -776,6 +776,7 @@ struct FileTypeStats: Sendable {
         didSet { restoreDeveloperCleanupSelection() }
     }
     @Published private(set) var developerCleanupSelectedIDs: Set<DeveloperCleanupReview.Item.ID> = []
+    @Published private(set) var developerCleanupDeletesPermanently = true
     private var developerCleanupSelectionKeys: Set<DeveloperCleanupReview.SelectionKey>?
     @Published private(set) var developerCleanupOutcome: DeveloperCleanupReview.Outcome?
     @Published private(set) var developerCleanupError: String?
@@ -805,9 +806,19 @@ struct FileTypeStats: Sendable {
         workspace = .cleanup
     }
 
-    func setDeveloperCleanupSelection(_ ids: Set<DeveloperCleanupReview.Item.ID>, planID: UUID) {
+    private func editableDeveloperCleanupPlan(_ planID: UUID) -> DeveloperCleanupReview? {
         guard canStartDeveloperCleanup, developerCleanupOutcome == nil,
-              let plan = developerCleanupPlan, plan.id == planID else { return }
+              let plan = developerCleanupPlan, plan.id == planID else { return nil }
+        return plan
+    }
+
+    func setDeveloperCleanupDeletesPermanently(_ value: Bool, planID: UUID) {
+        guard editableDeveloperCleanupPlan(planID) != nil else { return }
+        developerCleanupDeletesPermanently = value
+    }
+
+    func setDeveloperCleanupSelection(_ ids: Set<DeveloperCleanupReview.Item.ID>, planID: UUID) {
+        guard let plan = editableDeveloperCleanupPlan(planID) else { return }
         let selected = plan.items.filter { ids.contains($0.id) && $0.keptReason == nil }
         guard selected.count == ids.count else { return }
         rememberDeveloperCleanupSelection(selected, in: plan)
@@ -905,9 +916,9 @@ struct FileTypeStats: Sendable {
     }
 
     func confirmDeveloperCleanup(planID: UUID, ids: Set<DeveloperCleanupReview.Item.ID>, permanently: Bool) {
-        guard canStartDeveloperCleanup, !ids.isEmpty, let plan = developerCleanupPlan,
-              plan.id == planID, developerCleanupOutcome == nil,
-              ids.isSubset(of: developerCleanupSelectedIDs) else { return }
+        guard let plan = editableDeveloperCleanupPlan(planID), !ids.isEmpty,
+              ids.isSubset(of: developerCleanupSelectedIDs),
+              permanently == developerCleanupDeletesPermanently else { return }
         developerCleanupError = nil
         busy = true
         progress = "Checking what is in use…"
