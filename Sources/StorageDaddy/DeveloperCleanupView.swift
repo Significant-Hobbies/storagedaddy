@@ -15,6 +15,10 @@ struct DeveloperCleanupView: View {
             if let target = model.spaceTarget {
                 Text("\(DiskFormat.bytes(target.available)) available on the startup disk")
                     .font(.headline)
+                if model.searchingForMoreCleanup {
+                    Text("You can clean these caches now. Project folders are still being checked.")
+                        .font(.callout).foregroundStyle(Tints.secondaryText)
+                }
                 if let plan = model.developerCleanupPlan, !plan.scopes.isEmpty {
                     let unavailable = plan.scopes.filter { $0.error != nil }.count
                     DisclosureGroup(unavailable == 0 ? "Scanned locations (\(plan.scopes.count))" :
@@ -170,7 +174,7 @@ struct DeveloperCleanupView: View {
                     if include { selected.insert(item.id) }
                     else { selected.remove(item.id) }
                     model.setDeveloperCleanupSelection(selected, planID: planID)
-                })).labelsHidden().disabled(model.busy)
+                })).labelsHidden().disabled(!model.canEditCleanupReview)
             } else {
                 Image(systemName: reason != nil ? "lock" : "folder")
                     .foregroundStyle(Tints.secondaryText).frame(width: 18)
@@ -224,7 +228,7 @@ struct DeveloperCleanupView: View {
             Button(permanentCount == 0 ? "Move \(countLabel) to Trash" : permanentCount == count ? "Delete \(countLabel) Permanently" : "Clean Up \(countLabel)") {
                 model.confirmDeveloperCleanup(planID: plan.id, ids: selected, permanently: permanently)
             }.buttonStyle(SMMacButtonStyle(.primary))
-                .disabled(count == 0 || !model.canStartDeveloperCleanup)
+                .disabled(count == 0 || !model.canEditCleanupReview)
         }
     }
 

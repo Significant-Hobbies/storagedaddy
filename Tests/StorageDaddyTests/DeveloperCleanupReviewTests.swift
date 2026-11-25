@@ -67,7 +67,7 @@ struct DeveloperCleanupReviewTests {
         #expect(replaced.deleted.isEmpty)
     }
 
-    @Test func goBuildCleanupPinsTheReviewedCache() async throws {
+    @MainActor @Test func goBuildCleanupPinsTheReviewedCache() async throws {
         let fm = FileManager.default
         let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
         defer { try? fm.removeItem(at: home) }
@@ -91,7 +91,25 @@ struct DeveloperCleanupReviewTests {
         #expect(try SpaceTargetCache.discover(home: home, exclusions: [entry.path]).isEmpty)
         let cache = try #require(SpaceTargetCache.discover(home: home, exclusions: []).first)
         #expect(cache.tool == .go)
-        try cache.clean()
+        try fm.createDirectory(at: home.appendingPathComponent("Projects"), withIntermediateDirectories: true)
+        let model = ExplorerModel(developerCleanupPreferences: nil, quickProjectPlanner: { _, _, _ in
+            try await Task.sleep(for: .seconds(30))
+            return DeveloperCleanupReview(scopes: [], items: [])
+        })
+        let capacity = try #require(StartupCapacity(total: 100, available: 50))
+        model.openSpaceTarget(capacity, home: home)
+        let scan = Task { await model.waitForCurrentStorageOperation() }
+        for _ in 0..<200 where !model.searchingForMoreCleanup { try await Task.sleep(for: .milliseconds(25)) }
+        let initial = try #require(model.developerCleanupPlan)
+        #expect(model.searchingForMoreCleanup && model.canEditCleanupReview)
+        let selected = model.developerCleanupSelectedIDs
+        #expect(selected.count == 1)
+        model.confirmDeveloperCleanup(planID: initial.id, ids: selected, permanently: true)
+        await model.waitForCurrentStorageOperation()
+        await scan.value
+        #expect(model.developerCleanupPlan?.id == initial.id)
+        #expect(model.developerCleanupOutcome?.deleted == selected)
+        #expect(!model.searchingForMoreCleanup && !model.busy)
         #expect(fm.fileExists(atPath: home.appendingPathComponent("confirmed").path))
     }
 

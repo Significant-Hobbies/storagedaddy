@@ -787,6 +787,7 @@ struct FileTypeStats: Sendable {
     @Published private(set) var developerCleanupOutcome: DeveloperCleanupReview.Outcome?
     @Published private(set) var developerCleanupError: String?
     private let developerCleanupPreferences: UserDefaults?
+    private let quickProjectPlanner: @Sendable ([URL], [String], URL) async throws -> DeveloperCleanupReview
     private let developerCleanupPlanner: @Sendable ([URL], [String]) async throws -> DeveloperCleanupReview
     @Published private(set) var developerCleanupFolders: [String] {
         didSet { developerCleanupPreferences?.set(developerCleanupFolders, forKey: "developerCleanupFolders") }
@@ -794,6 +795,11 @@ struct FileTypeStats: Sendable {
 
     init(
         developerCleanupPreferences: UserDefaults? = .standard,
+        quickProjectPlanner: @escaping @Sendable ([URL], [String], URL) async throws -> DeveloperCleanupReview = { roots, exclusions, home in
+            let avoid = AutomaticScanPrivacy.promptAvoidancePaths(homeDirectory: home, accessStatus: FullDiskAccessProbe.status(homeDirectory: home))
+            return try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: avoid,
+                                                            quickCleanup: true, home: home.path)
+        },
         developerCleanupPlanner: @escaping @Sendable ([URL], [String]) async throws -> DeveloperCleanupReview = { roots, exclusions in
             let promptAvoidance = AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
             return try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: promptAvoidance)
@@ -801,6 +807,7 @@ struct FileTypeStats: Sendable {
     ) {
         self.developerCleanupPreferences = developerCleanupPreferences
         self.developerCleanupPlanner = developerCleanupPlanner
+        self.quickProjectPlanner = quickProjectPlanner
         developerCleanupFolders = developerCleanupPreferences?.stringArray(forKey: "developerCleanupFolders")
             ?? developerCleanupPreferences?.string(forKey: "developerCleanupFolder").map { [$0] } ?? []
     }
@@ -874,8 +881,27 @@ struct FileTypeStats: Sendable {
         workspace = .cleanup
     }
 
+    private var discoveryID: UUID?
+    @Published private(set) var searchingForMoreCleanup = false
+
+    var canEditCleanupReview: Bool {
+        canStartDeveloperCleanup || (searchingForMoreCleanup && busy && !moves.busy && moves.plan == nil
+            && !snapshotBusy && !monitoring && macTools?.isBusy != true && !conversationArchive.busy && staged.isEmpty)
+    }
+
+    /// Freeze the visible review before acting on it. Late discovery cannot
+    /// replace its item IDs, reset the selection or end a new cleanup operation.
+    private func freezeCleanupReview() {
+        guard searchingForMoreCleanup else { return }
+        task?.cancel()
+        discoveryID = nil
+        searchingForMoreCleanup = false
+        busy = false
+        progress = "Reviewing measured items"
+    }
+
     private func editableDeveloperCleanupPlan(_ planID: UUID) -> DeveloperCleanupReview? {
-        guard canStartDeveloperCleanup, developerCleanupOutcome == nil,
+        guard canEditCleanupReview, developerCleanupOutcome == nil,
               let plan = developerCleanupPlan, plan.id == planID else { return nil }
         return plan
     }
@@ -889,6 +915,7 @@ struct FileTypeStats: Sendable {
         guard let plan = editableDeveloperCleanupPlan(planID) else { return }
         let selected = plan.items.filter { ids.contains($0.id) && $0.keptReason == nil }
         guard selected.count == ids.count else { return }
+        freezeCleanupReview()
         rememberDeveloperCleanupSelection(selected, in: plan)
     }
 
@@ -968,36 +995,58 @@ struct FileTypeStats: Sendable {
         progress = cacheHome != nil ? "Measuring package caches and project dependencies…" : "Finding developer files in \(roots.count) \(roots.count == 1 ? "folder" : "folders")…"
         let exclusions = excludedFolders
         let planner = developerCleanupPlanner
+        let quickPlanner = quickProjectPlanner
+        let runID = UUID()
+        discoveryID = runID
         task = Task {
-            defer { busy = false }
-            let worker = Task.detached(priority: .userInitiated) {
+            defer {
+                if discoveryID == runID {
+                    busy = false
+                    searchingForMoreCleanup = false
+                    discoveryID = nil
+                }
+            }
+            let worker = Task.detached(priority: .userInitiated) { [self] in
                 guard let cacheHome else { return try await planner(roots, exclusions) }
-                let avoid = AutomaticScanPrivacy.promptAvoidancePaths(homeDirectory: cacheHome, accessStatus: FullDiskAccessProbe.status(homeDirectory: cacheHome))
-                async let projectPlan = DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: avoid, quickCleanup: true, home: cacheHome.path)
+                async let projectPlan = quickPlanner(roots, exclusions, cacheHome)
                 var data = stat()
                 let device = stat("/System/Volumes/Data", &data) == 0 ? UInt64(UInt32(bitPattern: data.st_dev)) : nil
                 let caches = try SpaceTargetCache.discover(home: cacheHome, exclusions: exclusions)
+                let initial = DeveloperCleanupReview(scopes: [], items: []).reclaimable(on: device, caches: caches)
+                if !initial.items.isEmpty && !roots.isEmpty {
+                    await showInitialCleanupReview(initial, runID: runID)
+                }
                 return try await projectPlan.reclaimable(on: device, caches: caches)
             }
             do {
                 let plan = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
                 try Task.checkCancellation()
+                guard discoveryID == runID else { return }
                 developerCleanupOutcome = nil
                 developerCleanupPlan = plan
                 if cacheHome == nil { developerCleanupFolders = plan.scopes.map(\.path) }
                 progress = "\(plan.items.count) developer folders found"
-            } catch is CancellationError { progress = "Developer scan cancelled" }
+            } catch is CancellationError { if discoveryID == runID { progress = "Developer scan cancelled" } }
             catch {
+                guard discoveryID == runID else { return }
                 developerCleanupError = error.localizedDescription
                 progress = "Developer scan needs attention"
             }
         }
     }
 
+    private func showInitialCleanupReview(_ plan: DeveloperCleanupReview, runID: UUID) {
+        guard discoveryID == runID, task?.isCancelled == false else { return }
+        developerCleanupPlan = plan
+        searchingForMoreCleanup = true
+        progress = "Searching project folders for more space…"
+    }
+
     func confirmDeveloperCleanup(planID: UUID, ids: Set<DeveloperCleanupReview.Item.ID>, permanently: Bool) {
         guard let plan = editableDeveloperCleanupPlan(planID), !ids.isEmpty,
               ids.isSubset(of: developerCleanupSelectedIDs),
               permanently == developerCleanupDeletesPermanently else { return }
+        freezeCleanupReview()
         developerCleanupError = nil
         busy = true
         progress = "Checking what is in use…"
