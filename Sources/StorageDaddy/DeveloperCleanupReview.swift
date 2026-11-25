@@ -34,21 +34,33 @@ struct DeveloperCleanupReview: Sendable {
     struct Scope: Identifiable, Sendable {
         fileprivate let url: URL
         fileprivate let plan: DeveloperCleanupPlan?
+        let cache: SpaceTargetCache?
         let error: String?
         var path: String { url.standardizedFileURL.path }
         var id: String { path }
 
-        init(url: URL, plan: DeveloperCleanupPlan? = nil, error: String? = nil) {
+        init(url: URL, plan: DeveloperCleanupPlan? = nil, cache: SpaceTargetCache? = nil, error: String? = nil) {
             self.url = url
             self.plan = plan
+            self.cache = cache
             self.error = error
         }
     }
 
-    func reclaimable(on device: UInt64?) -> Self {
-        Self(scopes: scopes, items: items.filter {
+    func reclaimable(on device: UInt64?, caches: [SpaceTargetCache] = []) -> Self {
+        var locations = scopes
+        var ready = items.filter {
             $0.device == device && $0.device != 0 && $0.keptReason == nil && $0.canDeletePermanently && $0.allocatedBytes > 0
-        })
+        }
+        for cache in caches where cache.device == device && device != 0 {
+            let policy = FolderExclusions(paths: [cache.directory.path])
+            guard !ready.contains(where: { policy.blocksCleanup(URL(fileURLWithPath: $0.path)) }) else { continue }
+            let id = Item.ID(scope: locations.count, node: 0)
+            locations.append(Scope(url: cache.directory, cache: cache))
+            ready.append(Item(id: id, path: cache.measured.path, allocatedBytes: cache.bytes, keptReason: nil,
+                              canDeletePermanently: true, device: cache.device, inode: cache.inode))
+        }
+        return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes })
     }
 
     func selection(upTo target: Int64) -> Set<Item.ID> {
@@ -146,7 +158,21 @@ struct DeveloperCleanupReview: Sendable {
         var processed = 0
         for (index, scope) in scopes.enumerated() {
             if Task.isCancelled { outcome.cancelled = true; break }
-            guard let plan = scope.plan, let batch = selection[index] else { continue }
+            guard let batch = selection[index] else { continue }
+            if let cache = scope.cache, let id = batch.first {
+                guard permanently else { outcome.kept[id] = "Package cache cleaning requires permanent deletion."; continue }
+                progress(processed + 1, ids.count)
+                do {
+                    try cache.clean()
+                    outcome.deleted.insert(id)
+                } catch is CancellationError {
+                    outcome.cancelled = true
+                    break
+                } catch { outcome.kept[id] = error.localizedDescription }
+                processed += 1
+                continue
+            }
+            guard let plan = scope.plan else { continue }
             let access = scope.url.startAccessingSecurityScopedResource()
             defer { if access { scope.url.stopAccessingSecurityScopedResource() } }
             let offset = processed

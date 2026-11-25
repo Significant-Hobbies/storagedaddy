@@ -119,11 +119,14 @@ struct DashboardView: View {
         .buttonStyle(SMMacButtonStyle(.secondary))
         .background(DashboardSamplingObserver(dashboard: dashboard).frame(width: 0, height: 0))
         .task {
-            dashboard.loadIfNeeded()
+            dashboard.refresh()
             trashInventory.refresh(excludedFolders: m.excludedFolders)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { trashInventory.refresh(excludedFolders: m.excludedFolders) }
+            if phase == .active {
+                dashboard.refresh()
+                trashInventory.refresh(excludedFolders: m.excludedFolders)
+            }
         }
         .onChange(of: m.excludedFolders) { _, _ in trashInventory.refresh(excludedFolders: m.excludedFolders) }
         .onDisappear { trashInventory.cancel() }
@@ -145,7 +148,7 @@ struct DashboardView: View {
                         Button("Review cleanup for 80%") { m.openSpaceTarget(capacity) }
                             .buttonStyle(SMMacButtonStyle(.primary))
                             .disabled(!m.canStartDeveloperCleanup)
-                            .help("Scan saved project folders, or Desktop and common development folders, for rebuildable dependencies.")
+                            .help("Measure uv and npm caches and rebuildable dependencies in saved project folders, or Desktop and common development folders.")
                         Text("Free \(DiskFormat.bytes(capacity.bytesToEightyPercent)) to reach 80% used")
                             .font(.caption).foregroundStyle(Tints.secondaryText)
                     } else {

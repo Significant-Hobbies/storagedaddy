@@ -76,7 +76,7 @@ struct DeveloperCleanupView: View {
                 }
                 if plan.items.isEmpty {
                     let reason = plan.scopes.compactMap(\.error).first
-                    StorageEmptyView(reason == nil ? (model.spaceTarget == nil ? "No supported developer folders found" : "No eligible dependencies found") : "Scan location unavailable",
+                    StorageEmptyView(reason == nil ? (model.spaceTarget == nil ? "No supported developer folders found" : "No eligible caches or dependencies found") : "Scan location unavailable",
                         systemImage: "folder", description:
                             Text(reason ?? "Add the locations that hold your projects, linked worktrees, or developer caches."))
                 } else {
@@ -111,7 +111,7 @@ struct DeveloperCleanupView: View {
     }
 
     private var subtitle: String {
-        if model.spaceTarget != nil { return "Rebuildable project dependencies · startup disk only" }
+        if model.spaceTarget != nil { return "Package caches and rebuildable dependencies · startup disk only" }
         if let root = model.developerCleanupFolders.first, model.developerCleanupFolders.count == 1 {
             return StorageLabels.location(root)
         }
@@ -136,7 +136,12 @@ struct DeveloperCleanupView: View {
     private func row(_ item: DeveloperCleanupReview.Item, planID: UUID) -> some View {
         let outcome = model.developerCleanupOutcome
         let reason = outcome?.kept[item.id] ?? item.keptReason
-        let name = URL(fileURLWithPath: item.path).lastPathComponent
+        let url = URL(fileURLWithPath: item.path)
+        let cache = model.developerCleanupPlan.flatMap { plan in
+            plan.id == planID && plan.scopes.indices.contains(item.id.scope) ? plan.scopes[item.id.scope].cache : nil
+        }
+        let name = cache.map { "\($0.tool.title) package cache" } ?? (model.spaceTarget != nil ?
+            url.deletingLastPathComponent().lastPathComponent + " / " + url.lastPathComponent : url.lastPathComponent)
         let deletesPermanently = model.developerCleanupDeletesPermanently && item.canDeletePermanently
         let method = deletesPermanently ? "Delete permanently" : "Move to Trash"
         return HStack(alignment: .top, spacing: 12) {
@@ -157,6 +162,7 @@ struct DeveloperCleanupView: View {
                 Text(name).font(.callout.weight(.semibold))
                 Text(StorageLabels.location(item.path)).font(.caption).foregroundStyle(Tints.secondaryText)
                     .lineLimit(1).truncationMode(.middle).help(item.path)
+                if let cache { Text(cache.tool.command).font(.caption.monospaced()).foregroundStyle(Tints.secondaryText) }
                 if let reason { Text(reason).font(.caption).foregroundStyle(Tints.yellow) }
             }
             Spacer(minLength: 8)
@@ -184,7 +190,8 @@ struct DeveloperCleanupView: View {
         let permanentCount = permanently ? items.filter(\.canDeletePermanently).count : 0
         let count = items.count
         let allocation = bytes(items)
-        let countLabel = count == 1 ? "1 Folder" : "\(count) Folders"
+        let countLabel = model.spaceTarget != nil ? (count == 1 ? "1 Item" : "\(count) Items") :
+            (count == 1 ? "1 Folder" : "\(count) Folders")
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(count) selected · \(allocation) on disk").font(.callout.weight(.semibold))
@@ -194,7 +201,7 @@ struct DeveloperCleanupView: View {
                             "Selected allocation covers the target. Actual space freed can vary.")
                 }
                 if model.spaceTarget != nil {
-                    Text("Permanent deletion removes local edits. Reinstall dependencies before building again.")
+                    Text("Permanent deletion removes local edits and cached packages. Reinstalls may need a download.")
                 } else if permanentCount > 0 {
                     Text("\(permanentCount) permanent · \(count - permanentCount) to Trash. Permanent deletion cannot be undone.")
                 } else {

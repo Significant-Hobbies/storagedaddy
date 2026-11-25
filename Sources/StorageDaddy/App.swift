@@ -836,11 +836,7 @@ struct FileTypeStats: Sendable {
         }
         developerCleanupPlan = nil
         developerCleanupOutcome = nil
-        guard !roots.isEmpty else {
-            developerCleanupError = "Choose the folders where you keep your projects to look for rebuildable dependencies."
-            return
-        }
-        findDeveloperCleanup(in: roots)
+        findDeveloperCleanup(in: roots, cacheHome: home)
     }
 
     func openDeveloperCleanup() {
@@ -948,34 +944,33 @@ struct FileTypeStats: Sendable {
         rescanDeveloperCleanup()
     }
 
-    func findDeveloperCleanup(in roots: [URL], retainingReviewOnFailure: Bool = false) {
-        guard canStartDeveloperCleanup, !roots.isEmpty else { return }
+    func findDeveloperCleanup(in roots: [URL], retainingReviewOnFailure: Bool = false, cacheHome: URL? = nil) {
+        guard canStartDeveloperCleanup, !roots.isEmpty || cacheHome != nil else { return }
         if !retainingReviewOnFailure {
             developerCleanupPlan = nil
             developerCleanupOutcome = nil
         }
         developerCleanupError = nil
         busy = true
-        progress = "Finding developer files in \(roots.count) \(roots.count == 1 ? "folder" : "folders")…"
+        progress = cacheHome != nil ? "Measuring package caches and project dependencies…" : "Finding developer files in \(roots.count) \(roots.count == 1 ? "folder" : "folders")…"
         let exclusions = excludedFolders
         let planner = developerCleanupPlanner
         task = Task {
             defer { busy = false }
             let worker = Task.detached(priority: .userInitiated) {
-                try await planner(roots, exclusions)
+                let plan = try await planner(roots, exclusions)
+                guard let cacheHome else { return plan }
+                var data = stat()
+                let device = stat("/System/Volumes/Data", &data) == 0 ? UInt64(UInt32(bitPattern: data.st_dev)) : nil
+                let caches = try SpaceTargetCache.discover(home: cacheHome, exclusions: exclusions)
+                return plan.reclaimable(on: device, caches: caches)
             }
             do {
                 let plan = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
                 try Task.checkCancellation()
                 developerCleanupOutcome = nil
-                if spaceTarget != nil {
-                    var data = stat()
-                    let device = stat("/System/Volumes/Data", &data) == 0 ? UInt64(UInt32(bitPattern: data.st_dev)) : nil
-                    developerCleanupPlan = plan.reclaimable(on: device)
-                } else {
-                    developerCleanupPlan = plan
-                    developerCleanupFolders = plan.scopes.map(\.path)
-                }
+                developerCleanupPlan = plan
+                if cacheHome == nil { developerCleanupFolders = plan.scopes.map(\.path) }
                 progress = "\(plan.items.count) developer folders found"
             } catch is CancellationError { progress = "Developer scan cancelled" }
             catch {

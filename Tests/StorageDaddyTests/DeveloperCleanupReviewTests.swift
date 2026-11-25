@@ -4,6 +4,44 @@ import Testing
 @testable import StorageDaddy
 
 struct DeveloperCleanupReviewTests {
+    @Test func targetCacheRechecksExclusionsAndFolderIdentityAndUsesReviewedCommand() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("target-cache-\(UUID())").resolvingSymlinksInPath()
+        defer { try? fm.removeItem(at: home) }
+        let bin = home.appendingPathComponent(".local/bin")
+        let directory = home.appendingPathComponent(".cache/uv")
+        try fm.createDirectory(at: bin, withIntermediateDirectories: true)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(repeating: 1, count: 65536).write(to: directory.appendingPathComponent("entry"))
+        let script = bin.appendingPathComponent("uv")
+        let commands = """
+        #!/bin/sh
+        case "$1 $2" in
+          'cache dir') echo "$PWD/.cache/uv" ;;
+          'cache clean') test "$3" = --cache-dir && test "$4" -ef "$PWD/.cache/uv" && touch "$PWD/confirmed" ;;
+          *) exit 1 ;;
+        esac
+        """
+        try Data(commands.utf8).write(to: script)
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        #expect(try SpaceTargetCache.discover(home: home, exclusions: [directory.appendingPathComponent("entry").path]).isEmpty)
+        let caches = try SpaceTargetCache.discover(home: home, exclusions: [])
+        let cache = try #require(caches.first)
+        let review = DeveloperCleanupReview(scopes: [], items: []).reclaimable(on: cache.device, caches: caches)
+        let selected = review.selection(upTo: 1)
+        #expect(selected.count == 1)
+        #expect(!fm.fileExists(atPath: home.appendingPathComponent("confirmed").path))
+        let confirmed = await review.clean(ids: selected, permanently: true) { _, _ in }
+        #expect(confirmed.kept.isEmpty)
+        #expect(confirmed.deleted == selected)
+        #expect(fm.fileExists(atPath: home.appendingPathComponent("confirmed").path))
+        try fm.moveItem(at: directory, to: home.appendingPathComponent("old-cache"))
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        let replaced = await review.clean(ids: selected, permanently: true) { _, _ in }
+        #expect(Set(replaced.kept.keys) == selected)
+        #expect(replaced.deleted.isEmpty)
+    }
+
     @MainActor @Test(.timeLimit(.minutes(2))) func deselectionsAndNewFoldersStayUncheckedAcrossReviews() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("developer-selection-\(UUID())")
