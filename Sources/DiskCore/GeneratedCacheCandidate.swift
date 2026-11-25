@@ -25,13 +25,17 @@ public struct GeneratedCacheCandidate: Sendable {
         "SDKStatCaches.noindex", "CompilationCache.noindex", "SDKExplicitPrecompiledModules", "Index.noindex"]
 
     public static func discover(home: URL, excludedFolders: [String]) async throws -> [Self] {
+        // System temporary caches belong only to the currently logged-in user's inventory.
+        guard home.resolvingSymlinksInPath().path == FileManager.default.homeDirectoryForCurrentUser.resolvingSymlinksInPath().path else {
+            return try await discover(home: home, temporary: nil, chromeStore: nil, excludedFolders: excludedFolders)
+        }
         let temporary = physicalPath(FileManager.default.temporaryDirectory).map { URL(fileURLWithPath: $0) } ?? FileManager.default.temporaryDirectory
         let store = temporary.deletingLastPathComponent().appendingPathComponent("X/com.google.Chrome.code_sign_clone")
         return try await discover(home: home, temporary: URL(fileURLWithPath: "/private/tmp"),
             chromeStore: ChromeSigningClones.location(path: store.path) == .store ? store : nil, excludedFolders: excludedFolders)
     }
 
-    static func discover(home: URL, temporary: URL, chromeStore: URL?, excludedFolders: [String]) async throws -> [Self] {
+    static func discover(home: URL, temporary: URL?, chromeStore: URL?, excludedFolders: [String]) async throws -> [Self] {
         let policy = FolderExclusions(paths: excludedFolders)
         var locations: [URL: Kind] = [:]
         func children(_ root: URL) -> [URL] {
@@ -65,7 +69,7 @@ public struct GeneratedCacheCandidate: Sendable {
             try Task.checkCancellation()
             derivedData(child.appendingPathComponent("DerivedData"))
         }
-        for child in children(temporary) {
+        for child in temporary.map(children) ?? [] {
             try Task.checkCancellation()
             guard physicalDirectory(child, owned: true), !policy.contains(child.path), !isSensitivePath(child),
                   child.pathExtension != "app" else { continue }
