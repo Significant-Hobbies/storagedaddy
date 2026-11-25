@@ -10,11 +10,12 @@ struct DeveloperCleanupReview: Sendable {
         }
 
         let id: ID
-        fileprivate let artifact: DeveloperCleanupPlan.Item
-        var path: String { artifact.path }
-        var allocatedBytes: Int64 { artifact.allocatedBytes }
-        var keptReason: String? { artifact.keptReason }
-        var canDeletePermanently: Bool { artifact.canDeletePermanently }
+        let path: String
+        let allocatedBytes: Int64
+        let keptReason: String?
+        let canDeletePermanently: Bool
+        let device: UInt64
+        let inode: UInt64
     }
 
     struct SelectionKey: Hashable {
@@ -25,9 +26,9 @@ struct DeveloperCleanupReview: Sendable {
     }
 
     func selectionKey(for item: Item) -> SelectionKey? {
-        guard item.artifact.device != 0, item.artifact.inode != 0 else { return nil }
+        guard item.device != 0, item.inode != 0 else { return nil }
         return SelectionKey(scopePath: scopes[item.id.scope].path, folderPath: item.path,
-                            device: item.artifact.device, inode: item.artifact.inode)
+                            device: item.device, inode: item.inode)
     }
 
     struct Scope: Identifiable, Sendable {
@@ -36,6 +37,12 @@ struct DeveloperCleanupReview: Sendable {
         let error: String?
         var path: String { url.standardizedFileURL.path }
         var id: String { path }
+
+        init(url: URL, plan: DeveloperCleanupPlan? = nil, error: String? = nil) {
+            self.url = url
+            self.plan = plan
+            self.error = error
+        }
     }
 
     struct Outcome: Sendable {
@@ -102,7 +109,11 @@ struct DeveloperCleanupReview: Sendable {
             catch { scopes.append(Scope(url: root, plan: nil, error: error.localizedDescription)) }
         }
         let items = scopes.enumerated().flatMap { scope, entry in
-            (entry.plan?.items ?? []).map { Item(id: .init(scope: scope, node: $0.id), artifact: $0) }
+            (entry.plan?.items ?? []).map { artifact in
+                Item(id: .init(scope: scope, node: artifact.id), path: artifact.path, allocatedBytes: artifact.allocatedBytes,
+                     keptReason: artifact.keptReason, canDeletePermanently: artifact.canDeletePermanently,
+                     device: artifact.device, inode: artifact.inode)
+            }
         }.sorted {
             if ($0.keptReason == nil) != ($1.keptReason == nil) { return $0.keptReason == nil }
             if $0.allocatedBytes != $1.allocatedBytes { return $0.allocatedBytes > $1.allocatedBytes }

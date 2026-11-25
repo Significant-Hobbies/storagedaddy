@@ -786,9 +786,23 @@ struct FileTypeStats: Sendable {
     private var developerCleanupSelectionKeys: Set<DeveloperCleanupReview.SelectionKey>?
     @Published private(set) var developerCleanupOutcome: DeveloperCleanupReview.Outcome?
     @Published private(set) var developerCleanupError: String?
-    @Published private(set) var developerCleanupFolders = UserDefaults.standard.stringArray(forKey: "developerCleanupFolders")
-        ?? UserDefaults.standard.string(forKey: "developerCleanupFolder").map { [$0] } ?? [] {
-        didSet { UserDefaults.standard.set(developerCleanupFolders, forKey: "developerCleanupFolders") }
+    private let developerCleanupPreferences: UserDefaults?
+    private let developerCleanupPlanner: @Sendable ([URL], [String]) async throws -> DeveloperCleanupReview
+    @Published private(set) var developerCleanupFolders: [String] {
+        didSet { developerCleanupPreferences?.set(developerCleanupFolders, forKey: "developerCleanupFolders") }
+    }
+
+    init(
+        developerCleanupPreferences: UserDefaults? = .standard,
+        developerCleanupPlanner: @escaping @Sendable ([URL], [String]) async throws -> DeveloperCleanupReview = { roots, exclusions in
+            let promptAvoidance = AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
+            return try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: promptAvoidance)
+        }
+    ) {
+        self.developerCleanupPreferences = developerCleanupPreferences
+        self.developerCleanupPlanner = developerCleanupPlanner
+        developerCleanupFolders = developerCleanupPreferences?.stringArray(forKey: "developerCleanupFolders")
+            ?? developerCleanupPreferences?.string(forKey: "developerCleanupFolder").map { [$0] } ?? []
     }
 
     var showsDeveloperCleanupReview: Bool { showingDeveloperCleanup && staged.isEmpty }
@@ -900,11 +914,11 @@ struct FileTypeStats: Sendable {
         busy = true
         progress = "Finding developer files in \(roots.count) \(roots.count == 1 ? "folder" : "folders")…"
         let exclusions = excludedFolders
-        let promptAvoidance = AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
+        let planner = developerCleanupPlanner
         task = Task {
             defer { busy = false }
             let worker = Task.detached(priority: .userInitiated) {
-                try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: promptAvoidance)
+                try await planner(roots, exclusions)
             }
             do {
                 let plan = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }

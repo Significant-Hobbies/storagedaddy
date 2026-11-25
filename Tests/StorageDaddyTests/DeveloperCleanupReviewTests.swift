@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 @testable import StorageDaddy
@@ -9,12 +10,7 @@ struct DeveloperCleanupReviewTests {
         let first = root.appendingPathComponent("First")
         let second = root.appendingPathComponent("Second")
         let added = root.appendingPathComponent("Added")
-        let defaults = UserDefaults.standard
-        let priorFolders = defaults.object(forKey: "developerCleanupFolders")
-        defer {
-            defaults.set(priorFolders, forKey: "developerCleanupFolders")
-            try? fm.removeItem(at: root)
-        }
+        defer { try? fm.removeItem(at: root) }
 
         func makeDependencies(in folder: URL) throws -> URL {
             let dependencies = folder.appendingPathComponent("node_modules")
@@ -27,7 +23,17 @@ struct DeveloperCleanupReviewTests {
         let unchecked = try makeDependencies(in: first)
         let checked = try makeDependencies(in: second)
         let new = try makeDependencies(in: added)
-        let model = ExplorerModel()
+        let model = ExplorerModel(developerCleanupPreferences: nil) { roots, _ in
+            let scopes = roots.map { DeveloperCleanupReview.Scope(url: $0) }
+            let items = try roots.enumerated().map { index, root in
+                let path = root.appendingPathComponent("node_modules").resolvingSymlinksInPath().path
+                var entry = stat()
+                guard lstat(path, &entry) == 0 else { throw CocoaError(.fileReadNoSuchFile) }
+                return DeveloperCleanupReview.Item(id: .init(scope: index, node: 1), path: path, allocatedBytes: 4_096,
+                    keptReason: nil, canDeletePermanently: true, device: UInt64(UInt32(bitPattern: entry.st_dev)), inode: UInt64(entry.st_ino))
+            }
+            return DeveloperCleanupReview(scopes: scopes, items: items)
+        }
 
         func completedReview() async throws -> DeveloperCleanupReview {
             await model.waitForCurrentStorageOperation()
