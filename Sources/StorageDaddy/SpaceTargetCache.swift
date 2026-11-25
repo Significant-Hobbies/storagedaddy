@@ -39,6 +39,23 @@ struct SpaceTargetCache: Sendable {
         return result
     }
 
+    /// Probe uv's existing advisory lock without creating or changing the lock file.
+    /// The manager still owns locking when it runs after this point-in-time check.
+    var lockReason: String? {
+        guard tool == .uv else { return nil }
+        let path = directory.appendingPathComponent(".lock").path
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+        let unavailable = "Could not verify the uv cache lock. Scan again before cleaning it."
+        guard fd >= 0 else { return errno == ENOENT ? nil : unavailable }
+        defer { close(fd) }
+        var metadata = stat()
+        guard fstat(fd, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFREG else { return unavailable }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            return errno == EWOULDBLOCK ? "uv is using this cache. Let the active uv task finish, then scan again." : unavailable
+        }
+        return nil
+    }
+
     func clean() throws {
         try Task.checkCancellation()
         guard directory.path == directory.resolvingSymlinksInPath().path,
@@ -46,6 +63,9 @@ struct SpaceTargetCache: Sendable {
               let current = Self.identity(measured), current == (device, inode),
               try tool.cacheDirectory(executable: executable, home: home).path == directory.path else {
             throw CocoaError(.fileWriteNoPermission)
+        }
+        if let lockReason {
+            throw NSError(domain: "SpaceTargetCache", code: 1, userInfo: [NSLocalizedDescriptionKey: lockReason])
         }
         let option = tool == .uv ? "--cache-dir" : "--cache"
         let result = try PackageToolCommand.run(executable: executable, arguments: tool.arguments + [option, directory.path],

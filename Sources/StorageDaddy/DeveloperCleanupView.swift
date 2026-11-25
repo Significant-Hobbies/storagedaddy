@@ -64,7 +64,7 @@ struct DeveloperCleanupView: View {
             }
             if let plan = model.developerCleanupPlan {
                 if model.spaceTarget != nil && !plan.withheld.isEmpty {
-                    DisclosureGroup("\(plan.withheld.count.formatted()) developer folders kept") {
+                    DisclosureGroup("\(plan.withheld.count.formatted()) folders and caches kept") {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 8) {
                                 ForEach(plan.withheld) { entry in

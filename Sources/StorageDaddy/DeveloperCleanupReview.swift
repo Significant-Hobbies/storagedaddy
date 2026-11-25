@@ -53,7 +53,7 @@ struct DeveloperCleanupReview: Sendable {
             $0.device == device && $0.device != 0 && $0.keptReason == nil && $0.canDeletePermanently && $0.allocatedBytes > 0
         }
         let readyIDs = Set(ready.map(\.id))
-        let withheld = items.filter { !readyIDs.contains($0.id) }.map { item in
+        var withheld = items.filter { !readyIDs.contains($0.id) }.map { item in
             let reason = item.keptReason ?? (item.device != device || device == 0 ?
                 "Outside the verified startup disk." : item.allocatedBytes == 0 ?
                 "No measured allocation." : "Requires a separate Trash review.")
@@ -64,8 +64,11 @@ struct DeveloperCleanupReview: Sendable {
             guard !ready.contains(where: { policy.blocksCleanup(URL(fileURLWithPath: $0.path)) }) else { continue }
             let id = Item.ID(scope: locations.count, node: 0)
             locations.append(Scope(url: cache.directory, cache: cache))
-            ready.append(Item(id: id, path: cache.measured.path, allocatedBytes: cache.bytes, keptReason: nil,
-                              canDeletePermanently: true, device: cache.device, inode: cache.inode))
+            let reason = cache.lockReason
+            let item = Item(id: id, path: cache.measured.path, allocatedBytes: cache.bytes, keptReason: reason,
+                            canDeletePermanently: true, device: cache.device, inode: cache.inode)
+            if let reason { withheld.append(Withheld(item: item, reason: reason)) }
+            else { ready.append(item) }
         }
         return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes }, withheld: withheld)
     }

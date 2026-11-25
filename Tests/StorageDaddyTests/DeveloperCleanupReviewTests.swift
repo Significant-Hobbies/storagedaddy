@@ -31,6 +31,20 @@ struct DeveloperCleanupReviewTests {
         let selected = review.selection(upTo: 1)
         #expect(selected.count == 1)
         #expect(!fm.fileExists(atPath: home.appendingPathComponent("confirmed").path))
+        let lockFile = directory.appendingPathComponent(".lock")
+        let holder = open(lockFile.path, O_RDWR | O_CREAT | O_EXCL, 0o600)
+        try #require(holder >= 0)
+        defer { close(holder) }
+        try #require(flock(holder, LOCK_SH | LOCK_NB) == 0)
+        let busyReview = DeveloperCleanupReview(scopes: [], items: []).reclaimable(on: cache.device, caches: caches)
+        #expect(busyReview.selection(upTo: .max).isEmpty)
+        #expect(busyReview.withheld.first?.item.allocatedBytes == cache.bytes)
+        #expect(busyReview.withheld.first?.reason.contains("active uv task") == true)
+        let becameBusy = await review.clean(ids: selected, permanently: true) { _, _ in }
+        #expect(becameBusy.deleted.isEmpty)
+        #expect(becameBusy.kept.values.first?.contains("active uv task") == true)
+        #expect(!fm.fileExists(atPath: home.appendingPathComponent("confirmed").path))
+        try #require(flock(holder, LOCK_UN) == 0)
         let confirmed = await review.clean(ids: selected, permanently: true) { _, _ in }
         #expect(confirmed.kept.isEmpty)
         #expect(confirmed.deleted == selected)
