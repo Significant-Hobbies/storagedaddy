@@ -30,7 +30,7 @@ struct SpaceTargetCache: Sendable {
                   !FolderExclusions(paths: exclusions).blocksCleanup(directory) else { continue }
             let measured = tool == .npm ? directory.appendingPathComponent("_cacache") : directory
             guard let identity = identity(measured) else { continue }
-            if let reason = lockReason(tool: tool, directory: directory) {
+            if tool == .uv, let reason = lockReason(tool: tool, directory: directory) {
                 result.append(Self(tool: tool, executable: executable, home: home, directory: directory,
                                    measured: measured, device: identity.0, inode: identity.1, bytes: 0,
                                    exclusions: exclusions, deferredReason: reason))
@@ -52,6 +52,10 @@ struct SpaceTargetCache: Sendable {
     var lockReason: String? { deferredReason ?? Self.lockReason(tool: tool, directory: directory) }
 
     private static func lockReason(tool: PackageCacheTool, directory: URL) -> String? {
+        if tool == .go || tool == .pip {
+            do { try CleanupActiveUse.validateCacheIsIdle(directory); return nil }
+            catch { return error.localizedDescription }
+        }
         guard tool == .uv else { return nil }
         let path = directory.appendingPathComponent(".lock").path
         let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)

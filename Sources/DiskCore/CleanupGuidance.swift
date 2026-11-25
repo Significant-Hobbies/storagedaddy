@@ -129,7 +129,8 @@ public enum CleanupGuidance {
         }
     }
 
-    /// Only Node dependency trees and bounded download caches may bypass Trash.
+    /// Default developer cleanup permits Node dependency trees and bounded download caches.
+    /// The startup-disk review separately validates known build caches and managed worktrees.
     /// Installed runtimes, manifests and other data keep their recovery path.
     public static func canDeletePermanently(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
         guard !isInstalledRuntime(path: path) else { return false }

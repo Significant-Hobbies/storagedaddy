@@ -4,6 +4,8 @@ import SwiftUI
 
 struct DeveloperCleanupView: View {
     @EnvironmentObject private var model: ExplorerModel
+    @StateObject private var worktreeReview = GitWorktreeReviewModel()
+    @State private var worktreesExpanded = true
     @State private var presentedOutcome = false
 
     var body: some View {
@@ -16,7 +18,7 @@ struct DeveloperCleanupView: View {
                 Text("\(DiskFormat.bytes(target.available)) available on the startup disk")
                     .font(.headline)
                 if model.searchingForMoreCleanup {
-                    Text("You can clean these caches now. Project folders are still being checked.")
+                    Text("You can clean these items now. Checking more project folders and worktrees…")
                         .font(.callout).foregroundStyle(Tints.secondaryText)
                 }
                 if let plan = model.developerCleanupPlan, !plan.scopes.isEmpty {
@@ -67,6 +69,41 @@ struct DeveloperCleanupView: View {
                 Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Tints.yellow)
             }
             if let plan = model.developerCleanupPlan {
+                if model.spaceTarget != nil && model.developerCleanupOutcome == nil {
+                    if plan.items.count > 1 {
+                        HStack {
+                            Button("Select all") { model.setDeveloperCleanupSelection(Set(plan.items.map(\.id)), planID: plan.id) }
+                            Button("Deselect all") { model.setDeveloperCleanupSelection([], planID: plan.id) }
+                        }.disabled(!model.canEditCleanupReview)
+                    }
+                    let dependencies = plan.items.filter { $0.path.hasSuffix("/node_modules") }
+                    if !dependencies.isEmpty {
+                        Text("\(dependencies.count) idle node_modules installs · \(bytes(dependencies))")
+                            .font(.callout.weight(.semibold))
+                    }
+                    let worktrees = plan.idleWorktrees
+                    if !worktrees.isEmpty {
+                        DisclosureGroup("\(worktrees.count) Git \(worktrees.count == 1 ? "worktree" : "worktrees") with no open files detected", isExpanded: $worktreesExpanded) {
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 8) {
+                                    ForEach(worktrees) { candidate in
+                                        HStack {
+                                            Text(StorageLabels.location(candidate.url.path)).lineLimit(1).truncationMode(.middle)
+                                                .help(candidate.url.path)
+                                            if let preview = plan.checkedWorktrees[candidate.url.path] { Text(preview.status).foregroundStyle(Tints.secondaryText) }
+                                            Spacer()
+                                            if candidate.allocatedBytes > 0 { Text(DiskFormat.bytes(candidate.allocatedBytes)).monospacedDigit() }
+                                            Button("Review") {
+                                                model.freezeCleanupReview()
+                                                worktreeReview.inspect(candidate, explorer: model)
+                                            }.disabled(!model.canEditCleanupReview)
+                                        }
+                                    }
+                                }.font(.caption)
+                            }.frame(maxHeight: 140)
+                        }
+                    }
+                }
                 if model.spaceTarget != nil && !plan.withheld.isEmpty {
                     DisclosureGroup("\(plan.withheld.count.formatted()) folders and caches kept") {
                         ScrollView {
@@ -126,6 +163,7 @@ struct DeveloperCleanupView: View {
         .onChange(of: model.developerCleanupPlan?.id, initial: true) { _, _ in
             presentedOutcome = false
         }
+        .sheet(isPresented: $worktreeReview.presented) { GitWorktreeReviewSheet(model: worktreeReview) }
         .onDisappear {
             if presentedOutcome { model.finishViewingDeveloperCleanupResult() }
         }
@@ -161,8 +199,19 @@ struct DeveloperCleanupView: View {
         let cache = model.developerCleanupPlan.flatMap { plan in
             plan.id == planID && plan.scopes.indices.contains(item.id.scope) ? plan.scopes[item.id.scope].cache : nil
         }
-        let name = cache.map { $0.tool == .go ? "Go build cache" : "\($0.tool.title) package cache" } ?? (model.spaceTarget != nil ?
-            url.deletingLastPathComponent().lastPathComponent + " / " + url.lastPathComponent : url.lastPathComponent)
+        let isWorktree = model.developerCleanupPlan?.scopes[item.id.scope].worktree != nil
+        let name: String
+        if isWorktree { name = "Merged worktree · " + url.lastPathComponent }
+        else if let cache { name = cache.tool == .go ? "Go build cache" : "\(cache.tool.title) package cache" }
+        else if model.spaceTarget != nil {
+            let parent = url.deletingLastPathComponent()
+            switch url.lastPathComponent {
+            case "Intermediates.noindex": name = parent.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent + " · Swift build intermediates"
+            case "cache" where parent.lastPathComponent == ".next": name = parent.deletingLastPathComponent().lastPathComponent + " · Next.js cache"
+            case "node_modules" where parent.deletingLastPathComponent().lastPathComponent == "_npx": name = "npx tool dependencies · " + parent.lastPathComponent
+            default: name = parent.lastPathComponent + " / " + url.lastPathComponent
+            }
+        } else { name = url.lastPathComponent }
         let deletesPermanently = model.developerCleanupDeletesPermanently && item.canDeletePermanently
         let method = deletesPermanently ? "Delete permanently" : "Move to Trash"
         return HStack(alignment: .top, spacing: 12) {
@@ -217,7 +266,7 @@ struct DeveloperCleanupView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(count) selected · \(allocation) on disk").font(.callout.weight(.semibold))
                 if model.spaceTarget != nil {
-                    Text("Deletes the selected files permanently. Packages may need downloading and build caches will be rebuilt.")
+                    Text("Deletes selected checkouts, dependencies and caches permanently. Merged worktree history stays in Git.")
                 } else if permanentCount > 0 {
                     Text("\(permanentCount) permanent · \(count - permanentCount) to Trash. Permanent deletion cannot be undone.")
                 } else {

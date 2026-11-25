@@ -3,7 +3,7 @@ import Foundation
 
 /// Positive evidence of current use, including working directories and mapped
 /// files. Absence of an open handle is not proof that a folder is never needed.
-enum CleanupActiveUse {
+package enum CleanupActiveUse {
     struct OpenFiles: Sendable {
         fileprivate let coveredRoots: Set<String>
         fileprivate let users: [String: String]
@@ -18,6 +18,10 @@ enum CleanupActiveUse {
         var isFresh: Bool { capturedAt.duration(to: .now) < .seconds(2) }
 
         func user(of path: String) -> String? { users[CleanupGuidance.normalized(path)] }
+    }
+
+    package static func validateCacheIsIdle(_ url: URL) throws {
+        try validate(urls: [url])
     }
 
     static func captureOpenFiles(for paths: [String]) throws -> OpenFiles {

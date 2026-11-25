@@ -844,11 +844,14 @@ struct FileTypeStats: Sendable {
         } else {
             roots = developerCleanupFolders.map { URL(fileURLWithPath: $0) }
         }
-        let npx = home.appendingPathComponent(".npm/_npx").standardizedFileURL
-        if npx.path == npx.resolvingSymlinksInPath().path,
-           FileManager.default.fileExists(atPath: npx.path),
-           !FolderExclusions(paths: roots.map(\.path)).blocksCleanup(npx) {
-            roots.append(npx)
+        let standardLocations = [".npm/_npx", ".codex/worktrees", ".claude/worktrees",
+                                 "Library/Application Support/Fleet/Agent Workspaces.noindex/retired",
+                                 "Library/Application Support/Fleet/Agent Workspaces.noindex/worktrees"]
+        for relative in standardLocations {
+            let location = home.appendingPathComponent(relative).standardizedFileURL
+            if location.path == location.resolvingSymlinksInPath().path,
+               FileManager.default.fileExists(atPath: location.path),
+               !FolderExclusions(paths: roots.map(\.path)).blocksCleanup(location) { roots.append(location) }
         }
         developerCleanupPlan = nil
         developerCleanupOutcome = nil
@@ -891,7 +894,7 @@ struct FileTypeStats: Sendable {
 
     /// Freeze the visible review before acting on it. Late discovery cannot
     /// replace its item IDs, reset the selection or end a new cleanup operation.
-    private func freezeCleanupReview() {
+    func freezeCleanupReview() {
         guard searchingForMoreCleanup else { return }
         task?.cancel()
         discoveryID = nil
@@ -1016,7 +1019,43 @@ struct FileTypeStats: Sendable {
                 if !initial.items.isEmpty && !roots.isEmpty {
                     await showInitialCleanupReview(initial, runID: runID)
                 }
-                return try await projectPlan.reclaimable(on: device, caches: caches)
+                let projects = try await projectPlan
+                let measured = projects.reclaimable(on: device, caches: caches, exclusions: exclusions)
+                let candidates = projects.idleWorktrees.filter { $0.device == device && $0.allocatedBytes > 0 && FleetManagedCheckout.manages($0.url) }
+                if !candidates.isEmpty {
+                    await showInitialCleanupReview(measured, runID: runID)
+                    var checkedWorktrees: [FleetManagedCheckout.Preview] = []
+                    var next = candidates.makeIterator()
+                    try await withThrowingTaskGroup(of: FleetManagedCheckout.Preview?.self) { group in
+                        func inspect(_ candidate: GitWorktreeCandidate) {
+                            group.addTask {
+                                try Task.checkCancellation()
+                                return try? FleetManagedCheckout.inspect(candidate, exclusions: exclusions)
+                            }
+                        }
+                        for _ in 0..<3 { if let candidate = next.next() { inspect(candidate) } }
+                        var checked = 0
+                        var published = 0
+                        var lastUpdate = ContinuousClock.now
+                        for try await result in group {
+                            try Task.checkCancellation()
+                            checked += 1
+                            if let result { checkedWorktrees.append(result) }
+                            if checkedWorktrees.count != published && (result?.eligible == true || lastUpdate.duration(to: .now) >= .seconds(3)) {
+                                let updated = measured.addingWorktrees(checkedWorktrees)
+                                await showInitialCleanupReview(updated, runID: runID)
+                                published = checkedWorktrees.count
+                                lastUpdate = .now
+                            }
+                            if checked == 1 || checked.isMultiple(of: 10) {
+                                await updateWorktreeProgress(checked: checked, total: candidates.count, runID: runID)
+                            }
+                            if let candidate = next.next() { inspect(candidate) }
+                        }
+                    }
+                    return measured.addingWorktrees(checkedWorktrees)
+                }
+                return measured
             }
             do {
                 let plan = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
@@ -1033,6 +1072,11 @@ struct FileTypeStats: Sendable {
                 progress = "Developer scan needs attention"
             }
         }
+    }
+
+    private func updateWorktreeProgress(checked: Int, total: Int, runID: UUID) {
+        guard discoveryID == runID else { return }
+        progress = "Checked \(checked) of \(total) retired worktrees"
     }
 
     private func showInitialCleanupReview(_ plan: DeveloperCleanupReview, runID: UUID) {
@@ -1945,7 +1989,9 @@ extension ExplorerModel {
         } ?? root
         return (selected, lastScanAllowedProtectedFolder)
     }
-    var scanScheduleBlockReason: String? {
+    var scanScheduleBlockReason: String? { storageOperationBlockReason(scheduled: true) }
+
+    func storageOperationBlockReason(scheduled: Bool) -> String? {
         if busy || isScanning { return "A scan, cleanup or package command is running." }
         if !staged.isEmpty || showCleanup || !incompleteCleanup.isEmpty { return "Your cleanup selections are waiting for review." }
         if macTools?.isBusy == true { return "Mac Controls is busy." }
@@ -1957,7 +2003,7 @@ extension ExplorerModel {
         if folderExplanation != nil { return "A folder explanation is open." }
         if agentAccess.waitingReviewCount > 0 || !agentAccess.pairings.isEmpty { return "An agent request is waiting for review." }
         if NSApplication.shared.modalWindow != nil || NSApplication.shared.windows.contains(where: { $0.attachedSheet != nil }) { return "A dialog or review sheet is open." }
-        if DaddyCompletionNotices.hasVisibleAppWindow,
+        if scheduled, DaddyCompletionNotices.hasVisibleAppWindow,
            [.duplicates, .projects, .appData, .cleanup, .developer, .applications, .snapshots, .agents].contains(workspace) { return "You are reviewing storage results." }
         return nil
     }

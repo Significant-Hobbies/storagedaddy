@@ -196,7 +196,8 @@ private struct Scanner {
             for (entryIndex, entry) in entries.enumerated() {
                 if entryIndex & 255 == 0 { try cancellation.check() }
                 var insideArtifact = directory.insideDeveloperArtifact
-                if let home = developerArtifactHome, !insideArtifact {
+                let linkedMarker = quickCleanup && entry.name == ".git" && !entry.isDirectory && !entry.isSymlink
+                if let home = developerArtifactHome, !insideArtifact, !linkedMarker {
                     guard entry.isDirectory, !entry.isSymlink else { continue }
                     // Agent metadata also lives here. Descend only into the checkout container.
                     guard !isClaudeDirectory || entry.name == "worktrees" else { continue }

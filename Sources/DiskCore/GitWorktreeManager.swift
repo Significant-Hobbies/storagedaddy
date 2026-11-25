@@ -6,8 +6,8 @@ public struct GitWorktreeCandidate: Identifiable, Sendable {
     public var id: String { url.path }
     public let url: URL
     public let allocatedBytes: Int64
-    let device: UInt64
-    let inode: UInt64
+    package let device: UInt64
+    package let inode: UInt64
 }
 
 public struct GitWorktreeReview: Identifiable, Sendable {
@@ -105,6 +105,47 @@ public actor GitWorktreeManager {
         return result.sorted { $0.url.path < $1.url.path }
     }
 
+    /// The focused project scan only retains regular .git pointer files. Ask
+    /// Git to distinguish a registered linked checkout from a submodule.
+    static func linkedCandidates(in scan: ScanResult, excluding artifactIDs: Set<Int>,
+                                 exclusions: FolderExclusions) throws -> [GitWorktreeCandidate] {
+        var candidates: [GitWorktreeCandidate] = []
+        for marker in scan.nodes where marker.name == ".git" && !marker.isDirectory && !marker.isSymlink {
+            try Task.checkCancellation()
+            guard let id = marker.parent else { continue }
+            var parent: Int? = id
+            while let ancestor = parent, !artifactIDs.contains(ancestor) { parent = scan.nodes[ancestor].parent }
+            guard parent == nil else { continue }
+            let url = scan.url(for: id)
+            guard !exclusions.blocksCleanup(url),
+                  let paths = readGit(at: url, arguments: ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"])?
+                    .split(separator: "\n"), paths.count == 2,
+                  URL(fileURLWithPath: String(paths[0])).deletingLastPathComponent().path == String(paths[1]) + "/worktrees"
+            else { continue }
+            let root = scan.nodes[id]
+            candidates.append(.init(url: url, allocatedBytes: 0, device: root.device, inode: root.inode))
+        }
+        return candidates
+    }
+
+    static func measure(_ candidates: [GitWorktreeCandidate]) throws -> [GitWorktreeCandidate] {
+        guard !candidates.isEmpty else { return [] }
+        let locations = candidates.map { $0.url.path }
+        let result = try? PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/du"),
+            arguments: ["-skx"] + locations, directory: FileManager.default.temporaryDirectory,
+            timeout: 45, requireCompleteOutput: true, mergeStandardError: false)
+        try Task.checkCancellation()
+        guard let result, result.status == 0 else { return candidates }
+        var sizes: [String: Int64] = [:]
+        for line in result.output.split(separator: "\n") {
+            let fields = line.split(separator: "\t", maxSplits: 1)
+            if fields.count == 2, let kib = Int64(fields[0]), kib >= 0, kib <= Int64.max / 1024 {
+                sizes[String(fields[1])] = kib * 1024
+            }
+        }
+        return candidates.map { .init(url: $0.url, allocatedBytes: sizes[$0.url.path] ?? 0, device: $0.device, inode: $0.inode) }
+    }
+
     public func inspect(candidate: GitWorktreeCandidate, excludedFolders: [String] = []) async throws -> GitWorktreeReview {
         try Task.checkCancellation()
         let url = try Self.canonical(candidate.url)
@@ -175,6 +216,7 @@ public actor GitWorktreeManager {
     }
 
     public func remove(reviewed: GitWorktreeReview, excludedFolders: [String] = []) async throws {
+        guard !FleetManagedCheckout.manages(reviewed.candidate.url) else { throw GitWorktreeError.unsafe("Use the Fleet retirement review to preserve workspace leases and receipts.") }
         guard !removing else { throw GitWorktreeError.unsafe("another worktree removal is in progress") }
         guard reviewed.canRemove, reviewed.tree != nil else { throw GitWorktreeError.unsafe(reviewed.removalBlockers.joined(separator: " ")) }
         removing = true; defer { removing = false }

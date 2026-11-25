@@ -34,20 +34,22 @@ struct DeveloperCleanupReview: Sendable {
     struct Scope: Identifiable, Sendable {
         fileprivate let url: URL
         fileprivate let plan: DeveloperCleanupPlan?
+        let worktree: FleetManagedCheckout.Preview?
         let cache: SpaceTargetCache?
         let error: String?
         var path: String { url.standardizedFileURL.path }
         var id: String { path }
 
-        init(url: URL, plan: DeveloperCleanupPlan? = nil, cache: SpaceTargetCache? = nil, error: String? = nil) {
+        init(url: URL, plan: DeveloperCleanupPlan? = nil, cache: SpaceTargetCache? = nil, worktree: FleetManagedCheckout.Preview? = nil, error: String? = nil) {
             self.url = url
             self.plan = plan
             self.cache = cache
+            self.worktree = worktree
             self.error = error
         }
     }
 
-    func reclaimable(on device: UInt64?, caches: [SpaceTargetCache] = []) -> Self {
+    func reclaimable(on device: UInt64?, caches: [SpaceTargetCache] = [], exclusions: [String] = []) -> Self {
         var locations = scopes
         var ready = items.filter {
             $0.device == device && $0.device != 0 && $0.keptReason == nil && $0.canDeletePermanently && $0.allocatedBytes > 0
@@ -60,7 +62,7 @@ struct DeveloperCleanupReview: Sendable {
             return Withheld(item: item, reason: reason)
         }
         for cache in caches where cache.device == device && device != 0 {
-            let policy = FolderExclusions(paths: [cache.directory.path])
+            let policy = FolderExclusions(paths: [cache.measured.path])
             guard !ready.contains(where: { policy.blocksCleanup(URL(fileURLWithPath: $0.path)) }) else { continue }
             let id = Item.ID(scope: locations.count, node: 0)
             locations.append(Scope(url: cache.directory, cache: cache))
@@ -70,7 +72,27 @@ struct DeveloperCleanupReview: Sendable {
             if let reason { withheld.append(Withheld(item: item, reason: reason)) }
             else { ready.append(item) }
         }
-        return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes }, withheld: withheld)
+        return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes }, withheld: withheld,
+                    exclusions: exclusions, startupDevice: device)
+    }
+
+    func addingWorktrees(_ worktrees: [FleetManagedCheckout.Preview]) -> Self {
+        var ready = items
+        var locations = scopes
+        for preview in worktrees where preview.eligible {
+            let candidate = preview.candidate
+            guard candidate.device == startupDevice, candidate.allocatedBytes > 0 else { continue }
+            let parent = FolderExclusions(paths: [candidate.url.path])
+            // A checkout and the dependencies inside it represent the same bytes.
+            ready.removeAll { parent.contains($0.path) }
+            let id = Item.ID(scope: locations.count, node: 0)
+            locations.append(Scope(url: candidate.url, worktree: preview))
+            ready.append(Item(id: id, path: candidate.url.path, allocatedBytes: candidate.allocatedBytes,
+                              keptReason: nil, canDeletePermanently: true, device: candidate.device, inode: candidate.inode))
+        }
+        return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes }, withheld: withheld,
+                    exclusions: exclusions, checkedWorktrees: Dictionary(uniqueKeysWithValues: worktrees.map { ($0.candidate.url.path, $0) }), startupDevice: startupDevice)
+
     }
 
     struct Outcome: Sendable {
@@ -89,6 +111,16 @@ struct DeveloperCleanupReview: Sendable {
         var id: Item.ID { item.id }
     }
     var withheld: [Withheld] = []
+    var exclusions: [String] = []
+    var checkedWorktrees: [String: FleetManagedCheckout.Preview] = [:]
+    var startupDevice: UInt64?
+    var idleWorktrees: [GitWorktreeCandidate] {
+        let rows: [GitWorktreeCandidate] = scopes.compactMap(\.plan).flatMap(\.idleWorktrees)
+        return rows.filter { startupDevice == nil || $0.device == startupDevice }.sorted { first, second in
+            if first.allocatedBytes == second.allocatedBytes { return first.url.path < second.url.path }
+            return first.allocatedBytes > second.allocatedBytes
+        }
+    }
     var skipped: Int { scopes.reduce(0) { $0 + ($1.plan?.skipped ?? 0) } }
 
     private struct FolderIdentity: Hashable {
@@ -166,6 +198,16 @@ struct DeveloperCleanupReview: Sendable {
         for (index, scope) in scopes.enumerated() {
             if Task.isCancelled { outcome.cancelled = true; break }
             guard let batch = selection[index] else { continue }
+            if let preview = scope.worktree, let id = batch.first {
+                guard permanently else { outcome.kept[id] = "Worktree removal requires explicit permanent cleanup."; continue }
+                progress(processed + 1, ids.count)
+                do {
+                    try FleetManagedCheckout.remove(preview, exclusions: exclusions)
+                    outcome.deleted.insert(id)
+                } catch { outcome.kept[id] = error.localizedDescription }
+                processed += 1
+                continue
+            }
             if let cache = scope.cache, let id = batch.first {
                 guard permanently else { outcome.kept[id] = "Package cache cleaning requires permanent deletion."; continue }
                 progress(processed + 1, ids.count)

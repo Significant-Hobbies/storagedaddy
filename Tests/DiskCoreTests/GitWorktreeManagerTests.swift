@@ -41,6 +41,24 @@ final class GitWorktreeManagerTests: XCTestCase {
         return try XCTUnwrap(all.first { $0.url.lastPathComponent == "linked" })
     }
 
+    func testQuickCleanupSurfacesOnlyIdleLinkedCheckoutsAndPreservesTrackedDependencies() async throws {
+        let fixture = try fixture()
+        let project = fixture.linked
+        let modules = project.appendingPathComponent("node_modules")
+        try FileManager.default.createDirectory(at: modules, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: project.appendingPathComponent("package.json"))
+        try Data(repeating: 1, count: 8192).write(to: modules.appendingPathComponent("tracked.js"))
+        try git(project, ["add", "-f", "node_modules/tracked.js"])
+        let plan = try await DeveloperCleanupPlan.prepare(root: fixture.root, quickCleanup: true)
+        XCTAssertEqual(plan.idleWorktrees.map(\.url.path), [project.path])
+        XCTAssertGreaterThan(plan.idleWorktrees.first?.allocatedBytes ?? 0, 0)
+        let item = try XCTUnwrap(plan.items.first { $0.path == modules.path })
+        XCTAssertTrue(item.keptReason?.contains("tracked") == true)
+        let outcome = await plan.clean(ids: [item.id], permanently: true)
+        XCTAssertTrue(outcome.deleted.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: modules.appendingPathComponent("tracked.js").path))
+    }
+
     func testCleanLinkedRemovalKeepsMainAndBranch() async throws {
         let fixture = try fixture()
         let manager = GitWorktreeManager(activeUse: { _ in })

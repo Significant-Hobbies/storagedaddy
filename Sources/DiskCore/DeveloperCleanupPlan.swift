@@ -22,6 +22,7 @@ public struct DeveloperCleanupPlan: Sendable {
     public let id = UUID()
     public var rootPath: String { scan.rootPath }
     public var skipped: Int { scan.skipped }
+    public let idleWorktrees: [GitWorktreeCandidate]
     public let items: [Item]
     private let scan: ScanResult
     private let exclusions: [String]
@@ -76,10 +77,14 @@ public struct DeveloperCleanupPlan: Sendable {
         let rootIDs = Set(roots.map(\.id))
         let repositories = Set(scan.nodes.lazy.filter { CleanupGuidance.isGitCheckoutMarker($0.name) }
             .flatMap { ancestors(of: $0.id, in: scan).filter(rootIDs.contains) })
-        let openFiles = try captureOpenFiles(roots.compactMap { eligible[$0.id] }.flatMap { url in
-            [url.path, CleanupActiveUse.metroProject(for: url)?.path, quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path) ? url.deletingLastPathComponent().path : nil].compactMap { $0 }
+        let linked = quickCleanup && !isNpxScope
+            ? try GitWorktreeManager.linkedCandidates(in: scan, excluding: rootIDs, exclusions: exclusionPolicy) : []
+        let openFiles = try captureOpenFiles(linked.map { $0.url.path } + roots.compactMap { eligible[$0.id] }.flatMap { url in
+            [url.path, CleanupActiveUse.metroProject(for: url)?.path, quickCleanup && !isNpxScope ? url.deletingLastPathComponent().path : nil].compactMap { $0 }
         })
 
+        let idle = linked.filter { openFiles?.user(of: $0.url.path) == nil && !FleetManagedCheckout.isReserved($0.url) }
+        let measuredWorktrees = try GitWorktreeManager.measure(idle)
         let npxProcesses = isNpxScope && !roots.isEmpty ? try CleanupActiveUse.npxProcessSnapshot() : nil
         var items: [Item] = []
         for node in roots {
@@ -87,6 +92,12 @@ public struct DeveloperCleanupPlan: Sendable {
             guard let url = eligible[node.id] else { continue }
             let reason: String?
             do {
+                if quickCleanup && FleetManagedCheckout.containsReservedProject(url) {
+                    throw DiskAnalysisError.unsafePath(path: url.path, reason: "Fleet has reserved this workspace.")
+                }
+                if quickCleanup && !isNpxScope && CleanupGuidance.isProjectDependencies(path: url.path) {
+                    try Self.checkDependencyOwner(url, openFiles: openFiles)
+                }
                 if let npxProcesses {
                     try NpxCacheReview.validate(entries: [url.deletingLastPathComponent()], processOutput: npxProcesses)
                 }
@@ -118,7 +129,7 @@ public struct DeveloperCleanupPlan: Sendable {
                               canDeletePermanently: (quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path)) || CleanupGuidance.canDeletePermanently(path: url.path, home: home),
                               keptReason: reason, device: node.device, inode: node.inode))
         }
-        return Self(items: items.sorted {
+        return Self(idleWorktrees: measuredWorktrees, items: items.sorted {
             if ($0.keptReason == nil) != ($1.keptReason == nil) { return $0.keptReason == nil }
             if $0.allocatedBytes != $1.allocatedBytes { return $0.allocatedBytes > $1.allocatedBytes }
             return $0.path < $1.path
@@ -158,6 +169,12 @@ public struct DeveloperCleanupPlan: Sendable {
                 if quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path) {
                     try CleanupActiveUse.validate(urls: [url.deletingLastPathComponent()], home: home)
                 }
+                if quickCleanup && FleetManagedCheckout.containsReservedProject(url) {
+                    throw DiskAnalysisError.unsafePath(path: url.path, reason: "Fleet has reserved this workspace.")
+                }
+                if quickCleanup && isDependencies && !url.path.hasPrefix(URL(fileURLWithPath: home).appendingPathComponent(".npm/_npx").path + "/") {
+                    try Self.checkDependencyOwner(url, openFiles: nil)
+                }
                 if permanently && item.canDeletePermanently {
                     guard (quickCleanup && CleanupGuidance.isQuickBuildCache(path: url.path)) || CleanupGuidance.canDeletePermanently(path: url.path, home: home),
                           CleanupGuidance.requiredNativeCleaner(path: url.path, home: home) == nil else {
@@ -179,6 +196,24 @@ public struct DeveloperCleanupPlan: Sendable {
             } catch { outcome.kept[item.id] = error.localizedDescription }
         }
         return outcome
+    }
+
+    private static func checkDependencyOwner(_ url: URL, openFiles: CleanupActiveUse.OpenFiles?) throws {
+        let project = url.deletingLastPathComponent()
+        let evidence = try openFiles ?? CleanupActiveUse.captureOpenFiles(for: [project.path])
+        if let user = evidence.user(of: project.path) {
+            throw GitWorktreeError.unsafe("Project in use by " + user + ".")
+        }
+        var ancestor = project
+        while ancestor.path != "/" && !ancestor.path.isEmpty {
+            if FileManager.default.fileExists(atPath: ancestor.appendingPathComponent(".git").path) {
+                guard GitCheckoutProbe.runLocal(at: project, arguments: ["--no-lazy-fetch", "ls-files", "--cached", "-z", "--", "node_modules"]) == "" else {
+                    throw GitWorktreeError.unsafe("Dependencies are tracked by Git or the index could not be checked.")
+                }
+                break
+            }
+            ancestor.deleteLastPathComponent()
+        }
     }
 
     private static func captureOpenFiles(_ paths: [String]) throws -> CleanupActiveUse.OpenFiles? {
