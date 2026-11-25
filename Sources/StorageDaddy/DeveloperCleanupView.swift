@@ -95,7 +95,6 @@ struct DeveloperCleanupView: View {
                                             Spacer()
                                             if candidate.allocatedBytes > 0 { Text(DiskFormat.bytes(candidate.allocatedBytes)).monospacedDigit() }
                                             Button("Review") {
-                                                model.freezeCleanupReview()
                                                 worktreeReview.inspect(candidate, explorer: model)
                                             }.disabled(!model.canEditCleanupReview)
                                         }

@@ -8,7 +8,7 @@ final class GitWorktreeReviewModel: ObservableObject {
     @Published var presented = false
     @Published private(set) var review: GitWorktreeReview?
     @Published private(set) var managed: FleetManagedCheckout.Preview?
-    private var removed = false
+    private var refreshOnClose = false
     @Published private(set) var working = false
     @Published private(set) var message: String?
     private let manager = GitWorktreeManager()
@@ -16,9 +16,12 @@ final class GitWorktreeReviewModel: ObservableObject {
     private weak var explorer: ExplorerModel?
 
     func inspect(_ candidate: GitWorktreeCandidate, explorer: ExplorerModel) {
-        guard !working, explorer.storageOperationBlockReason(scheduled: false) == nil else { return }
+        guard !working else { return }
+        let interrupted = explorer.searchingForMoreCleanup
+        if interrupted { explorer.freezeCleanupReview() }
+        guard explorer.storageOperationBlockReason(scheduled: false) == nil else { return }
         self.explorer = explorer; explorer.busy = true
-        review = nil; managed = nil; removed = false; message = nil; presented = true; working = true
+        review = nil; managed = nil; refreshOnClose = interrupted; message = nil; presented = true; working = true
         let exclusions = explorer.excludedFolders
         task = Task {
             do {
@@ -41,7 +44,7 @@ final class GitWorktreeReviewModel: ObservableObject {
                 if let managed {
                     try await Task.detached(priority: .userInitiated) { try FleetManagedCheckout.remove(managed, exclusions: exclusions) }.value
                 } else if let review { try await manager.remove(reviewed: review, excludedFolders: exclusions) }
-                removed = true
+                refreshOnClose = true
                 self.review = nil; self.managed = nil
                 message = "Worktree removed. Its branch remains in the repository. Rescan for current totals."
                 explorer.progress = message!
@@ -52,7 +55,7 @@ final class GitWorktreeReviewModel: ObservableObject {
     func close() {
         guard !working else { return }
         presented = false; review = nil; managed = nil; explorer?.busy = false
-        if removed, let explorer, let capacity = explorer.spaceTarget { explorer.openSpaceTarget(capacity) }
+        if refreshOnClose, let explorer, let capacity = explorer.spaceTarget { explorer.openSpaceTarget(capacity) }
         explorer = nil
     }
 }
@@ -124,7 +127,7 @@ struct GitWorktreeReviewSheet: View {
             if model.working { ProgressView("Checking Git and current files…") }
             if let managed = model.managed {
                 Text(managed.candidate.url.path).font(.callout).textSelection(.enabled)
-                Text("Retired Fleet workspace · " + DiskFormat.bytes(managed.candidate.allocatedBytes))
+                Text("Retired Fleet workspace" + (managed.candidate.allocatedBytes > 0 ? " · " + DiskFormat.bytes(managed.candidate.allocatedBytes) : ""))
                 if managed.eligible {
                     Text("Fleet verified merged history and checked for leases, changes and unrecognized ignored files.")
                     Toggle("I reviewed this checkout and its generated files", isOn: $acknowledged)
