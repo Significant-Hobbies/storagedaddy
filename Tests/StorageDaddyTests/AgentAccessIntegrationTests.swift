@@ -25,13 +25,22 @@ struct AgentAccessIntegrationTests {
         let scan = try await DiskScanner.scan(root: root)
         let nodeID = try #require(scan.nodes.first(where: { $0.name == "sample.bin" })?.id)
         let explorer = ExplorerModel(); explorer.scan = scan
-        let port = UInt16.random(in: 53000...54999)
-        let agents = AgentAccessModel(explorer: explorer, directory: agentDirectory, httpPort: port)
+        func openFixtureListener() throws -> (AgentAccessModel, UInt16) {
+            for _ in 0..<5 {
+                let port = UInt16.random(in: 25000...31999)
+                let agents = AgentAccessModel(explorer: explorer, directory: agentDirectory, httpPort: port)
+                #expect(!agents.enabled)
+                #expect(!agents.listening)
+                agents.setEnabled(true)
+                if agents.listening { return (agents, port) }
+                if agents.error?.hasPrefix("Port \(port) is unavailable.") != true {
+                    throw AgentSecurity.failure(agents.error ?? "Fixture listener failed")
+                }
+            }
+            throw AgentSecurity.failure("All attempted fixture ports were unavailable")
+        }
+        let (agents, port) = try openFixtureListener()
         explorer.agentAccess = agents
-        #expect(!agents.enabled)
-        #expect(!agents.listening)
-        agents.setEnabled(true)
-        #expect(agents.listening, "\(agents.error ?? "No listener error")")
         let token = try AgentSecurity.randomToken()
         let paired = await agents.handle(.init(operation: "pair", payload: .object(["client": .string("Fixture agent"), "tokenHash": .string(AgentSecurity.hash(token)), "permissions": .array(AgentRole.admin.permissions.sorted().map(AgentJSON.string))])))
         #expect(paired["state"].string == "pending")
