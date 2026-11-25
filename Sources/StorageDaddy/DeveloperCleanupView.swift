@@ -16,7 +16,9 @@ struct DeveloperCleanupView: View {
                 Text("Free \(DiskFormat.bytes(target.bytesToEightyPercent)) to reach 80% used")
                     .font(.headline)
                 if let plan = model.developerCleanupPlan, !plan.scopes.isEmpty {
-                    DisclosureGroup("Scanned locations (\(plan.scopes.count))") {
+                    let unavailable = plan.scopes.filter { $0.error != nil }.count
+                    DisclosureGroup(unavailable == 0 ? "Scanned locations (\(plan.scopes.count))" :
+                                        "Scan locations · \(unavailable) unavailable") {
                         ForEach(plan.scopes) { scope in
                             Text(StorageLabels.location(scope.path) + (scope.error.map { " · " + $0 } ?? ""))
                                 .font(.caption)
@@ -60,6 +62,10 @@ struct DeveloperCleanupView: View {
                 Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Tints.yellow)
             }
             if let plan = model.developerCleanupPlan {
+                if model.spaceTarget != nil && plan.withheld > 0 {
+                    Text("\(plan.withheld.formatted()) developer folders kept because they were in use or ineligible for permanent cleanup.")
+                        .font(.caption).foregroundStyle(Tints.secondaryText)
+                }
                 if plan.skipped > 0 {
                     Text("\(plan.skipped.formatted()) locations skipped. Excluded, protected and unreadable locations stay untouched.")
                         .font(.caption).foregroundStyle(Tints.secondaryText)
@@ -75,10 +81,10 @@ struct DeveloperCleanupView: View {
                     result(outcome).onAppear { presentedOutcome = true }
                 }
                 if plan.items.isEmpty {
-                    let reason = plan.scopes.compactMap(\.error).first
+                    let reason = plan.scopes.allSatisfy { $0.error != nil } ? plan.scopes.first?.error : nil
                     StorageEmptyView(reason == nil ? (model.spaceTarget == nil ? "No supported developer folders found" : "No eligible caches or dependencies found") : "Scan location unavailable",
                         systemImage: "folder", description:
-                            Text(reason ?? "Add the locations that hold your projects, linked worktrees, or developer caches."))
+                            Text(reason ?? (model.spaceTarget == nil ? "Add the locations that hold your projects, linked worktrees, or developer caches." : "Review other developer folders to look for more space.")))
                 } else {
                     if model.developerCleanupOutcome == nil && model.spaceTarget == nil { selectionControls(plan) }
                     ScrollView {
@@ -93,7 +99,9 @@ struct DeveloperCleanupView: View {
                 }
             } else if model.busy {
                 Spacer(minLength: 0)
-            } else if model.spaceTarget == nil {
+            } else if let target = model.spaceTarget {
+                Button("Scan again") { model.openSpaceTarget(target) }
+            } else {
                 StorageEmptyView("Choose where to look", systemImage: "folder.badge.gearshape",
                     description: Text("Add project and worktree locations, including any worktrees stored outside your projects folder."))
             }

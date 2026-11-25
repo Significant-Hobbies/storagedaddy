@@ -826,8 +826,10 @@ struct FileTypeStats: Sendable {
         workspace = .cleanup
         let roots: [URL]
         if developerCleanupFolders.isEmpty {
+            let avoid = AutomaticScanPrivacy.promptAvoidancePaths(homeDirectory: home, accessStatus: FullDiskAccessProbe.status(homeDirectory: home))
             roots = ["Desktop", "Developer", "Projects", "Code", "src", "repos"].compactMap {
                 let url = home.appendingPathComponent($0)
+                guard !avoid.contains(url.standardizedFileURL.path) else { return nil }
                 let metadata = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
                 return metadata?.isDirectory == true && metadata?.isSymbolicLink == false ? url : nil
             }
@@ -839,15 +841,18 @@ struct FileTypeStats: Sendable {
         findDeveloperCleanup(in: roots, cacheHome: home)
     }
 
+    private func exitSpaceTarget() {
+        guard spaceTarget != nil, !busy else { return }
+        spaceTarget = nil
+        developerCleanupDeletesPermanently = permanentBeforeTarget
+        developerCleanupPlan = nil
+        developerCleanupOutcome = nil
+        developerCleanupError = nil
+        showingDeveloperCleanup = false
+    }
+
     func openDeveloperCleanup() {
-        if spaceTarget != nil {
-            guard canStartDeveloperCleanup else { return }
-            spaceTarget = nil
-            developerCleanupDeletesPermanently = permanentBeforeTarget
-            developerCleanupPlan = nil
-            developerCleanupOutcome = nil
-            showingDeveloperCleanup = false
-        }
+        exitSpaceTarget()
         let entering = workspace != .cleanup || !showingDeveloperCleanup
         workspace = .cleanup
         guard staged.isEmpty else { showingDeveloperCleanup = false; return }
@@ -856,6 +861,7 @@ struct FileTypeStats: Sendable {
     }
 
     func openQuickCleanup() {
+        exitSpaceTarget()
         showingDeveloperCleanup = false
         showWelcome = false
         workspace = .cleanup

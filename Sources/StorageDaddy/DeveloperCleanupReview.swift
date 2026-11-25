@@ -52,6 +52,7 @@ struct DeveloperCleanupReview: Sendable {
         var ready = items.filter {
             $0.device == device && $0.device != 0 && $0.keptReason == nil && $0.canDeletePermanently && $0.allocatedBytes > 0
         }
+        let withheld = items.count - ready.count
         for cache in caches where cache.device == device && device != 0 {
             let policy = FolderExclusions(paths: [cache.directory.path])
             guard !ready.contains(where: { policy.blocksCleanup(URL(fileURLWithPath: $0.path)) }) else { continue }
@@ -60,13 +61,21 @@ struct DeveloperCleanupReview: Sendable {
             ready.append(Item(id: id, path: cache.measured.path, allocatedBytes: cache.bytes, keptReason: nil,
                               canDeletePermanently: true, device: cache.device, inode: cache.inode))
         }
-        return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes })
+        return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes }, withheld: withheld)
     }
 
     func selection(upTo target: Int64) -> Set<Item.ID> {
         var remaining = target
         var selected = Set<Item.ID>()
-        for item in items where remaining > 0 {
+        // Items are ordered largest first. Use the smallest sufficient final item.
+        for (index, item) in items.enumerated() {
+            guard remaining > 0 else { break }
+            if item.allocatedBytes >= remaining {
+                if let last = items[index...].last(where: { $0.allocatedBytes >= remaining }) {
+                    selected.insert(last.id)
+                }
+                break
+            }
             selected.insert(item.id)
             remaining -= item.allocatedBytes
         }
@@ -83,6 +92,7 @@ struct DeveloperCleanupReview: Sendable {
     let id = UUID()
     let scopes: [Scope]
     let items: [Item]
+    var withheld = 0
     var skipped: Int { scopes.reduce(0) { $0 + ($1.plan?.skipped ?? 0) } }
 
     private struct FolderIdentity: Hashable {

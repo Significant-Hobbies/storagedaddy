@@ -12,6 +12,7 @@ struct DiskHoundParityRenderingTests {
         let home = fm.temporaryDirectory.appendingPathComponent("space-target-\(UUID())")
         defer { try? fm.removeItem(at: home) }
         let projects = home.appendingPathComponent("Projects")
+        try fm.createDirectory(at: home.appendingPathComponent("Desktop"), withIntermediateDirectories: true)
         for (name, size) in [("Larger", 65536), ("Smaller", 4096)] {
             let project = projects.appendingPathComponent(name)
             let dependencies = project.appendingPathComponent("node_modules")
@@ -27,9 +28,12 @@ struct DiskHoundParityRenderingTests {
         let plan = try #require(model.developerCleanupPlan)
         #expect(model.showsDeveloperCleanupReview)
         #expect(model.developerCleanupFolders.isEmpty)
+        #expect(plan.scopes.count == 1)
         #expect(plan.items.count == 2)
         #expect(plan.reclaimable(on: nil).items.isEmpty)
         #expect(plan.selection(upTo: Int64.max).count == 2)
+        let smaller = try #require(plan.items.last)
+        #expect(plan.selection(upTo: 1) == [smaller.id])
         let item = try #require(plan.items.first)
         #expect(item.path.contains("/Larger/"))
         #expect(model.developerCleanupSelectedIDs == [item.id])
