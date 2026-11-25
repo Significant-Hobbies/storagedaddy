@@ -148,7 +148,7 @@ struct DashboardView: View {
                         Button("Review cleanup for 80%") { m.openSpaceTarget(capacity) }
                             .buttonStyle(SMMacButtonStyle(.primary))
                             .disabled(!m.canStartDeveloperCleanup)
-                            .help("Measure uv and npm caches and rebuildable dependencies in saved project folders, or Desktop and common development folders.")
+                            .help("Measure uv and npm caches and rebuildable dependencies in saved project folders, or accessible development folders when no locations are saved.")
                         Text("Free \(DiskFormat.bytes(capacity.bytesToEightyPercent)) to reach 80% used")
                             .font(.caption).foregroundStyle(Tints.secondaryText)
                     } else {

@@ -52,7 +52,13 @@ struct DeveloperCleanupReview: Sendable {
         var ready = items.filter {
             $0.device == device && $0.device != 0 && $0.keptReason == nil && $0.canDeletePermanently && $0.allocatedBytes > 0
         }
-        let withheld = items.count - ready.count
+        let readyIDs = Set(ready.map(\.id))
+        let withheld = items.filter { !readyIDs.contains($0.id) }.map { item in
+            let reason = item.keptReason ?? (item.device != device || device == 0 ?
+                "Outside the verified startup disk." : item.allocatedBytes == 0 ?
+                "No measured allocation." : "Requires a separate Trash review.")
+            return Withheld(item: item, reason: reason)
+        }
         for cache in caches where cache.device == device && device != 0 {
             let policy = FolderExclusions(paths: [cache.directory.path])
             guard !ready.contains(where: { policy.blocksCleanup(URL(fileURLWithPath: $0.path)) }) else { continue }
@@ -92,7 +98,12 @@ struct DeveloperCleanupReview: Sendable {
     let id = UUID()
     let scopes: [Scope]
     let items: [Item]
-    var withheld = 0
+    struct Withheld: Identifiable, Sendable {
+        let item: Item
+        let reason: String
+        var id: Item.ID { item.id }
+    }
+    var withheld: [Withheld] = []
     var skipped: Int { scopes.reduce(0) { $0 + ($1.plan?.skipped ?? 0) } }
 
     private struct FolderIdentity: Hashable {
@@ -176,6 +187,7 @@ struct DeveloperCleanupReview: Sendable {
                     try cache.clean()
                     outcome.deleted.insert(id)
                 } catch is CancellationError {
+                    outcome.kept[id] = "Cleaner stopped. Some cached files may already have been removed. Scan again to measure."
                     outcome.cancelled = true
                     break
                 } catch { outcome.kept[id] = error.localizedDescription }

@@ -27,6 +27,7 @@ struct DeveloperCleanupView: View {
                 }
                 if !model.busy && model.developerCleanupOutcome == nil {
                     Button("Other developer folders", action: model.openDeveloperCleanup)
+                        .disabled(!model.canStartDeveloperCleanup)
                 }
             } else {
                 HStack(spacing: 10) {
@@ -62,9 +63,17 @@ struct DeveloperCleanupView: View {
                 Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Tints.yellow)
             }
             if let plan = model.developerCleanupPlan {
-                if model.spaceTarget != nil && plan.withheld > 0 {
-                    Text("\(plan.withheld.formatted()) developer folders kept because they were in use or ineligible for permanent cleanup.")
-                        .font(.caption).foregroundStyle(Tints.secondaryText)
+                if model.spaceTarget != nil && !plan.withheld.isEmpty {
+                    DisclosureGroup("\(plan.withheld.count.formatted()) developer folders kept") {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 8) {
+                                ForEach(plan.withheld) { entry in
+                                    Text(StorageLabels.location(entry.item.path) + " · " + DiskFormat.bytes(entry.item.allocatedBytes))
+                                    Text(entry.reason).foregroundStyle(Tints.secondaryText)
+                                }
+                            }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+                        }.frame(maxHeight: 120)
+                    }
                 }
                 if plan.skipped > 0 {
                     Text("\(plan.skipped.formatted()) locations skipped. Excluded, protected and unreadable locations stay untouched.")
@@ -99,8 +108,8 @@ struct DeveloperCleanupView: View {
                 }
             } else if model.busy {
                 Spacer(minLength: 0)
-            } else if let target = model.spaceTarget {
-                Button("Scan again") { model.openSpaceTarget(target) }
+            } else if model.spaceTarget != nil {
+                Button("Return to dashboard") { model.workspace = .dashboard }
             } else {
                 StorageEmptyView("Choose where to look", systemImage: "folder.badge.gearshape",
                     description: Text("Add project and worktree locations, including any worktrees stored outside your projects folder."))
@@ -176,7 +185,7 @@ struct DeveloperCleanupView: View {
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 4) {
                 Text(DiskFormat.bytes(item.allocatedBytes)).monospacedDigit()
-                if reason != nil { Text("Kept").foregroundStyle(Tints.yellow).font(.caption) }
+                if reason != nil { Text(cache != nil && outcome != nil ? "Check result" : "Kept").foregroundStyle(Tints.yellow).font(.caption) }
                 else if let outcome {
                     Text(outcome.deleted.contains(item.id) ? "Deleted" : outcome.trashed.contains(item.id) ? "In Trash" : "Unchanged")
                         .foregroundStyle(Tints.secondaryText).font(.caption)
@@ -227,7 +236,7 @@ struct DeveloperCleanupView: View {
     private func result(_ outcome: DeveloperCleanupReview.Outcome) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(outcome.cancelled ? "Cleanup stopped" : "Cleanup complete").font(.headline)
-            Text("\(outcome.deleted.count) deleted · \(outcome.trashed.count) moved to Trash · \(outcome.kept.count) could not be removed")
+            Text("\(outcome.deleted.count) deleted · \(outcome.trashed.count) moved to Trash · \(outcome.kept.count) did not complete")
                 .font(.callout).foregroundStyle(Tints.secondaryText)
             if model.spaceTarget != nil {
                 if let capacity = model.spaceTargetResult {
