@@ -232,6 +232,7 @@ struct ExplorerView: View {
             badge: item == .cleanup && !m.staged.isEmpty ? m.staged.count.formatted() : nil) {
                 m.showWelcome = false
                 if item == .explore { m.openStorage(m.storageSection) }
+                else if item == .cleanup { m.openQuickCleanup() }
                 else { m.workspace = item }
             }
             .accessibilityIdentifier("workspace-\(item.rawValue)")
@@ -308,7 +309,9 @@ struct ExplorerView: View {
             }
         case .snapshots: SavedHistoryView()
         case .dashboard: DashboardView(dashboard: m.dashboard)
-        case .cleanup: CleanupView()
+        case .cleanup:
+            if m.showsDeveloperCleanupReview { DeveloperCleanupView() }
+            else { CleanupView() }
         case .duplicates:
             if let scan = m.scan {
                 DuplicateReviewView(scan: scan, groups: m.duplicateGroups, isLoading: m.duplicatesLoading,

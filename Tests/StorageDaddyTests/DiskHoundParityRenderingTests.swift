@@ -6,6 +6,90 @@ import DiskCore
 
 @MainActor @Suite(.serialized)
 struct DiskHoundParityRenderingTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["STORAGEDADDY_DEVELOPER_CLEANUP_EVIDENCE"] == "1"),
+          .timeLimit(.minutes(2)))
+    func developerCleanupShowsOneReviewAndConfirmsSelectedFolders() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("Developer Cleanup Demo \(UUID())")
+        defer { try? fm.removeItem(at: root) }
+
+        let projects = root.appendingPathComponent("Projects")
+        let worktrees = root.appendingPathComponent("Linked Worktrees")
+        let web = projects.appendingPathComponent("build/Website")
+        let dependencies = web.appendingPathComponent("node_modules")
+        let manifest = web.appendingPathComponent("package.json")
+        try fm.createDirectory(at: dependencies, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: projects.appendingPathComponent("package.json"))
+        try Data("{}".utf8).write(to: manifest)
+        try Data(repeating: 1, count: 2_097_152).write(to: dependencies.appendingPathComponent("module.js"))
+        let native = worktrees.appendingPathComponent("NativeLibrary")
+        let build = native.appendingPathComponent(".build")
+        try fm.createDirectory(at: build, withIntermediateDirectories: true)
+        try Data().write(to: native.appendingPathComponent("Package.swift"))
+        try Data(repeating: 1, count: 1_048_576).write(to: build.appendingPathComponent("object.o"))
+
+        let model = ExplorerModel(developerCleanupPreferences: nil)
+        model.workspace = .cleanup
+        model.showingDeveloperCleanup = true
+        #expect(model.showsDeveloperCleanupReview)
+        model.staged = [1]
+        #expect(!model.showsDeveloperCleanupReview)
+        model.openQuickCleanup()
+        model.staged = []
+        #expect(!model.showsDeveloperCleanupReview)
+        model.showingDeveloperCleanup = true
+        model.findDeveloperCleanup(in: [projects, worktrees])
+        await model.waitForCurrentStorageOperation()
+        try Task.checkCancellation()
+        let plan = try #require(model.developerCleanupPlan)
+        #expect(model.scan == nil)
+        #expect(plan.items.count == 2)
+        #expect(Set(plan.items.map(\.id.scope)).count == 2)
+        model.findDeveloperCleanup(in: [projects, worktrees, web], retainingReviewOnFailure: true)
+        await model.waitForCurrentStorageOperation()
+        try Task.checkCancellation()
+        #expect(model.developerCleanupPlan?.id == plan.id)
+        #expect(model.developerCleanupError?.contains("overlaps") == true)
+        model.setDeveloperCleanupDeletesPermanently(false, planID: plan.id)
+        let assets = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Assets")
+        let invalidScope = ExplorerModel(developerCleanupPreferences: nil)
+        invalidScope.workspace = .cleanup
+        invalidScope.showingDeveloperCleanup = true
+        invalidScope.findDeveloperCleanup(in: [dependencies])
+        await invalidScope.waitForCurrentStorageOperation()
+        try Task.checkCancellation()
+        let invalidPlan = try #require(invalidScope.developerCleanupPlan)
+        #expect(invalidPlan.items.isEmpty)
+        #expect(invalidPlan.scopes.first?.error?.contains("project folder") == true)
+        for width in [880, 1100, 1440] {
+            try capture(AnyView(ExplorerView(runsLaunchActions: false).environmentObject(model)
+                .environment(\.storageArtworkDirectory, assets)), name: "developer-cleanup-\(width)", width: width)
+            try capture(AnyView(ExplorerView(runsLaunchActions: false).environmentObject(invalidScope)
+                .environment(\.storageArtworkDirectory, assets)), name: "developer-cleanup-invalid-scope-\(width)", width: width)
+        }
+        let permanentItem = plan.items.first { $0.canDeletePermanently }
+        let item = try #require(permanentItem)
+        model.confirmDeveloperCleanup(planID: UUID(), ids: [item.id], permanently: false)
+        #expect(!model.busy)
+        #expect(fm.fileExists(atPath: dependencies.path))
+        model.setDeveloperCleanupDeletesPermanently(true, planID: plan.id)
+        model.confirmDeveloperCleanup(planID: plan.id, ids: [item.id], permanently: true)
+        #expect(model.developerCleanupError == nil)
+        await model.waitForCurrentStorageOperation()
+        try Task.checkCancellation()
+        #expect(model.developerCleanupOutcome?.deleted == [item.id])
+        #expect(!fm.fileExists(atPath: dependencies.path))
+        #expect(fm.fileExists(atPath: manifest.path))
+        #expect(fm.fileExists(atPath: build.path))
+        model.openQuickCleanup()
+        model.openDeveloperCleanup()
+        #expect(model.developerCleanupOutcome?.deleted == [item.id])
+        #expect(!model.busy)
+        model.finishViewingDeveloperCleanupResult()
+        #expect(model.developerCleanupOutcome == nil)
+    }
+
     @Test func cleanupRefreshFollowsTheActiveScan() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("sd-refresh-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

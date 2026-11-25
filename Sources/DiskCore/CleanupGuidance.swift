@@ -3,6 +3,25 @@ import Foundation
 
 /// Recoverability guidance, never proof that a folder is unused or safe to delete.
 public enum CleanupGuidance {
+    private static let packageCacheNames: Set<String> = [
+        "npm", "pnpm", "yarn", "pip", "uv", "homebrew", "go-build", "cocoapods", "composer", "ccache", "sccache"
+    ]
+    private static let focusedDeveloperNames: Set<String> = [
+        "node_modules", ".build", "target", ".next", ".nuxt", ".metro-cache", "DerivedData", "__pycache__", "_cacache", "hub"
+    ]
+
+    static func isFocusedDeveloperName(_ name: String) -> Bool {
+        focusedDeveloperNames.contains(name) || packageCacheNames.contains(name.lowercased())
+    }
+
+    static func isGitCheckoutMarker(_ name: String) -> Bool {
+        name.lowercased() == ".git"
+    }
+
+    static func isDependencyContainerName(_ name: String) -> Bool {
+        name == "node_modules"
+    }
+
     /// uv owns cache locking and shared installed environments. Its supported
     /// cleaner keeps the cache root and lock; direct Trash/delete is unsafe.
     public static func requiredNativeCleaner(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String? {
@@ -66,7 +85,7 @@ public enum CleanupGuidance {
         let aliases = roots.map { "/System/Volumes/Data" + $0 }
         let tool = url.lastPathComponent.lowercased()
         return (roots + aliases).contains(parent)
-            && ["npm", "pnpm", "yarn", "pip", "uv", "homebrew", "go-build", "cocoapods", "composer", "ccache", "sccache"].contains(tool)
+            && packageCacheNames.contains(tool)
     }
 
     /// Installed runtimes are not project dependencies or disposable build outputs.
@@ -85,7 +104,7 @@ public enum CleanupGuidance {
 
     /// Project dependencies move as one folder; package contents need no audit.
     public static func isProjectDependencies(path: String) -> Bool {
-        URL(fileURLWithPath: path).lastPathComponent == "node_modules"
+        isDependencyContainerName(URL(fileURLWithPath: path).lastPathComponent)
             && isRegenerableFolder(path: path)
     }
 
@@ -113,19 +132,22 @@ public enum CleanupGuidance {
         let normalizedHome = normalized(home)
         if name == "__pycache__" { return true }
         if name == "DerivedData", normalizedPath.hasPrefix(normalizedHome + "/Library/Developer/") { return true }
+        let parent = url.deletingLastPathComponent()
+        func hasRegularFile(_ name: String) -> Bool {
+            var info = stat()
+            return lstat(parent.appendingPathComponent(name).path, &info) == 0 && info.st_mode & S_IFMT == S_IFREG
+        }
         let manifests: [String]
         switch name {
         case "node_modules", ".next", ".nuxt": manifests = ["package.json"]
+        case ".metro-cache":
+            return hasRegularFile("package.json") && ["js", "cjs", "mjs", "ts"].contains { hasRegularFile("metro.config.\($0)") }
         case ".build": manifests = ["Package.swift"]
         case "target": manifests = ["Cargo.toml"]
         case "build", "dist": manifests = ["package.json", "Package.swift", "Cargo.toml", "CMakeLists.txt", "pyproject.toml"]
         default: return false
         }
-        return manifests.contains { name in
-            var info = stat()
-            let manifest = url.deletingLastPathComponent().appendingPathComponent(name)
-            return lstat(manifest.path, &info) == 0 && info.st_mode & S_IFMT == S_IFREG
-        }
+        return manifests.contains(where: hasRegularFile)
     }
 
     static func normalized(_ path: String) -> String {

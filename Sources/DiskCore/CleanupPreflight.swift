@@ -32,6 +32,14 @@ public enum CleanupPreflightError: Error, LocalizedError, Sendable {
 public enum CleanupPreflight {
     public static func validate(ids: [Int], in scan: ScanResult, acknowledgedIncomplete: [Int: CleanupIncompleteReview] = [:], excludedFolders: [String] = [],
                                 regenerableIDs: Set<Int> = [], home: String = FileManager.default.homeDirectoryForCurrentUser.path) async throws {
+        try await validate(ids: ids, in: scan, acknowledgedIncomplete: acknowledgedIncomplete, excludedFolders: excludedFolders,
+                           regenerableIDs: regenerableIDs, home: home, openFiles: nil)
+    }
+
+    static func validate(ids: [Int], in scan: ScanResult, acknowledgedIncomplete: [Int: CleanupIncompleteReview] = [:], excludedFolders: [String],
+                         regenerableIDs: Set<Int>, home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                         openFiles: CleanupActiveUse.OpenFiles?, requireNoNestedGitCheckout: Bool = false,
+                         promptAvoidanceFolders: [String] = []) async throws {
         try Task.checkCancellation()
         guard !ids.isEmpty else { return }
 
@@ -95,11 +103,25 @@ public enum CleanupPreflight {
         var activeUseURLs = candidateURLs.map(\.url)
 
         // Reinstallable project dependencies are reviewed as a whole folder.
-        // Keep root identity/path checks without walking every package again.
-        for candidate in candidateURLs where candidate.node.isDirectory && !dependencies.contains(candidate.node.id) {
+        // Developer Cleanup also rechecks its promise to keep nested checkouts.
+        for candidate in candidateURLs where candidate.node.isDirectory {
+            let isDependencies = dependencies.contains(candidate.node.id)
+            guard !isDependencies || requireNoNestedGitCheckout else { continue }
             try Task.checkCancellation()
 
-            let result = try await DiskScanner.scan(root: candidate.url)
+            let result = try await DiskScanner.scan(root: candidate.url,
+                excludedFolders: requireNoNestedGitCheckout ? excludedFolders : [],
+                promptAvoidanceFolders: requireNoNestedGitCheckout ? promptAvoidanceFolders : [])
+            if requireNoNestedGitCheckout {
+                if result.nodes.contains(where: { CleanupGuidance.isGitCheckoutMarker($0.name) }) {
+                    throw DiskAnalysisError.unsafePath(path: candidate.url.path, reason: "Contains a Git checkout. This folder is kept.")
+                }
+                guard !result.nodes.isEmpty, result.skipped == 0, result.errors.isEmpty,
+                      result.nodes.first?.isScanIncomplete != true else {
+                    throw DiskAnalysisError.unsafePath(path: candidate.url.path, reason: "The Git checkout check could not finish. This folder is kept.")
+                }
+            }
+            guard !isDependencies else { continue }
             activeUseURLs.append(contentsOf: ToolStorage.dataRoots(in: result))
             for node in result.nodes where node.name.lowercased() == ".gortex" || node.name.lowercased() == ".selltraces" {
                 try ToolStorage.validateCleanup(path: result.url(for: node.id).path)
@@ -141,8 +163,8 @@ public enum CleanupPreflight {
         // An unchanged database, snapshot, dependency tree or ordinary file can
         // still be open. Regeneration changes comparison rules, never use checks.
         let urls = activeUseURLs
-        let probe = Task.detached(priority: .utility) { try CleanupActiveUse.validate(urls: urls, home: home) }
-        try await probe.value
+        let probe = Task.detached(priority: .utility) { try CleanupActiveUse.validate(urls: urls, home: home, openFiles: openFiles) }
+        try await withTaskCancellationHandler { try await probe.value } onCancel: { probe.cancel() }
 
         // Run the final identity/path checks after all subtree comparisons. This
         // detects stale scan identities. Path-based moves still have a small
