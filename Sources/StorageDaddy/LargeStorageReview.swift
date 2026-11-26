@@ -9,8 +9,110 @@ struct LargeStorageEntry: Identifiable, Sendable {
     let title: String
     let explanation: String
     let bytes: Int64
+    struct ReviewedFile: Sendable {
+        let root: URL
+        let node: DiskNode
+    }
+
+    var ordinaryFile: ReviewedFile?
     var vm: LumeVMReview?
     var id: String { url.path }
+
+    struct Inventory: Sendable {
+        var entries: [LargeStorageEntry] = []
+        var errors: [String] = []
+    }
+
+    static func inventory(home: URL, projectFolders: [String], exclusions: [String],
+                          onUpdate: @MainActor @Sendable (Inventory) -> Void = { _ in }) async -> Inventory {
+        await withTaskGroup(of: Inventory.self) { group in
+            group.addTask {
+                let avoid = AutomaticScanPrivacy.promptAvoidancePaths(homeDirectory: home, accessStatus: FullDiskAccessProbe.status(homeDirectory: home))
+                let common = ["Downloads", "Movies", "Documents", "Desktop", "Projects", "Developer", "Code", "src", "repos"]
+                let roots = common.map { home.appendingPathComponent($0) } + projectFolders.map { URL(fileURLWithPath: $0) }
+                return ordinaryFiles(in: roots, exclusions: exclusions + avoid, volume: home)
+            }
+            group.addTask {
+                do { return Inventory(entries: try await discover(home: home, exclusions: exclusions)) }
+                catch { return Inventory(errors: ["Large files: " + error.localizedDescription]) }
+            }
+            group.addTask {
+                do {
+                    let machines = try LumeVMReview.discover(home: home, exclusions: exclusions)
+                    return Inventory(entries: machines.map { vm in
+                        Self(url: vm.url, title: vm.name + " · stopped virtual machine",
+                             explanation: "Deleting this virtual machine permanently removes its guest files and installed tools.",
+                             bytes: vm.bytes, vm: vm)
+                    })
+                } catch { return Inventory(errors: ["Virtual machines: " + error.localizedDescription]) }
+            }
+            var result = Inventory()
+            for await part in group {
+                result.entries += part.entries
+                result.errors += part.errors
+                let catalog = result.entries.filter { $0.ordinaryFile == nil }
+                let covered = FolderExclusions(paths: catalog.map(\.id), resolveAliases: false)
+                result.entries.removeAll { $0.ordinaryFile != nil && covered.blocksCleanup($0.url) }
+                result.entries.sort {
+                    if $0.bytes == $1.bytes { return $0.id < $1.id }
+                    return $0.bytes > $1.bytes
+                }
+                if !Task.isCancelled { await onUpdate(result) }
+            }
+            return result
+        }
+    }
+
+    static func ordinaryFiles(in roots: [URL], exclusions: [String], volume: URL,
+                              minimumBytes: Int64 = 100_000_000, limitPerRoot: Int = 12_000) -> Inventory {
+        var disk = stat()
+        guard lstat(volume.path, &disk) == 0 else { return Inventory() }
+        let policy = FolderExclusions(paths: exclusions + [volume.appendingPathComponent("Library").path])
+        let stopFolders: Set<String> = ["node_modules", "DerivedData", "Pods"]
+        let fm = FileManager.default
+        var walked = Set<String>()
+        var found: [String: Self] = [:]
+        var capped = false
+        for root in roots {
+            let path = root.standardizedFileURL.path
+            guard !Task.isCancelled, path.hasPrefix(volume.standardizedFileURL.path + "/"),
+                  !path.dropFirst(volume.standardizedFileURL.path.count).split(separator: "/").contains(where: { $0.hasPrefix(".") }),
+                  !policy.contains(path), !isSensitivePath(root), walked.insert(path).inserted,
+                  path == root.resolvingSymlinksInPath().path else { continue }
+            var rootInfo = stat()
+            guard lstat(path, &rootInfo) == 0, rootInfo.st_mode & S_IFMT == S_IFDIR,
+                  rootInfo.st_dev == disk.st_dev,
+                  let walker = fm.enumerator(at: root, includingPropertiesForKeys: [],
+                      options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in true }) else { continue }
+            for (index, element) in walker.enumerated() {
+                if Task.isCancelled { return Inventory() }
+                if index >= limitPerRoot { capped = true; break }
+                guard let url = element as? URL else { continue }
+                var info = stat()
+                guard !isSensitiveComponent(url.lastPathComponent), !policy.contains(url.path), lstat(url.path, &info) == 0, info.st_dev == disk.st_dev else {
+                    walker.skipDescendants(); continue
+                }
+                if info.st_mode & S_IFMT == S_IFDIR {
+                    if stopFolders.contains(url.lastPathComponent) { walker.skipDescendants() }
+                    continue
+                }
+                guard info.st_mode & S_IFMT == S_IFREG, info.st_uid == getuid(), info.st_nlink == 1 else { continue }
+                let bytes = Int64(info.st_blocks) * 512
+                guard bytes >= minimumBytes else { continue }
+                let stamp = info.st_mtimespec
+                let modified = Date(timeIntervalSince1970: Double(stamp.tv_sec) + Double(stamp.tv_nsec) / 1_000_000_000)
+                let node = DiskNode(id: 1, parent: 0, name: url.lastPathComponent, isDirectory: false,
+                                    logicalBytes: Int64(info.st_size), allocatedBytes: bytes, modified: modified,
+                                    device: UInt64(UInt32(bitPattern: info.st_dev)), inode: info.st_ino)
+                found[url.path] = Self(url: url, title: url.lastPathComponent,
+                    explanation: "Personal or project file. You can restore it from Trash until you empty it.", bytes: bytes,
+                    ordinaryFile: ReviewedFile(root: root, node: node))
+                if found.count > 20, let smallest = found.values.min(by: { $0.bytes < $1.bytes }) { found.removeValue(forKey: smallest.id) }
+            }
+        }
+        return Inventory(entries: found.values.sorted { $0.bytes > $1.bytes },
+                         errors: capped ? ["The large-file search reached its entry limit. Scan a folder for full coverage."] : [])
+    }
 
     static func discover(home: URL, exclusions: [String]) async throws -> [Self] {
         let catalog = [
@@ -47,6 +149,8 @@ struct LargeStorageEntry: Identifiable, Sendable {
 struct LargeStorageReviewSheet: View {
     @EnvironmentObject private var model: ExplorerModel
     @Environment(\.dismiss) private var dismiss
+    let home: URL
+    let measured: LargeStorageEntry.Inventory?
     let startWithCodex: Bool
     let onScan: (URL) -> Void
     let onChange: (StartupCapacity?) -> Void
@@ -108,22 +212,12 @@ struct LargeStorageReviewSheet: View {
         .interactiveDismissDisabled(removing)
         .task {
             if startWithCodex { askCodex() }
-            let home = FileManager.default.homeDirectoryForCurrentUser
-            let exclusions = model.excludedFolders
-            let vmTask = Task.detached(priority: .userInitiated) { try LumeVMReview.discover(home: home, exclusions: exclusions) }
-            let known = Task.detached(priority: .utility) { try await LargeStorageEntry.discover(home: home, exclusions: exclusions) }
-            await withTaskCancellationHandler {
-                do {
-                    let machines = try await vmTask.value
-                    if !Task.isCancelled {
-                        merge(machines.map { vm in
-                            LargeStorageEntry(url: vm.url, title: vm.name + " · stopped virtual machine",
-                                explanation: "A separate computer stored on this Mac. Deleting it permanently removes its guest files and installed tools.", bytes: vm.bytes, vm: vm)
-                        })
-                    }
-                } catch { if !Task.isCancelled { discoveryError = error.localizedDescription } }
-                if let values = try? await known.value, !Task.isCancelled { merge(values) }
-            } onCancel: { vmTask.cancel(); known.cancel() }
+            let inventory: LargeStorageEntry.Inventory
+            if let measured { inventory = measured }
+            else { inventory = await LargeStorageEntry.inventory(home: home, projectFolders: model.developerCleanupFolders, exclusions: model.excludedFolders) }
+            guard !Task.isCancelled else { return }
+            merge(inventory.entries)
+            if !inventory.errors.isEmpty { discoveryError = inventory.errors.joined(separator: "\n") }
             loading = false
         }
         .onDisappear { codexTask?.cancel() }
@@ -145,7 +239,6 @@ struct LargeStorageReviewSheet: View {
         guard !asking else { return }
         asking = true
         notice = nil
-        let home = FileManager.default.homeDirectoryForCurrentUser
         let exclusions = model.excludedFolders
         codexTask = Task {
             defer { asking = false }

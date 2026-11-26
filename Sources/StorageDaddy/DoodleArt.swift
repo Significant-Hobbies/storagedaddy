@@ -54,6 +54,7 @@ struct WelcomeIllustration: View {
 }
 
 struct ScanWelcomeView: View {
+    let findCulprits: (StartupCapacity?) -> Void
     let scanDisk: () -> Void
     let scanFolder: () -> Void
     let scanHome: () -> Void
@@ -87,9 +88,11 @@ struct ScanWelcomeView: View {
                 Text("Find bulky builds, forgotten caches, installed modules and AI sessions. Your results appear as the scan runs.")
                     .font(.system(size: 15)).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
                 capacitySummary
+                Button("Find storage culprits") { findCulprits(startupCapacity) }
+                    .buttonStyle(SMMacButtonStyle(.primary)).controlSize(.large)
                 HStack(spacing: 12) {
                     Button("scan a disk…", systemImage: "internaldrive.fill", action: scanDisk).accessibilityLabel("Scan a Disk…")
-                        .buttonStyle(SMMacButtonStyle(.primary)).controlSize(.large)
+                        .controlSize(.large)
                     Button("scan home folder", systemImage: "house", action: scanHome).accessibilityLabel("Scan Home Folder").controlSize(.large)
                     Button("scan a folder…", systemImage: "folder.badge.plus", action: scanFolder).accessibilityLabel("Scan a Folder…")
                         .controlSize(.large)

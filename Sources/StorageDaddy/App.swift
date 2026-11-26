@@ -820,15 +820,18 @@ struct FileTypeStats: Sendable {
             && macTools?.isBusy != true && !conversationArchive.busy && staged.isEmpty
     }
 
+    @Published private(set) var culpritSearchHome: URL?
+    var isFindingStorageCulprits: Bool { culpritSearchHome != nil }
     @Published private(set) var spaceTarget: StartupCapacity?
     private(set) var capacityBeforeCleanup: StartupCapacity?
     @Published private(set) var spaceTargetResult: StartupCapacity?
     private var permanentBeforeTarget = true
 
-    func openSpaceTarget(_ capacity: StartupCapacity, home: URL = FileManager.default.homeDirectoryForCurrentUser, preservingSelection: Bool = false) {
+    func openSpaceTarget(_ capacity: StartupCapacity?, home: URL = FileManager.default.homeDirectoryForCurrentUser, preservingSelection: Bool = false) {
         guard canStartDeveloperCleanup else { return }
         if !preservingSelection { quickReviewSelection = nil }
-        if spaceTarget == nil { permanentBeforeTarget = developerCleanupDeletesPermanently }
+        if !isFindingStorageCulprits { permanentBeforeTarget = developerCleanupDeletesPermanently }
+        culpritSearchHome = home
         spaceTarget = capacity
         spaceTargetResult = nil
         developerCleanupDeletesPermanently = true
@@ -861,13 +864,44 @@ struct FileTypeStats: Sendable {
     }
 
     private func exitSpaceTarget() {
-        guard spaceTarget != nil, !busy else { return }
+        guard isFindingStorageCulprits, !busy else { return }
+        culpritSearchHome = nil
         spaceTarget = nil
         developerCleanupDeletesPermanently = permanentBeforeTarget
         developerCleanupPlan = nil
         developerCleanupOutcome = nil
         developerCleanupError = nil
         showingDeveloperCleanup = false
+    }
+
+    func trashLargeFile(_ entry: LargeStorageEntry, moveToTrash: (URL) throws -> URL? = { url in
+        var destination: NSURL?
+        try FileManager.default.trashItem(at: url, resultingItemURL: &destination)
+        return destination as URL?
+    }) async throws {
+        guard isFindingStorageCulprits, workspace == .cleanup, let file = entry.ordinaryFile,
+              storageOperationBlockReason(scheduled: false, allowingDiscovery: true) == nil else {
+            throw CocoaError(.userCancelled)
+        }
+        freezeCleanupReview()
+        busy = true
+        progress = "Checking " + entry.title
+        defer { busy = false }
+        do {
+            try await Task.detached(priority: .userInitiated) { try CleanupActiveUse.validateCacheIsIdle(entry.url) }.value
+            try Task.checkCancellation()
+            guard workspace == .cleanup, isFindingStorageCulprits else { throw CocoaError(.userCancelled) }
+            guard !FolderExclusions(paths: excludedFolders).blocksCleanup(entry.url) else {
+                throw CleanupPreflightError.excludedFolder(entry.url.path)
+            }
+            try CleanupSafety.validate(url: entry.url, expected: file.node, root: file.root)
+            if let destination = try moveToTrash(entry.url) { lastTrashedURLs.append(destination) }
+            progress = entry.title + " moved to Trash"
+            dashboard.refresh()
+        } catch {
+            progress = "File kept · " + error.localizedDescription
+            throw error
+        }
     }
 
     func openDeveloperCleanup() {
@@ -921,7 +955,7 @@ struct FileTypeStats: Sendable {
         let selected = plan.items.filter { ids.contains($0.id) && $0.keptReason == nil }
         guard selected.count == ids.count else { return }
         freezeCleanupReview()
-        if spaceTarget != nil { quickReviewSelection = Set(selected.compactMap { plan.selectionKey(for: $0) }) }
+        if isFindingStorageCulprits { quickReviewSelection = Set(selected.compactMap { plan.selectionKey(for: $0) }) }
         rememberDeveloperCleanupSelection(selected, in: plan)
     }
 
@@ -930,7 +964,7 @@ struct FileTypeStats: Sendable {
             developerCleanupSelectedIDs.removeAll()
             return
         }
-        if spaceTarget != nil {
+        if isFindingStorageCulprits {
             let selected = quickReviewSelection.map { keys in
                 plan.items.filter { plan.selectionKey(for: $0).map(keys.contains) == true }
             } ?? plan.items
@@ -949,7 +983,7 @@ struct FileTypeStats: Sendable {
 
     private func rememberDeveloperCleanupSelection(_ items: [DeveloperCleanupReview.Item], in plan: DeveloperCleanupReview) {
         developerCleanupSelectedIDs = Set(items.map(\.id))
-        guard spaceTarget == nil else { return }
+        guard !isFindingStorageCulprits else { return }
         developerCleanupSelectionKeys = Set(items.compactMap { plan.selectionKey(for: $0) })
     }
 
@@ -1007,6 +1041,7 @@ struct FileTypeStats: Sendable {
         let quickPlanner = quickProjectPlanner
         let runID = UUID()
         discoveryID = runID
+        searchingForMoreCleanup = cacheHome != nil
         task = Task {
             defer {
                 if discoveryID == runID {
@@ -1159,7 +1194,7 @@ struct FileTypeStats: Sendable {
                     self.progress = "Cleaning folder \(index) of \(count)…"
                 }
             }
-            if spaceTarget != nil {
+            if isFindingStorageCulprits {
                 capacityBeforeCleanup = await Task.detached(priority: .userInitiated) {
                     StartupCapacity(report: SystemInventory.collect())
                 }.value
@@ -1168,7 +1203,7 @@ struct FileTypeStats: Sendable {
                 await plan.clean(ids: ids, permanently: permanently, progress: reportProgress)
             }
             let outcome = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
-            if spaceTarget != nil {
+            if isFindingStorageCulprits {
                 spaceTargetResult = await Task.detached(priority: .userInitiated) {
                     StartupCapacity(report: SystemInventory.collect())
                 }.value

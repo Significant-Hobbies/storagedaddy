@@ -55,9 +55,9 @@ final class GitWorktreeReviewModel: ObservableObject {
     func close() {
         guard !working else { return }
         presented = false; review = nil; managed = nil; explorer?.busy = false
-        if refreshOnClose, let explorer, let previous = explorer.spaceTarget {
+        if refreshOnClose, let explorer, let home = explorer.culpritSearchHome {
             explorer.dashboard.refresh()
-            explorer.openSpaceTarget(previous, preservingSelection: true)
+            explorer.openSpaceTarget(explorer.spaceTarget, home: home, preservingSelection: true)
         }
         explorer = nil
     }

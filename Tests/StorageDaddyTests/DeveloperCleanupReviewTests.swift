@@ -4,6 +4,57 @@ import Testing
 @testable import StorageDaddy
 
 struct DeveloperCleanupReviewTests {
+    @MainActor @Test func largePersonalFilesCanBeReviewedAndTrashedWithoutCapacityOrADeveloperPlan() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        let projects = home.appendingPathComponent("Projects")
+        let nested = projects.appendingPathComponent("Samples")
+        let skip = projects.appendingPathComponent("Private")
+        let modules = projects.appendingPathComponent("node_modules")
+        let temporaryTrash = home.appendingPathComponent("Trash")
+        for dir in [nested, skip, modules, temporaryTrash] {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        defer { try? fm.removeItem(at: home) }
+        let recording = nested.appendingPathComponent("recording.mov")
+        let archive = projects.appendingPathComponent("installer.zip")
+        let bytes = Data(repeating: 42, count: 65536)
+        try bytes.write(to: recording)
+        for url in [archive, skip.appendingPathComponent("keep"), modules.appendingPathComponent("library"),
+                    projects.appendingPathComponent("credentials.json")] {
+            try Data(repeating: 1, count: 8192).write(to: url)
+        }
+        try fm.createSymbolicLink(at: projects.appendingPathComponent("alias.mov"), withDestinationURL: recording)
+        let rows = LargeStorageEntry.ordinaryFiles(in: [projects, nested], exclusions: [skip.path],
+                                                  volume: home, minimumBytes: 4096).entries
+        #expect(rows.map(\.title) == ["recording.mov", "installer.zip"])
+        let first = try #require(rows.first)
+        let second = try #require(rows.last)
+        let model = ExplorerModel(developerCleanupPreferences: nil)
+        model.openSpaceTarget(nil, home: home)
+        await model.waitForCurrentStorageOperation()
+        #expect(model.isFindingStorageCulprits)
+        #expect(model.developerCleanupSelectedIDs.isEmpty)
+        // The same path now names a different file.
+        try fm.moveItem(at: archive, to: home.appendingPathComponent("original.zip"))
+        try bytes.write(to: archive)
+        var moved = false
+        await #expect(throws: (any Error).self) {
+            try await model.trashLargeFile(second) { _ in moved = true; return nil }
+        }
+        #expect(!moved)
+        #expect(try Data(contentsOf: archive) == bytes)
+        let recovered = temporaryTrash.appendingPathComponent(recording.lastPathComponent)
+        try await model.trashLargeFile(first) { url in
+            try fm.moveItem(at: url, to: recovered)
+            return recovered
+        }
+        #expect(!fm.fileExists(atPath: recording.path))
+        #expect(try Data(contentsOf: recovered) == bytes)
+        #expect(model.lastTrashedURLs.contains(recovered))
+        #expect(fm.fileExists(atPath: skip.appendingPathComponent("keep").path))
+    }
+
     @Test func automaticCleanupWithholdsSharedPnpmAndProtectsGuestsWhileExplicitPruneUsesReviewedStore() async throws {
         let fm = FileManager.default
         let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()

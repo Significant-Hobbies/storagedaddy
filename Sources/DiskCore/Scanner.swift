@@ -983,7 +983,7 @@ private func saturatingAdd(_ lhs: Int64, _ rhs: Int64) -> Int64 {
     return overflow ? Int64.max : value
 }
 
-func isSensitivePath(_ url: URL) -> Bool {
+package func isSensitivePath(_ url: URL) -> Bool {
     let standardized = url.standardizedFileURL
     let canonical = standardized.resolvingSymlinksInPath().standardizedFileURL
     return [standardized, canonical].contains { candidate in
@@ -991,7 +991,7 @@ func isSensitivePath(_ url: URL) -> Bool {
     }
 }
 
-func isSensitiveComponent(_ name: String) -> Bool {
+package func isSensitiveComponent(_ name: String) -> Bool {
     // Most entries cannot match any sensitive prefix. Avoid allocating a
     // lowercased copy of every ordinary filename on multi-million-entry scans.
     if let first = name.utf8.first, first < 128,

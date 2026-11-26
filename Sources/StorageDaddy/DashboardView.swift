@@ -144,16 +144,13 @@ struct DashboardView: View {
             HStack(spacing: 16) {
                 DoodleArt(topic: .overview).frame(width: 72, height: 72)
                 VStack(alignment: .trailing, spacing: 8) {
+                    Button("Find storage culprits") { m.openSpaceTarget(dashboard.report.flatMap(StartupCapacity.init(report:))) }
+                        .buttonStyle(SMMacButtonStyle(.primary))
+                        .disabled(!m.canStartDeveloperCleanup)
+                        .help("Measure developer files, caches and known large items. Review the biggest items first.")
                     if let capacity = dashboard.report.flatMap(StartupCapacity.init(report:)) {
-                        Button("Find space to clean") { m.openSpaceTarget(capacity) }
-                            .buttonStyle(SMMacButtonStyle(.primary))
-                            .disabled(!m.canStartDeveloperCleanup)
-                            .help("Measure tool caches, build caches and rebuildable dependencies in saved project folders, or accessible development folders when no locations are saved.")
                         Text("\(DiskFormat.bytes(capacity.available)) available")
                             .font(.caption).foregroundStyle(Tints.secondaryText)
-                    } else {
-                        Button("Find Developer Files", action: m.openDeveloperCleanup)
-                            .buttonStyle(SMMacButtonStyle(.primary))
                     }
                     HStack(spacing: 10) {
                         Button("Refresh", action: dashboard.refresh).disabled(dashboard.loading || m.busy)
