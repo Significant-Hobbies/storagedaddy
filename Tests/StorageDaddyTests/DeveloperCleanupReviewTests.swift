@@ -217,10 +217,27 @@ struct DeveloperCleanupReviewTests {
         model.openSpaceTarget(capacity, home: home)
         let scan = Task { await model.waitForCurrentStorageOperation() }
         for _ in 0..<200 where !model.searchingForMoreCleanup { try await Task.sleep(for: .milliseconds(25)) }
-        let initial = try #require(model.developerCleanupPlan)
+        let firstPlan = try #require(model.developerCleanupPlan)
         #expect(model.searchingForMoreCleanup && model.canEditCleanupReview)
+        let projects = home.appendingPathComponent("Projects")
+        let archive = projects.appendingPathComponent("demo.zip")
+        try Data(repeating: 7, count: 8192).write(to: archive)
+        let reviewed = try #require(LargeStorageEntry.ordinaryFiles(in: [projects], exclusions: [],
+            volume: home, minimumBytes: 4096).entries.first)
+        let destination = home.appendingPathComponent("reviewed-demo.zip")
+        let searchID = model.culpritSearchID
+        try await model.trashLargeFile(reviewed) { url in
+            try fm.moveItem(at: url, to: destination)
+            return destination
+        }
+        #expect(fm.fileExists(atPath: destination.path))
+        #expect(model.developerCleanupPlan != nil)
+        #expect(model.measuringCulprits && model.culpritSearchID == searchID)
+        for _ in 0..<200 where model.developerCleanupPlan?.id == firstPlan.id { try await Task.sleep(for: .milliseconds(25)) }
+        let initial = try #require(model.developerCleanupPlan)
+        #expect(initial.id != firstPlan.id)
         let selected = model.developerCleanupSelectedIDs
-        #expect(selected.count == 1)
+        #expect(selected == Set(firstPlan.items.map(\.id)) && selected.count == 1)
         model.confirmDeveloperCleanup(planID: initial.id, ids: selected, permanently: true)
         await model.waitForCurrentStorageOperation()
         await scan.value

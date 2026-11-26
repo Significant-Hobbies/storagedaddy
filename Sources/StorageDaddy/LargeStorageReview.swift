@@ -21,6 +21,7 @@ struct LargeStorageEntry: Identifiable, Sendable {
     struct Inventory: Sendable {
         var entries: [LargeStorageEntry] = []
         var errors: [String] = []
+        var skippedProtectedRoots: [String] = []
     }
 
     static func inventory(home: URL, projectFolders: [String], exclusions: [String],
@@ -30,7 +31,12 @@ struct LargeStorageEntry: Identifiable, Sendable {
                 let avoid = AutomaticScanPrivacy.promptAvoidancePaths(homeDirectory: home, accessStatus: FullDiskAccessProbe.status(homeDirectory: home))
                 let common = ["Downloads", "Movies", "Documents", "Desktop", "Projects", "Developer", "Code", "src", "repos"]
                 let roots = common.map { home.appendingPathComponent($0) } + projectFolders.map { URL(fileURLWithPath: $0) }
-                return ordinaryFiles(in: roots, exclusions: exclusions + avoid, volume: home)
+                var inventory = ordinaryFiles(in: roots, exclusions: exclusions + avoid, volume: home)
+                let rootPaths = roots.map { $0.standardizedFileURL.path }
+                inventory.skippedProtectedRoots = avoid.filter { path in
+                    rootPaths.contains { $0 == path || $0.hasPrefix(path + "/") }
+                }.map { URL(fileURLWithPath: $0).lastPathComponent }.sorted()
+                return inventory
             }
             group.addTask {
                 do { return Inventory(entries: try await discover(home: home, exclusions: exclusions)) }
@@ -50,6 +56,7 @@ struct LargeStorageEntry: Identifiable, Sendable {
             for await part in group {
                 result.entries += part.entries
                 result.errors += part.errors
+                result.skippedProtectedRoots += part.skippedProtectedRoots
                 let catalog = result.entries.filter { $0.ordinaryFile == nil }
                 let covered = FolderExclusions(paths: catalog.map(\.id), resolveAliases: false)
                 result.entries.removeAll { $0.ordinaryFile != nil && covered.blocksCleanup($0.url) }
@@ -111,7 +118,7 @@ struct LargeStorageEntry: Identifiable, Sendable {
             }
         }
         return Inventory(entries: found.values.sorted { $0.bytes > $1.bytes },
-                         errors: capped ? ["The large-file search reached its entry limit. Scan a folder for full coverage."] : [])
+                         errors: capped ? ["The large-file search stopped after \(limitPerRoot.formatted()) entries in a folder. Scan that folder for full coverage."] : [])
     }
 
     static func discover(home: URL, exclusions: [String]) async throws -> [Self] {

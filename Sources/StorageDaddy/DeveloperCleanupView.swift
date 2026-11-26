@@ -130,6 +130,7 @@ struct DeveloperCleanupView: View {
     }
 
     private struct SearchScope: Equatable {
+        let searchID: UUID
         let home: URL?
         let exclusions: [String]
         let projects: [String]
@@ -163,7 +164,7 @@ struct DeveloperCleanupView: View {
 
     private var culpritResults: some View {
         let plan = model.developerCleanupPlan
-        let scope = SearchScope(home: model.culpritSearchHome, exclusions: model.excludedFolders,
+        let scope = SearchScope(searchID: model.culpritSearchID, home: model.culpritSearchHome, exclusions: model.excludedFolders,
                                 projects: model.developerCleanupFolders, outcome: model.developerCleanupOutcome != nil,
                                 showingSheet: showingLargeItems)
         let ranked = rankedCulprits(plan: plan)
@@ -172,8 +173,13 @@ struct DeveloperCleanupView: View {
             if let fileOutcome { Text(fileOutcome).font(.callout) }
             if let outcome = model.developerCleanupOutcome {
                 result(outcome).onAppear { presentedOutcome = true }
-                Button("Find storage culprits again") {
-                    model.openSpaceTarget(model.spaceTargetResult ?? model.spaceTarget, home: scope.home ?? FileManager.default.homeDirectoryForCurrentUser)
+                HStack { repeatSearch; recoveryButton }
+                if let plan {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(plan.items) { item in row(item, planID: plan.id); Divider() }
+                        }
+                    }
                 }
             } else {
                 if model.busy || measuringLargeItems || inventory == nil {
@@ -182,6 +188,19 @@ struct DeveloperCleanupView: View {
                 }
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
+                        if let inventory {
+                            if !inventory.skippedProtectedRoots.isEmpty {
+                                Text("Skipped without Full Disk Access: " + inventory.skippedProtectedRoots.joined(separator: ", ") + ". Choose a folder to scan it directly.")
+                                    .font(.caption).foregroundStyle(Tints.yellow).padding(.bottom, 4)
+                                Button("Scan a folder…", action: model.chooseFolder)
+                                    .disabled(!model.canStartDeveloperCleanup).padding(.bottom, 6)
+                            }
+                            ForEach(inventory.errors, id: \.self) { Text($0).font(.caption).foregroundStyle(Tints.yellow) }
+                        }
+                        if let plan, plan.skipped > 0 {
+                            Text("\(plan.skipped.formatted()) excluded, protected or unreadable locations skipped.")
+                                .font(.caption).foregroundStyle(Tints.secondaryText)
+                        }
                         ForEach(ranked) { culprit in
                             switch culprit {
                             case .ready(let item):
@@ -219,15 +238,18 @@ struct DeveloperCleanupView: View {
                             }
                             Divider()
                         }
-                        if ranked.isEmpty && !model.busy && !measuringLargeItems && inventory != nil {
+                        if ranked.isEmpty && plan != nil && model.developerCleanupError == nil && !model.busy && !measuringLargeItems && inventory != nil {
                             Text("No cleanup candidates or large files found in the checked locations.")
                                 .foregroundStyle(Tints.secondaryText).padding(.vertical)
                         }
-                        if let plan {
-                            DisclosureGroup("Scan details and other locations", isExpanded: $searchDetails) {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Checks common project and media folders, user downloads, developer caches and known large items. Protected locations require access. Lists up to 20 personal files of at least 100 MB.")
-                                        .font(.caption).foregroundStyle(Tints.secondaryText)
+                        if !model.busy && (ranked.isEmpty || plan == nil || model.developerCleanupError != nil || fileOutcome != nil) {
+                            repeatSearch
+                        }
+                        DisclosureGroup("Scan details and other locations", isExpanded: $searchDetails) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Checks common project and media folders, user downloads, developer caches and known large items. Protected locations require access. Lists up to 20 personal files of at least 100 MB.")
+                                    .font(.caption).foregroundStyle(Tints.secondaryText)
+                                if let plan {
                                     ForEach(plan.scopes) { scope in
                                         Text(StorageLabels.location(scope.path) + (scope.error.map { " · " + $0 } ?? "")).font(.caption)
                                     }
@@ -238,23 +260,22 @@ struct DeveloperCleanupView: View {
                                             Button("Deselect all") { model.setDeveloperCleanupSelection([], planID: plan.id) }
                                         }.disabled(!model.canEditCleanupReview)
                                     }
-                                    let recovery = FileManager.default.homeDirectoryForCurrentUser
-                                        .appendingPathComponent("Library/Application Support/StorageDaddy/Cleanup Recovery")
-                                    if FileManager.default.fileExists(atPath: recovery.path) {
-                                        Button("Open Cleanup Recovery") { NSWorkspace.shared.open(recovery) }
-                                    }
-                                    Button("Other developer folders", action: model.openDeveloperCleanup)
-                                        .disabled(!model.canStartDeveloperCleanup)
-                                    Button("Find more with Codex…") { openLargeReview(usingCodex: true) }.disabled(!model.canEditCleanupReview)
-                                }.frame(maxWidth: .infinity, alignment: .leading)
-                            }.padding(.vertical, 8)
-                        }
-                        if let inventory { ForEach(inventory.errors, id: \.self) { Text($0).font(.caption).foregroundStyle(Tints.yellow) } }
+                                }
+                                recoveryButton
+                                Button("Other developer folders", action: model.openDeveloperCleanup)
+                                    .disabled(!model.canStartDeveloperCleanup)
+                                Button("Find more with Codex…") { openLargeReview(usingCodex: true) }.disabled(!model.canEditCleanupReview)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }.padding(.vertical, 8)
                     }
                 }
                 if let plan, !plan.items.isEmpty { Divider(); confirmation(plan) }
             }
         }.frame(maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: model.culpritSearchID) { _, _ in
+            trashedPaths.removeAll()
+            fileOutcome = nil
+        }
         .task(id: scope) {
             guard let home = scope.home, !scope.outcome, !scope.showingSheet else { return }
             inventory = nil
@@ -265,6 +286,21 @@ struct DeveloperCleanupView: View {
             guard !Task.isCancelled else { return }
             inventory = result
             measuringLargeItems = false
+        }
+    }
+
+    private var repeatSearch: some View {
+        Button("Find storage culprits again") {
+            model.openSpaceTarget(model.spaceTargetResult ?? model.spaceTarget,
+                                  home: model.culpritSearchHome ?? FileManager.default.homeDirectoryForCurrentUser)
+        }.disabled(!model.canStartDeveloperCleanup)
+    }
+
+    @ViewBuilder private var recoveryButton: some View {
+        let folder = (model.culpritSearchHome ?? FileManager.default.homeDirectoryForCurrentUser)
+            .appendingPathComponent("Library/Application Support/StorageDaddy/Cleanup Recovery")
+        if FileManager.default.fileExists(atPath: folder.path) {
+            Button("Open Cleanup Recovery") { NSWorkspace.shared.open(folder) }
         }
     }
 

@@ -820,6 +820,7 @@ struct FileTypeStats: Sendable {
             && macTools?.isBusy != true && !conversationArchive.busy && staged.isEmpty
     }
 
+    @Published private(set) var culpritSearchID = UUID()
     @Published private(set) var culpritSearchHome: URL?
     var isFindingStorageCulprits: Bool { culpritSearchHome != nil }
     @Published private(set) var spaceTarget: StartupCapacity?
@@ -829,7 +830,7 @@ struct FileTypeStats: Sendable {
 
     func openSpaceTarget(_ capacity: StartupCapacity?, home: URL = FileManager.default.homeDirectoryForCurrentUser, preservingSelection: Bool = false) {
         guard canStartDeveloperCleanup else { return }
-        if !preservingSelection { quickReviewSelection = nil }
+        if !preservingSelection { quickReviewSelection = nil; culpritSearchID = UUID() }
         if !isFindingStorageCulprits { permanentBeforeTarget = developerCleanupDeletesPermanently }
         culpritSearchHome = home
         spaceTarget = capacity
@@ -858,9 +859,9 @@ struct FileTypeStats: Sendable {
                FileManager.default.fileExists(atPath: location.path),
                !FolderExclusions(paths: roots.map(\.path)).blocksCleanup(location) { roots.append(location) }
         }
-        developerCleanupPlan = nil
+        if !preservingSelection { developerCleanupPlan = nil }
         developerCleanupOutcome = nil
-        findDeveloperCleanup(in: roots, cacheHome: home)
+        findDeveloperCleanup(in: roots, retainingReviewOnFailure: preservingSelection, cacheHome: home)
     }
 
     private func exitSpaceTarget() {

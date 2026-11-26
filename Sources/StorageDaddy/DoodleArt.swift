@@ -54,6 +54,7 @@ struct WelcomeIllustration: View {
 }
 
 struct ScanWelcomeView: View {
+    let canFindCulprits: Bool
     let findCulprits: (StartupCapacity?) -> Void
     let scanDisk: () -> Void
     let scanFolder: () -> Void
@@ -89,6 +90,7 @@ struct ScanWelcomeView: View {
                     .font(.system(size: 15)).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
                 capacitySummary
                 Button("Find storage culprits") { findCulprits(startupCapacity) }
+                    .disabled(!canFindCulprits)
                     .buttonStyle(SMMacButtonStyle(.primary)).controlSize(.large)
                 HStack(spacing: 12) {
                     Button("scan a disk…", systemImage: "internaldrive.fill", action: scanDisk).accessibilityLabel("Scan a Disk…")
