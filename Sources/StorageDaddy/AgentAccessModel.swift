@@ -98,9 +98,16 @@ private struct AgentPolicy: Codable {
     var waitingApprovalCount: Int { pairings.filter { Date().timeIntervalSince($0.createdAt) < 600 }.count }
     var helperPath: String { Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/storagedaddy-mcp").path }
     var socketPath: String { AgentSecurity.socketPath(for: directory) }
+    var embedded: Bool { directory == Self.embeddedDirectory }
+    static var embeddedDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("daddyrad/Storage Agent Bridge", isDirectory: true)
+    }
     var configuration: String {
         let escaped = helperPath.replacingOccurrences(of: "'", with: "'\\''")
-        return "codex mcp add storagedaddy --url http://127.0.0.1:\(httpPort)/mcp --oauth-client-registration dcr\nclaude mcp add --scope user --transport stdio storagedaddy -- '\(escaped)'"
+        let name = embedded ? "daddyrad-storage" : "storagedaddy"
+        let extra = embedded ? " --socket " + socketPath : ""
+        return "codex mcp add \(name) --url http://127.0.0.1:\(httpPort)/mcp --oauth-client-registration dcr\nclaude mcp add --scope user --transport stdio \(name) -- '\(escaped)'\(extra)"
     }
 
     init(explorer: ExplorerModel, directory: URL = AgentSecurity.directory, httpPort: UInt16 = 51736) {
@@ -208,11 +215,12 @@ private struct AgentPolicy: Codable {
         guard !extensionWorking else { return }
         extensionWorking = true
         let helper = URL(fileURLWithPath: helperPath)
+        let bridgeSocket = embedded ? socketPath : nil
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("StorageDaddy-Claude-\(UUID().uuidString)")
         Task {
             defer { extensionWorking = false }
             do {
-                let file = try await Task.detached(priority: .utility) { try AgentExtensionBuilder.build(helper: helper, directory: directory) }.value
+                let file = try await Task.detached(priority: .utility) { try AgentExtensionBuilder.build(helper: helper, directory: directory, socket: bridgeSocket) }.value
                 extensionURL = file
                 if !NSWorkspace.shared.open(file) { error = "Extension created. Open the file in Claude Desktop to review and install it." }
             } catch { self.error = error.localizedDescription }

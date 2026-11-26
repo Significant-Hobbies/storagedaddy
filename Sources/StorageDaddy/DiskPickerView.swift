@@ -8,7 +8,10 @@ struct DiskPickerView: View {
     @Binding private var isPresented: Bool
     @State private var volumes: [StorageVolume] = []
 
-    init(isPresented: Binding<Bool>) {
+    let destination: Workspace?
+
+    init(isPresented: Binding<Bool>, destination: Workspace? = nil) {
+        self.destination = destination
         _isPresented = isPresented
     }
 
@@ -39,7 +42,7 @@ struct DiskPickerView: View {
                     LazyVStack(spacing: 8) {
                         ForEach(volumes) { volume in
                             Button {
-                                m.start(volume.url)
+                                m.start(volume.url, destination: destination)
                                 isPresented = false
                             } label: {
                                 HStack(spacing: 14) {

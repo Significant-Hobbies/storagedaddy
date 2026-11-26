@@ -99,6 +99,7 @@ struct PackageCacheCleanersView: View {
 
 extension ExplorerModel {
     func cleanPackageCache(_ tool: PackageCacheTool, executable: URL, cache: URL) {
+        refreshExcludedFolders()
         guard !busy, !moves.busy, !snapshotBusy, macTools?.isBusy != true, !conversationArchive.busy, staged.isEmpty,
               !FolderExclusions(paths: excludedFolders).blocksCleanup(cache) else { return }
         let home = FileManager.default.homeDirectoryForCurrentUser

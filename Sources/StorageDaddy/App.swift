@@ -5,10 +5,9 @@ import AppKit
 import DiskCore
 import SaaSMakerUI
 
-@main
-enum StorageDaddyMain {
+public enum StorageDaddyMain {
     @MainActor
-    static func main() {
+    public static func main() {
         if CommandLine.arguments.contains("--check-ui-resources") {
             guard StorageUIResources.loaded else {
                 FileHandle.standardError.write(Data("StorageDaddy UI resources missing or invalid\n".utf8))
@@ -283,9 +282,10 @@ struct FileTypeStats: Sendable {
 }
 
 @MainActor final class ExplorerModel: ObservableObject {
-    @Published private(set) var excludedFolders: [String] = UserDefaults.standard.stringArray(forKey: "excludedFolders") ?? [] {
+    private let exclusionPreferences: UserDefaults
+    @Published private(set) var excludedFolders: [String] {
         didSet {
-            UserDefaults.standard.set(excludedFolders, forKey: "excludedFolders")
+            exclusionPreferences.set(excludedFolders, forKey: "excludedFolders")
             macTools?.setExcludedFolders(excludedFolders)
             if developerCleanupSelectionKeys != nil { developerCleanupSelectionKeys = [] }
             developerCleanupPlan = nil
@@ -301,13 +301,39 @@ struct FileTypeStats: Sendable {
 
     @Published private(set) var exclusionResultsStale = false
 
+    var currentExcludedFolders: [String] { exclusionPreferences.stringArray(forKey: "excludedFolders") ?? [] }
+
+    private var exclusionsNeedRefresh = false
+
+    func refreshExcludedFolders() {
+        let current = currentExcludedFolders
+        guard current != excludedFolders else { return }
+        guard !busy || discoveryID != nil else {
+            exclusionsNeedRefresh = true
+            return
+        }
+        let resumeHome = discoveryID != nil && workspace == .cleanup ? culpritSearchHome : nil
+        if discoveryID != nil {
+            task?.cancel()
+            discoveryID = nil
+            searchingForMoreCleanup = false
+            busy = false
+        }
+        excludedFolders = current
+        if let resumeHome, canStartDeveloperCleanup {
+            openSpaceTarget(spaceTarget, home: resumeHome, preservingSelection: true)
+        }
+    }
+
     func addExcludedFolders(_ urls: [URL]) {
+        refreshExcludedFolders()
         guard macTools?.isBusy != true, !busy else { return }
         let paths = FolderExclusions(paths: excludedFolders + urls.map { $0.standardizedFileURL.path }).paths
         if paths != excludedFolders { excludedFolders = paths }
     }
 
     func removeExcludedFolder(_ path: String) {
+        refreshExcludedFolders()
         guard macTools?.isBusy != true, !busy else { return }
         excludedFolders.removeAll { $0 == path }
     }
@@ -365,7 +391,14 @@ struct FileTypeStats: Sendable {
     @Published var volumeCapacity: Int64?
     @Published var liveProgress: ScanProgress?
     @Published var liveStorageCapacity: StartupCapacity?
-    @Published var busy = false
+    @Published var busy = false {
+        didSet {
+            if !busy && exclusionsNeedRefresh {
+                exclusionsNeedRefresh = false
+                refreshExcludedFolders()
+            }
+        }
+    }
     @Published private(set) var lastScanSummary = "No scan yet"
     @Published var progress = "Choose what to scan to begin" { didSet { runtime.scanStatus = progress } }
     @Published var folderExplanation: FolderExplanationState?
@@ -380,7 +413,11 @@ struct FileTypeStats: Sendable {
         }
         return model
     }()
-    lazy var agentAccess = AgentAccessModel(explorer: self)
+    private let agentDirectory: URL?
+    lazy var agentAccess: AgentAccessModel = {
+        guard let agentDirectory else { return AgentAccessModel(explorer: self) }
+        return AgentAccessModel(explorer: self, directory: agentDirectory, httpPort: 51737)
+    }()
     lazy var scanSchedule = ScanScheduleModel(explorer: self)
     @Published var staged: Set<Int> = []
     @Published var deleteNodeCachesPermanently = true
@@ -796,6 +833,8 @@ struct FileTypeStats: Sendable {
 
     init(
         developerCleanupPreferences: UserDefaults? = .standard,
+        exclusionPreferences: UserDefaults = .standard,
+        agentDirectory: URL? = nil,
         developerCleanupPlanner: @escaping @Sendable ([URL], [String]) async throws -> DeveloperCleanupReview = { roots, exclusions in
             let promptAvoidance = AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
             return try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: promptAvoidance)
@@ -806,6 +845,9 @@ struct FileTypeStats: Sendable {
                                                             quickCleanup: true, home: home.path)
         }
     ) {
+        self.agentDirectory = agentDirectory
+        self.exclusionPreferences = exclusionPreferences
+        excludedFolders = exclusionPreferences.stringArray(forKey: "excludedFolders") ?? []
         self.developerCleanupPreferences = developerCleanupPreferences
         self.developerCleanupPlanner = developerCleanupPlanner
         self.quickProjectPlanner = quickProjectPlanner
@@ -905,7 +947,7 @@ struct FileTypeStats: Sendable {
             guard !check.isCancelled else { throw CancellationError() }
             try Task.checkCancellation()
             guard workspace == .cleanup, isFindingStorageCulprits else { throw CocoaError(.userCancelled) }
-            guard !FolderExclusions(paths: excludedFolders).blocksCleanup(entry.url) else {
+            guard !FolderExclusions(paths: currentExcludedFolders).blocksCleanup(entry.url) else {
                 throw CleanupPreflightError.excludedFolder(entry.url.path)
             }
             try CleanupSafety.validate(url: entry.url, expected: file.node, root: file.root)
@@ -918,7 +960,10 @@ struct FileTypeStats: Sendable {
         }
     }
 
+    private(set) var manualCleanupNavigationID = UUID()
+
     func openDeveloperCleanup() {
+        manualCleanupNavigationID = UUID()
         exitSpaceTarget()
         let entering = workspace != .cleanup || !showingDeveloperCleanup
         workspace = .cleanup
@@ -928,6 +973,7 @@ struct FileTypeStats: Sendable {
     }
 
     func openQuickCleanup() {
+        manualCleanupNavigationID = UUID()
         exitSpaceTarget()
         showingDeveloperCleanup = false
         showWelcome = false
@@ -1043,6 +1089,7 @@ struct FileTypeStats: Sendable {
     }
 
     func findDeveloperCleanup(in roots: [URL], retainingReviewOnFailure: Bool = false, cacheHome: URL? = nil) {
+        refreshExcludedFolders()
         guard canStartDeveloperCleanup, !roots.isEmpty || cacheHome != nil else { return }
         if !retainingReviewOnFailure {
             developerCleanupPlan = nil
@@ -1192,6 +1239,7 @@ struct FileTypeStats: Sendable {
     }
 
     func confirmDeveloperCleanup(planID: UUID, ids: Set<DeveloperCleanupReview.Item.ID>, permanently: Bool) {
+        refreshExcludedFolders()
         guard let plan = editableDeveloperCleanupPlan(planID), !ids.isEmpty,
               ids.isSubset(of: developerCleanupSelectedIDs),
               permanently == developerCleanupDeletesPermanently else { return }
@@ -1243,7 +1291,7 @@ struct FileTypeStats: Sendable {
     func scanUserCachesForCleanup() {
         scanUserCaches(destination: .cleanup)
     }
-    private func scanUserCaches(destination: Workspace) {
+    func scanUserCaches(destination: Workspace) {
         start(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches"), destination: destination)
     }
     func scanHomeFolder() {
@@ -1257,7 +1305,7 @@ struct FileTypeStats: Sendable {
     func requestAISessionsRefresh() { aiSessionsRefreshID = UUID() }
     func chooseFolder() { chooseFolder(destination: nil) }
     func chooseCleanupFolder() { chooseFolder(destination: .cleanup) }
-    private func chooseFolder(destination: Workspace?) {
+    func chooseFolder(destination: Workspace?) {
         let p = NSOpenPanel(); p.canChooseDirectories = true; p.canChooseFiles = false; p.allowsMultipleSelection = false; p.prompt = "Scan Folder"
         if p.runModal() == .OK, let url = p.url {
             let protected = AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
@@ -1887,6 +1935,7 @@ struct FileTypeStats: Sendable {
         try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
         return trashedURL as URL?
     }) {
+        refreshExcludedFolders()
         guard let scan, !busy, !moves.busy, macTools?.isBusy != true, !monitoring, !ids.isEmpty,
               cleanupAuthorizationIsCurrent(authorization, remaining: Set(ids)), permanent.isSubset(of: Set(ids)) else { return }
         let version = scanVersion
@@ -1958,7 +2007,7 @@ struct FileTypeStats: Sendable {
                     guard scanVersion == version, filenameSearchIdentity == scanIdentity, cleanupAuthorizationIsCurrent(authorization, remaining: remaining) else { throw CancellationError() }
                     try DuplicateSurvivorProtection.validateSurvivors(scan: scan, selections: duplicates, staged: Set(ids))
                     let url = scan.url(for: id)
-                    if FolderExclusions(paths: excludedFolders).blocksCleanup(url) {
+                    if FolderExclusions(paths: currentExcludedFolders).blocksCleanup(url) {
                         throw CleanupPreflightError.excludedFolder(url.path)
                     }
                     try CleanupSafety.validate(url: url, expected: scan.nodes[id], root: URL(fileURLWithPath: scan.rootPath),
@@ -1980,7 +2029,7 @@ struct FileTypeStats: Sendable {
                                 guard self.agentAccess.allowsPermanentCleanup(of: id) else {
                                     throw CocoaError(.fileWriteNoPermission)
                                 }
-                                if FolderExclusions(paths: self.excludedFolders).blocksCleanup(url) {
+                                if FolderExclusions(paths: self.currentExcludedFolders).blocksCleanup(url) {
                                     throw CleanupPreflightError.excludedFolder(url.path)
                                 }
                                 try DuplicateSurvivorProtection.validateSurvivors(scan: scan, selections: duplicates, staged: Set(ids))

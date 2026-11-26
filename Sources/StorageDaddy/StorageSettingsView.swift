@@ -6,6 +6,7 @@ import DiskCore
 struct StorageSettingsView: View {
     @EnvironmentObject private var model: ExplorerModel
     @ObservedObject var updates: AppUpdates
+    var embedded = false
     @State private var tab = 1
     @AppStorage("automaticallySaveScans") private var automaticallySaveScans = true
     @AppStorage("appearanceMode") private var appearance = "dark"
@@ -81,9 +82,9 @@ struct StorageSettingsView: View {
             ScanScheduleSettingsView(schedule: model.scanSchedule)
                 .tabItem { Label("Recurring Scans", systemImage: "clock.arrow.circlepath") }.tag(3)
         }
-        .frame(width: 620, height: 520)
+        .frame(width: embedded ? nil : 620, height: embedded ? nil : 520)
         .background(AppColors.canvas)
-        .smWorkspaceWindowChrome()
+        .modifier(StorageWindowChrome(embedded: embedded, hideToolbar: false))
         .storageTheme(DaddyTheme.palette)
         .tint(Tints.mint)
         .buttonStyle(SMMacButtonStyle(.secondary))
@@ -119,24 +120,26 @@ struct StorageSettingsView: View {
                         Toggle("Save completed scans to local history", isOn: $automaticallySaveScans).labelsHidden().toggleStyle(.switch)
                     }
                 }
-                SMSettingsGroup("Startup & updates", footer: "Installation waits until scans, exports and cleanup review are finished.") {
-                    SMSettingsRow("Start in the menu bar", subtitle: "Keep the main window closed at launch") {
-                        Toggle("Start minimized in the menu bar", isOn: $startMinimized).labelsHidden().toggleStyle(.switch)
+                if !embedded {
+                    SMSettingsGroup("Startup & updates", footer: "Installation waits until scans, exports and cleanup review are finished.") {
+                        SMSettingsRow("Start in the menu bar", subtitle: "Keep the main window closed at launch") {
+                            Toggle("Start minimized in the menu bar", isOn: $startMinimized).labelsHidden().toggleStyle(.switch)
+                        }
+                        Divider()
+                        SMSettingsRow("Automatically check for updates") {
+                            Toggle("Automatically check for updates", isOn: $updates.automaticallyChecks).labelsHidden().toggleStyle(.switch)
+                        }
+                        Divider()
+                        SMSettingsRow("New versions") {
+                            Button("Check for Updates…", action: updates.check).disabled(!updates.canCheck || !updates.isIdle)
+                        }
                     }
-                    Divider()
-                    SMSettingsRow("Automatically check for updates") {
-                        Toggle("Automatically check for updates", isOn: $updates.automaticallyChecks).labelsHidden().toggleStyle(.switch)
-                    }
-                    Divider()
-                    SMSettingsRow("New versions") {
-                        Button("Check for Updates…", action: updates.check).disabled(!updates.canCheck || !updates.isIdle)
-                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Yours free forever, including all future versions.").fontWeight(.medium)
+                        Text("Everyone who downloads during early access gets every future version free. No trial expiry or subscription.")
+                    }.font(.custom(DaddyTheme.palette.sansFont, size: 12)).foregroundStyle(Tints.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Yours free forever, including all future versions.").fontWeight(.medium)
-                    Text("Everyone who downloads during early access gets every future version free. No trial expiry or subscription.")
-                }.font(.custom(DaddyTheme.palette.sansFont, size: 12)).foregroundStyle(Tints.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
             }.padding(28)
         }
     }

@@ -8,18 +8,22 @@ import DiskCore
 struct ExplorerView: View {
     // Fixtures host the actual shell without app activation or scripted scans.
     var runsLaunchActions = true
+    let embedded: Bool
+    var worktreesOnly = false
     @EnvironmentObject var m: ExplorerModel
     @AppStorage("storageAccessIntroductionSeen") private var accessIntroductionSeen = false
     @State private var inspector = false
     @State private var choosingDisk = false
     @State private var toolsExpanded = false
-    init(runsLaunchActions: Bool = true, inspector: Bool = false) {
+    init(runsLaunchActions: Bool = true, inspector: Bool = false, embedded: Bool = false, worktreesOnly: Bool = false) {
+        self.embedded = embedded
+        self.worktreesOnly = worktreesOnly
         self.runsLaunchActions = runsLaunchActions
         _inspector = State(initialValue: inspector)
     }
     var body: some View {
         HStack(spacing: 0) {
-            sidebar
+            if !embedded { sidebar }
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     scopeBar
@@ -52,7 +56,7 @@ struct ExplorerView: View {
                         }.padding(12).overlay(Rectangle().stroke(Tints.mint.opacity(0.25)))
                     }
                     if !m.busy, m.workspace == .explore, m.showWelcome || (!accessIntroductionSeen && m.scan == nil) { accessIntroduction }
-                    else if m.isScanning, m.workspace == .explore, m.storageSection == .explore, let live = m.liveProgress { LiveScanView(progress: live) }
+                    else if m.isScanning, (m.workspace == .explore && m.storageSection == .explore) || (embedded && m.workspace.requiresScan), let live = m.liveProgress { LiveScanView(progress: live) }
                     else if m.scan == nil, m.workspace.requiresScan || m.workspace == .explore { emptyState }
                     else { content }
                     Divider().overlay(Tints.secondaryText.opacity(0.18))
@@ -77,6 +81,7 @@ struct ExplorerView: View {
                                 .monospacedDigit().foregroundStyle(Tints.secondaryText)
                                 .help(processDiskReadRateHelp)
                         }
+                        if embedded, let scan = m.scan, scan.skipped > 0 { skippedDetails(scan) }
                         Text("On-device only").foregroundStyle(Tints.secondaryText)
                     }.font(.custom(DaddyTheme.palette.sansFont, size: 10)).lineLimit(1).padding(.horizontal, 24).frame(height: 30)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -86,11 +91,10 @@ struct ExplorerView: View {
             }.background(AppColors.canvas)
         }
         .font(.custom(DaddyTheme.palette.sansFont, size: 14))
-        .smWorkspaceWindowChrome()
+        .modifier(StorageWindowChrome(embedded: embedded, hideToolbar: true))
         .storageTheme(DaddyTheme.palette)
         .buttonStyle(SMMacButtonStyle(.secondary))
-        .toolbar(.hidden, for: .windowToolbar)
-        .sheet(isPresented: $choosingDisk) { DiskPickerView(isPresented: $choosingDisk).environmentObject(m).frame(width: 620, height: 560) }
+        .sheet(isPresented: $choosingDisk) { DiskPickerView(isPresented: $choosingDisk, destination: scanDestination).environmentObject(m).frame(width: 620, height: 560) }
         .sheet(isPresented: $m.showAbout) {
             VStack(spacing: 16) {
                 if let icon = StorageDaddyAppDelegate.brandIcon {
@@ -110,6 +114,9 @@ struct ExplorerView: View {
         .onChange(of: m.progress) { _, progress in m.runtime.scanStatus = progress }
         .onChange(of: m.storageInspectorRequest) { _, _ in inspector = true }
         .onChange(of: m.busy) { _, busy in if busy && !StorageStartupCheck.enabled { accessIntroductionSeen = true } }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            m.refreshExcludedFolders()
+        }
         .onAppear {
             guard runsLaunchActions else { return }
             NSApplication.shared.setActivationPolicy(.regular)
@@ -205,10 +212,7 @@ struct ExplorerView: View {
                              ?? "\(DiskFormat.bytes(root.allocatedBytes)) on disk")
                             .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.secondaryText)
                         if scan.skipped > 0 {
-                            Button("\(scan.skipped.formatted()) skipped · Details") {
-                                m.message = [m.scanStorageAccounting?.measuredBreakdown, m.scanStorageAccounting?.explanation, scan.coverageExplanation]
-                                    .compactMap { $0 }.joined(separator: "\n\n")
-                            }.font(.caption).buttonStyle(.plain)
+                            skippedDetails(scan)
                         }
                     }.padding(.horizontal, 8)
                 }
@@ -240,6 +244,13 @@ struct ExplorerView: View {
             .accessibilityIdentifier("workspace-\(item.rawValue)")
             .accessibilityLabel(item == .cleanup && !m.staged.isEmpty ? "Quick Cleanup, \(m.staged.count) \(m.staged.count == 1 ? "item" : "items") waiting for cleanup review" : title ?? item.title)
             .help(item.requiresScan && m.scan == nil ? "Scan a disk or folder to see these results." : title ?? item.title)
+    }
+
+    private func skippedDetails(_ scan: ScanResult) -> some View {
+        Button("\(scan.skipped.formatted()) skipped · Details") {
+            m.message = [m.scanStorageAccounting?.measuredBreakdown, m.scanStorageAccounting?.explanation, scan.coverageExplanation]
+                .compactMap { $0 }.joined(separator: "\n\n")
+        }.font(.caption).buttonStyle(.plain)
     }
 
     private var scopeBar: some View {
@@ -281,14 +292,16 @@ struct ExplorerView: View {
             }
         }
     }
+    private var scanDestination: Workspace? { embedded && m.workspace.requiresScan ? m.workspace : nil }
+
     private var emptyState: some View {
         ScanWelcomeView(
             canFindCulprits: m.canStartDeveloperCleanup,
             findCulprits: { m.openSpaceTarget($0) },
             scanDisk: { choosingDisk = true },
-            scanFolder: m.chooseFolder,
-            scanHome: m.scanHomeFolder,
-            scanCaches: m.scanUserCaches
+            scanFolder: { m.chooseFolder(destination: scanDestination) },
+            scanHome: { m.start(FileManager.default.homeDirectoryForCurrentUser, destination: scanDestination ?? .explore) },
+            scanCaches: { m.scanUserCaches(destination: scanDestination ?? .explore) }
         )
     }
     @ViewBuilder private var content: some View {
@@ -324,7 +337,8 @@ struct ExplorerView: View {
                     onMove: { ids in m.moves.reviewCopies(ids: ids, scan: scan, excludedFolders: m.excludedFolders) })
                     .id("\(scan.started):\(scan.rootPath)")
             }
-        case .developer: DeveloperView()
+        case .developer:
+            if worktreesOnly { ScrollView { GitWorktreeView().padding(24) } } else { DeveloperView() }
         case .projects:
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -694,5 +708,16 @@ struct BrandMark: View {
     var body: some View {
         if let image = StorageArtwork.image("StorageDaddy", directory: artworkDirectory) { Image(nsImage: image).resizable().scaledToFit().accessibilityHidden(true) }
         else { Image(systemName: "externaldrive.fill").resizable().scaledToFit().foregroundStyle(Tints.mint).accessibilityHidden(true) }
+    }
+}
+
+
+struct StorageWindowChrome: ViewModifier {
+    let embedded: Bool
+    let hideToolbar: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if embedded { content }
+        else if hideToolbar { content.smWorkspaceWindowChrome().toolbar(.hidden, for: .windowToolbar) }
+        else { content.smWorkspaceWindowChrome() }
     }
 }
