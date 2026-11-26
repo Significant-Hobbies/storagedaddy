@@ -885,12 +885,19 @@ struct FileTypeStats: Sendable {
               storageOperationBlockReason(scheduled: false, allowingDiscovery: true) == nil else {
             throw CocoaError(.userCancelled)
         }
+        let resumeDiscovery = measuringCulprits
         freezeCleanupReview()
         busy = true
         progress = "Checking " + entry.title
         let check = Task.detached(priority: .userInitiated) { try CleanupActiveUse.validateCacheIsIdle(entry.url) }
         largeFileCheck = check
-        defer { busy = false; largeFileCheck = nil }
+        defer {
+            busy = false
+            largeFileCheck = nil
+            if resumeDiscovery, !check.isCancelled, workspace == .cleanup, let home = culpritSearchHome {
+                openSpaceTarget(spaceTarget, home: home, preservingSelection: true)
+            }
+        }
         do {
             try await withTaskCancellationHandler { try await check.value } onCancel: { check.cancel() }
             guard !check.isCancelled else { throw CancellationError() }
