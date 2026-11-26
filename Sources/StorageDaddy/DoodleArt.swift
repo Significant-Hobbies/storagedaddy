@@ -54,6 +54,8 @@ struct WelcomeIllustration: View {
 }
 
 struct ScanWelcomeView: View {
+    let canFindCulprits: Bool
+    let findCulprits: (StartupCapacity?) -> Void
     let scanDisk: () -> Void
     let scanFolder: () -> Void
     let scanHome: () -> Void
@@ -87,9 +89,12 @@ struct ScanWelcomeView: View {
                 Text("Find bulky builds, forgotten caches, installed modules and AI sessions. Your results appear as the scan runs.")
                     .font(.system(size: 15)).foregroundStyle(Tints.secondaryText).fixedSize(horizontal: false, vertical: true)
                 capacitySummary
+                Button("Find storage culprits") { findCulprits(startupCapacity) }
+                    .disabled(!canFindCulprits)
+                    .buttonStyle(SMMacButtonStyle(.primary)).controlSize(.large)
                 HStack(spacing: 12) {
                     Button("scan a disk…", systemImage: "internaldrive.fill", action: scanDisk).accessibilityLabel("Scan a Disk…")
-                        .buttonStyle(SMMacButtonStyle(.primary)).controlSize(.large)
+                        .controlSize(.large)
                     Button("scan home folder", systemImage: "house", action: scanHome).accessibilityLabel("Scan Home Folder").controlSize(.large)
                     Button("scan a folder…", systemImage: "folder.badge.plus", action: scanFolder).accessibilityLabel("Scan a Folder…")
                         .controlSize(.large)
@@ -146,9 +151,9 @@ struct ScanWelcomeView: View {
             if phase == .active { accessStatus = FullDiskAccessProbe.status() }
         }
         .task {
-            let volumes = await Task.detached(priority: .utility) { SystemInventory.mountedVolumes() }.value
+            let capacity = await Task.detached(priority: .utility) { StartupCapacity.measure() }.value
             guard !Task.isCancelled else { return }
-            startupCapacity = StartupCapacity(volumes: volumes)
+            startupCapacity = capacity
             capacityLoaded = true
         }
     }
@@ -258,13 +263,26 @@ struct StartupCapacity: Sendable {
         self.available = available
     }
 
-    init?(volumes: [MountedVolumeInfo]) {
+    static func measure() -> Self? {
+        guard let volume = SystemInventory.startupVolume() else { return nil }
+        return Self(volumes: [volume], accounting: StartupAPFSAccounting.collect(startup: volume))
+    }
+
+    init?(volumes: [MountedVolumeInfo], accounting: StartupAPFSAccounting? = nil) {
+        if let accounting, let capacity = Self(total: accounting.total, available: accounting.available) {
+            self = capacity
+            return
+        }
         guard let volume = volumes.first(where: \.isStartupData)
                 ?? volumes.first(where: { $0.mountPoint == "/" }),
               let total = volume.totalCapacity, total > 0,
               let available = volume.availableCapacity, (0...total).contains(available) else { return nil }
         self.total = total
         self.available = available
+    }
+
+    init?(report: SystemStorageReport) {
+        self.init(volumes: report.volumes, accounting: report.startupAccounting)
     }
 
     var used: Int64 { total - available }

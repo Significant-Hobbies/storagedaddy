@@ -79,11 +79,10 @@ public enum NpxCacheReview {
         }
     }
 
-    static func commandNames(entry: URL) throws -> Set<String> {
+    static func requestedPackages(entry: URL) throws -> Set<String> {
         let package = try manifest(entry.appendingPathComponent("package.json"), inside: entry)
         guard let dependencies = package["dependencies"] as? [String: Any], !dependencies.isEmpty,
               dependencies.count <= 100 else { throw failure("This entry has no verifiable package metadata. Inspect it before cleanup.") }
-        var names = Set<String>()
         for name in dependencies.keys {
             let parts = name.split(separator: "/", omittingEmptySubsequences: false)
             guard (parts.count == 1 || (parts.count == 2 && name.hasPrefix("@"))),
@@ -91,7 +90,14 @@ public enum NpxCacheReview {
                     && $0.unicodeScalars.allSatisfy { CharacterSet(charactersIn: "@abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-").contains($0) } }) else {
                 throw failure("The package name could not be verified. Inspect this entry before cleanup.")
             }
-            names.insert(String(parts.last!))
+        }
+        return Set(dependencies.keys)
+    }
+
+    static func commandNames(entry: URL) throws -> Set<String> {
+        var names = Set<String>()
+        for name in try requestedPackages(entry: entry) {
+            names.insert(String(name.split(separator: "/").last ?? ""))
             let installed = try manifest(entry.appendingPathComponent("node_modules/" + name + "/package.json"), inside: entry)
             if let bins = installed["bin"] as? [String: Any] { names.formUnion(bins.keys) }
         }

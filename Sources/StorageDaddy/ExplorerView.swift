@@ -163,6 +163,8 @@ struct ExplorerView: View {
     }
     private var accessIntroduction: some View {
         ScanWelcomeView(
+            canFindCulprits: m.canStartDeveloperCleanup,
+            findCulprits: { accessIntroductionSeen = true; m.showWelcome = false; m.openSpaceTarget($0) },
             scanDisk: { accessIntroductionSeen = true; m.showWelcome = false; choosingDisk = true },
             scanFolder: { accessIntroductionSeen = true; m.showWelcome = false; m.chooseFolder() },
             scanHome: { accessIntroductionSeen = true; m.showWelcome = false; m.scanHomeFolder() },
@@ -281,6 +283,8 @@ struct ExplorerView: View {
     }
     private var emptyState: some View {
         ScanWelcomeView(
+            canFindCulprits: m.canStartDeveloperCleanup,
+            findCulprits: { m.openSpaceTarget($0) },
             scanDisk: { choosingDisk = true },
             scanFolder: m.chooseFolder,
             scanHome: m.scanHomeFolder,

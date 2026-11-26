@@ -786,7 +786,9 @@ struct FileTypeStats: Sendable {
     private var developerCleanupSelectionKeys: Set<DeveloperCleanupReview.SelectionKey>?
     @Published private(set) var developerCleanupOutcome: DeveloperCleanupReview.Outcome?
     @Published private(set) var developerCleanupError: String?
+    private var quickReviewSelection: Set<DeveloperCleanupReview.SelectionKey>?
     private let developerCleanupPreferences: UserDefaults?
+    private let quickProjectPlanner: @Sendable ([URL], [String], URL) async throws -> DeveloperCleanupReview
     private let developerCleanupPlanner: @Sendable ([URL], [String]) async throws -> DeveloperCleanupReview
     @Published private(set) var developerCleanupFolders: [String] {
         didSet { developerCleanupPreferences?.set(developerCleanupFolders, forKey: "developerCleanupFolders") }
@@ -797,10 +799,16 @@ struct FileTypeStats: Sendable {
         developerCleanupPlanner: @escaping @Sendable ([URL], [String]) async throws -> DeveloperCleanupReview = { roots, exclusions in
             let promptAvoidance = AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
             return try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: promptAvoidance)
+        },
+        quickProjectPlanner: @escaping @Sendable ([URL], [String], URL) async throws -> DeveloperCleanupReview = { roots, exclusions, home in
+            let avoid = AutomaticScanPrivacy.promptAvoidancePaths(homeDirectory: home, accessStatus: FullDiskAccessProbe.status(homeDirectory: home))
+            return try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: avoid,
+                                                            quickCleanup: true, home: home.path)
         }
     ) {
         self.developerCleanupPreferences = developerCleanupPreferences
         self.developerCleanupPlanner = developerCleanupPlanner
+        self.quickProjectPlanner = quickProjectPlanner
         developerCleanupFolders = developerCleanupPreferences?.stringArray(forKey: "developerCleanupFolders")
             ?? developerCleanupPreferences?.string(forKey: "developerCleanupFolder").map { [$0] } ?? []
     }
@@ -812,7 +820,106 @@ struct FileTypeStats: Sendable {
             && macTools?.isBusy != true && !conversationArchive.busy && staged.isEmpty
     }
 
+    @Published private(set) var culpritSearchID = UUID()
+    @Published private(set) var culpritSearchHome: URL?
+    var isFindingStorageCulprits: Bool { culpritSearchHome != nil }
+    @Published private(set) var spaceTarget: StartupCapacity?
+    private(set) var capacityBeforeCleanup: StartupCapacity?
+    @Published private(set) var spaceTargetResult: StartupCapacity?
+    private var permanentBeforeTarget = true
+
+    func openSpaceTarget(_ capacity: StartupCapacity?, home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                         preservingSelection: Bool = false, retainingUnaffectedPlan: Bool = false) {
+        guard canStartDeveloperCleanup else { return }
+        if !preservingSelection { quickReviewSelection = nil; culpritSearchID = UUID() }
+        if !isFindingStorageCulprits { permanentBeforeTarget = developerCleanupDeletesPermanently }
+        culpritSearchHome = home
+        spaceTarget = capacity
+        spaceTargetResult = nil
+        developerCleanupDeletesPermanently = true
+        showingDeveloperCleanup = true
+        workspace = .cleanup
+        var roots: [URL]
+        if developerCleanupFolders.isEmpty {
+            let avoid = AutomaticScanPrivacy.promptAvoidancePaths(homeDirectory: home, accessStatus: FullDiskAccessProbe.status(homeDirectory: home))
+            roots = ["Desktop", "Developer", "Projects", "Code", "src", "repos"].compactMap {
+                let url = home.appendingPathComponent($0)
+                guard !avoid.contains(url.standardizedFileURL.path) else { return nil }
+                let metadata = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                return metadata?.isDirectory == true && metadata?.isSymbolicLink == false ? url : nil
+            }
+        } else {
+            roots = developerCleanupFolders.map { URL(fileURLWithPath: $0) }
+        }
+        let standardLocations = [".npm/_npx", ".codex/worktrees", ".claude/worktrees",
+                                 "Library/Application Support/Fleet/Agent Workspaces.noindex/retired",
+                                 "Library/Application Support/Fleet/Agent Workspaces.noindex/worktrees"]
+        for relative in standardLocations {
+            let location = home.appendingPathComponent(relative).standardizedFileURL
+            if location.path == location.resolvingSymlinksInPath().path,
+               FileManager.default.fileExists(atPath: location.path),
+               !FolderExclusions(paths: roots.map(\.path)).blocksCleanup(location) { roots.append(location) }
+        }
+        if !retainingUnaffectedPlan { developerCleanupPlan = nil }
+        developerCleanupOutcome = nil
+        findDeveloperCleanup(in: roots, retainingReviewOnFailure: retainingUnaffectedPlan, cacheHome: home)
+    }
+
+    private func exitSpaceTarget() {
+        guard isFindingStorageCulprits, !busy else { return }
+        culpritSearchHome = nil
+        spaceTarget = nil
+        developerCleanupDeletesPermanently = permanentBeforeTarget
+        developerCleanupPlan = nil
+        developerCleanupOutcome = nil
+        developerCleanupError = nil
+        showingDeveloperCleanup = false
+    }
+
+    private var largeFileCheck: Task<Void, Error>?
+
+    func trashLargeFile(_ entry: LargeStorageEntry, moveToTrash: (URL) throws -> URL? = { url in
+        var destination: NSURL?
+        try FileManager.default.trashItem(at: url, resultingItemURL: &destination)
+        return destination as URL?
+    }) async throws {
+        guard isFindingStorageCulprits, workspace == .cleanup, let file = entry.ordinaryFile,
+              storageOperationBlockReason(scheduled: false, allowingDiscovery: true) == nil else {
+            throw CocoaError(.userCancelled)
+        }
+        let resumeDiscovery = measuringCulprits
+        freezeCleanupReview()
+        busy = true
+        progress = "Checking " + entry.title
+        let check = Task.detached(priority: .userInitiated) { try CleanupActiveUse.validateCacheIsIdle(entry.url) }
+        largeFileCheck = check
+        defer {
+            busy = false
+            largeFileCheck = nil
+            if resumeDiscovery, !check.isCancelled, workspace == .cleanup, let home = culpritSearchHome {
+                openSpaceTarget(spaceTarget, home: home, preservingSelection: true, retainingUnaffectedPlan: true)
+            }
+        }
+        do {
+            try await withTaskCancellationHandler { try await check.value } onCancel: { check.cancel() }
+            guard !check.isCancelled else { throw CancellationError() }
+            try Task.checkCancellation()
+            guard workspace == .cleanup, isFindingStorageCulprits else { throw CocoaError(.userCancelled) }
+            guard !FolderExclusions(paths: excludedFolders).blocksCleanup(entry.url) else {
+                throw CleanupPreflightError.excludedFolder(entry.url.path)
+            }
+            try CleanupSafety.validate(url: entry.url, expected: file.node, root: file.root)
+            if let destination = try moveToTrash(entry.url) { lastTrashedURLs.append(destination) }
+            progress = entry.title + " moved to Trash"
+            dashboard.refresh()
+        } catch {
+            progress = "File kept · " + error.localizedDescription
+            throw error
+        }
+    }
+
     func openDeveloperCleanup() {
+        exitSpaceTarget()
         let entering = workspace != .cleanup || !showingDeveloperCleanup
         workspace = .cleanup
         guard staged.isEmpty else { showingDeveloperCleanup = false; return }
@@ -821,13 +928,34 @@ struct FileTypeStats: Sendable {
     }
 
     func openQuickCleanup() {
+        exitSpaceTarget()
         showingDeveloperCleanup = false
         showWelcome = false
         workspace = .cleanup
     }
 
+    private var discoveryID: UUID?
+    var measuringCulprits: Bool { discoveryID != nil && isFindingStorageCulprits }
+    @Published private(set) var searchingForMoreCleanup = false
+
+    var canEditCleanupReview: Bool {
+        canStartDeveloperCleanup || (measuringCulprits && busy && !moves.busy && moves.plan == nil
+            && !snapshotBusy && !monitoring && macTools?.isBusy != true && !conversationArchive.busy && staged.isEmpty)
+    }
+
+    /// Freeze the visible review before acting on it. Late discovery cannot
+    /// replace its item IDs, reset the selection or end a new cleanup operation.
+    func freezeCleanupReview() {
+        guard measuringCulprits else { return }
+        task?.cancel()
+        discoveryID = nil
+        searchingForMoreCleanup = false
+        busy = false
+        progress = "Reviewing measured items"
+    }
+
     private func editableDeveloperCleanupPlan(_ planID: UUID) -> DeveloperCleanupReview? {
-        guard canStartDeveloperCleanup, developerCleanupOutcome == nil,
+        guard canEditCleanupReview, developerCleanupOutcome == nil,
               let plan = developerCleanupPlan, plan.id == planID else { return nil }
         return plan
     }
@@ -841,12 +969,21 @@ struct FileTypeStats: Sendable {
         guard let plan = editableDeveloperCleanupPlan(planID) else { return }
         let selected = plan.items.filter { ids.contains($0.id) && $0.keptReason == nil }
         guard selected.count == ids.count else { return }
+        freezeCleanupReview()
+        if isFindingStorageCulprits { quickReviewSelection = Set(selected.compactMap { plan.selectionKey(for: $0) }) }
         rememberDeveloperCleanupSelection(selected, in: plan)
     }
 
     private func restoreDeveloperCleanupSelection() {
         guard let plan = developerCleanupPlan else {
             developerCleanupSelectedIDs.removeAll()
+            return
+        }
+        if isFindingStorageCulprits {
+            let selected = quickReviewSelection.map { keys in
+                plan.items.filter { plan.selectionKey(for: $0).map(keys.contains) == true }
+            } ?? plan.items
+            developerCleanupSelectedIDs = Set(selected.map(\.id))
             return
         }
         let ready = plan.items.filter { $0.keptReason == nil }
@@ -861,6 +998,7 @@ struct FileTypeStats: Sendable {
 
     private func rememberDeveloperCleanupSelection(_ items: [DeveloperCleanupReview.Item], in plan: DeveloperCleanupReview) {
         developerCleanupSelectedIDs = Set(items.map(\.id))
+        guard !isFindingStorageCulprits else { return }
         developerCleanupSelectionKeys = Set(items.compactMap { plan.selectionKey(for: $0) })
     }
 
@@ -904,41 +1042,160 @@ struct FileTypeStats: Sendable {
         rescanDeveloperCleanup()
     }
 
-    func findDeveloperCleanup(in roots: [URL], retainingReviewOnFailure: Bool = false) {
-        guard canStartDeveloperCleanup, !roots.isEmpty else { return }
+    func findDeveloperCleanup(in roots: [URL], retainingReviewOnFailure: Bool = false, cacheHome: URL? = nil) {
+        guard canStartDeveloperCleanup, !roots.isEmpty || cacheHome != nil else { return }
         if !retainingReviewOnFailure {
             developerCleanupPlan = nil
             developerCleanupOutcome = nil
         }
         developerCleanupError = nil
         busy = true
-        progress = "Finding developer files in \(roots.count) \(roots.count == 1 ? "folder" : "folders")…"
+        progress = cacheHome != nil ? "Measuring package caches and project dependencies…" : "Finding developer files in \(roots.count) \(roots.count == 1 ? "folder" : "folders")…"
         let exclusions = excludedFolders
         let planner = developerCleanupPlanner
+        let quickPlanner = quickProjectPlanner
+        let runID = UUID()
+        discoveryID = runID
         task = Task {
-            defer { busy = false }
-            let worker = Task.detached(priority: .userInitiated) {
-                try await planner(roots, exclusions)
+            defer {
+                if discoveryID == runID {
+                    busy = false
+                    searchingForMoreCleanup = false
+                    discoveryID = nil
+                }
+            }
+            let worker = Task.detached(priority: .userInitiated) { [self] in
+                guard let cacheHome else { return try await planner(roots, exclusions) }
+                let npx = cacheHome.appendingPathComponent(".npm/_npx").standardizedFileURL
+                let npmRoots = roots.filter { $0.standardizedFileURL.path == npx.path }
+                let others = roots.filter { $0.standardizedFileURL.path != npx.path }
+                // Keep the normal planner's overlap validation for nested or aliased roots.
+                let split = npmRoots.count == 1 && !others.isEmpty && others.allSatisfy {
+                    !FolderExclusions(paths: [$0.resolvingSymlinksInPath().path]).blocksCleanup(npx.resolvingSymlinksInPath())
+                }
+                async let managedStores = SpaceTargetCache.discoverManagedStores(home: cacheHome, exclusions: exclusions)
+                async let generatedCaches = GeneratedCacheCandidate.discover(home: cacheHome, excludedFolders: exclusions)
+                async let projectPlan = quickPlanner(split ? others : roots, exclusions, cacheHome)
+                async let npmPlan = split ? quickPlanner(npmRoots, exclusions, cacheHome) : DeveloperCleanupReview(scopes: [], items: [])
+                async let inventory = FleetManagedCheckout.idleRetired(home: cacheHome, roots: roots, exclusions: exclusions)
+                var data = stat()
+                let device = stat("/System/Volumes/Data", &data) == 0 ? UInt64(UInt32(bitPattern: data.st_dev)) : nil
+                let caches = try SpaceTargetCache.discover(home: cacheHome, exclusions: exclusions)
+                let initial = DeveloperCleanupReview(scopes: [], items: []).reclaimable(on: device, caches: caches)
+                if !initial.items.isEmpty && !roots.isEmpty {
+                    await showInitialCleanupReview(initial, runID: runID)
+                }
+                let npm = try await npmPlan
+                let early = npm.reclaimable(on: device, caches: caches, exclusions: exclusions)
+                if !npm.items.isEmpty { await showInitialCleanupReview(early, runID: runID) }
+                let retired: [GitWorktreeCandidate]
+                do { retired = try await inventory }
+                catch is CancellationError { throw CancellationError() }
+                catch {
+                    retired = []
+                    await reportInventoryFailure("Could not check retired worktrees. " + error.localizedDescription, runID: runID)
+                }
+                try Task.checkCancellation()
+                if !retired.isEmpty {
+                    var quickReview = early
+                    quickReview.managedInventory = retired
+                    await showInitialCleanupReview(quickReview, runID: runID)
+                }
+                let extraCaches = try await managedStores
+                let allCaches = caches + extraCaches
+                var expanded = npm.reclaimable(on: device, caches: allCaches, exclusions: exclusions)
+                expanded.managedInventory = retired
+                if allCaches.count > caches.count { await showInitialCleanupReview(expanded, runID: runID) }
+                let generated: [GeneratedCacheCandidate]
+                do { generated = try await generatedCaches }
+                catch is CancellationError { throw CancellationError() }
+                catch {
+                    generated = []
+                    await reportInventoryFailure("Could not check generated caches. " + error.localizedDescription, runID: runID)
+                }
+                expanded = expanded.addingGenerated(generated)
+                if !generated.isEmpty { await showInitialCleanupReview(expanded, runID: runID) }
+                let sized = try GitWorktreeManager.measure(retired)
+                let remaining = try await projectPlan
+                let projects = split ? DeveloperCleanupReview.projectScopes(npm.scopes + remaining.scopes) : remaining
+                var measured = projects.reclaimable(on: device, caches: allCaches, exclusions: exclusions).addingGenerated(generated)
+                measured.projectsMeasured = true
+                measured.managedInventory = sized
+                let candidates = measured.idleWorktrees.filter { $0.device == device && FleetManagedCheckout.manages($0.url) }
+                if !candidates.isEmpty {
+                    await showInitialCleanupReview(measured, runID: runID)
+                    var checkedWorktrees: [FleetManagedCheckout.Preview] = []
+                    var next = candidates.makeIterator()
+                    try await withThrowingTaskGroup(of: FleetManagedCheckout.Preview?.self) { group in
+                        func inspect(_ candidate: GitWorktreeCandidate) {
+                            group.addTask {
+                                try Task.checkCancellation()
+                                return try? FleetManagedCheckout.inspect(candidate, exclusions: exclusions)
+                            }
+                        }
+                        for _ in 0..<3 { if let candidate = next.next() { inspect(candidate) } }
+                        var checked = 0
+                        var published = 0
+                        var lastUpdate = ContinuousClock.now
+                        for try await result in group {
+                            try Task.checkCancellation()
+                            checked += 1
+                            if let result { checkedWorktrees.append(result) }
+                            if checkedWorktrees.count != published && (result?.eligible == true || lastUpdate.duration(to: .now) >= .seconds(3)) {
+                                let updated = measured.addingWorktrees(checkedWorktrees)
+                                await showInitialCleanupReview(updated, runID: runID)
+                                published = checkedWorktrees.count
+                                lastUpdate = .now
+                            }
+                            if checked == 1 || checked.isMultiple(of: 10) {
+                                await updateWorktreeProgress(checked: checked, total: candidates.count, runID: runID)
+                            }
+                            if let candidate = next.next() { inspect(candidate) }
+                        }
+                    }
+                    return measured.addingWorktrees(checkedWorktrees)
+                }
+                return measured
             }
             do {
                 let plan = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
                 try Task.checkCancellation()
+                guard discoveryID == runID else { return }
                 developerCleanupOutcome = nil
                 developerCleanupPlan = plan
-                developerCleanupFolders = plan.scopes.map(\.path)
+                if cacheHome == nil { developerCleanupFolders = plan.scopes.map(\.path) }
                 progress = "\(plan.items.count) developer folders found"
-            } catch is CancellationError { progress = "Developer scan cancelled" }
+            } catch is CancellationError { if discoveryID == runID { progress = "Developer scan cancelled" } }
             catch {
+                guard discoveryID == runID else { return }
                 developerCleanupError = error.localizedDescription
                 progress = "Developer scan needs attention"
             }
         }
     }
 
+    private func reportInventoryFailure(_ detail: String, runID: UUID) {
+        guard discoveryID == runID else { return }
+        developerCleanupError = [developerCleanupError, detail].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    private func updateWorktreeProgress(checked: Int, total: Int, runID: UUID) {
+        guard discoveryID == runID else { return }
+        progress = "Checked \(checked) of \(total) retired worktrees"
+    }
+
+    private func showInitialCleanupReview(_ plan: DeveloperCleanupReview, runID: UUID) {
+        guard discoveryID == runID, task?.isCancelled == false else { return }
+        developerCleanupPlan = plan
+        searchingForMoreCleanup = true
+        progress = "Searching project folders for more space…"
+    }
+
     func confirmDeveloperCleanup(planID: UUID, ids: Set<DeveloperCleanupReview.Item.ID>, permanently: Bool) {
         guard let plan = editableDeveloperCleanupPlan(planID), !ids.isEmpty,
               ids.isSubset(of: developerCleanupSelectedIDs),
               permanently == developerCleanupDeletesPermanently else { return }
+        freezeCleanupReview()
         developerCleanupError = nil
         busy = true
         progress = "Checking what is in use…"
@@ -951,10 +1208,20 @@ struct FileTypeStats: Sendable {
                     self.progress = "Cleaning folder \(index) of \(count)…"
                 }
             }
+            if isFindingStorageCulprits {
+                capacityBeforeCleanup = await Task.detached(priority: .userInitiated) {
+                    StartupCapacity.measure()
+                }.value
+            }
             let worker = Task.detached(priority: .userInitiated) {
                 await plan.clean(ids: ids, permanently: permanently, progress: reportProgress)
             }
             let outcome = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+            if isFindingStorageCulprits {
+                spaceTargetResult = await Task.detached(priority: .userInitiated) {
+                    StartupCapacity.measure()
+                }.value
+            }
             developerCleanupOutcome = outcome
             let removed = outcome.deleted.union(outcome.trashed)
             if !removed.isEmpty {
@@ -1186,6 +1453,7 @@ struct FileTypeStats: Sendable {
         if let rss = ProcessMemory.residentBytes() { scanPeakRSS = max(scanPeakRSS ?? 0, rss) }
     }
     func cancel() {
+        largeFileCheck?.cancel()
         cacheCommandTask?.cancel()
         savedScanTask?.cancel()
         task?.cancel()
@@ -1739,7 +2007,10 @@ struct FileTypeStats: Sendable {
                         moved += 1
                     }
                     if !cleanupRefreshPaths.contains(scan.rootPath) { cleanupRefreshPaths.append(scan.rootPath) }
-                    if authorization.isReviewed { unstage(id) }
+                    if authorization.isReviewed {
+                        agentAccess.recordCleanupOutcome(nodeID: id, outcome: permanent.contains(id) ? "Permanently deleted" : "Moved to Trash")
+                        unstage(id)
+                    }
                     remaining.remove(id)
                     quickCleanupCandidateIDs.removeAll { $0 == id }
                     guard cleanupAuthorizationIsCurrent(authorization, remaining: remaining) else { throw CancellationError() }
@@ -1754,7 +2025,10 @@ struct FileTypeStats: Sendable {
                         return
                     }
                     quickCleanupFailures[id] = error.localizedDescription
-                    if authorization.isReviewed { unstage(id) }
+                    if authorization.isReviewed {
+                        agentAccess.recordCleanupOutcome(nodeID: id, outcome: "Cleanup did not finish: " + error.localizedDescription)
+                        unstage(id)
+                    }
                     remaining.remove(id); skipped += 1
                     quickCleanupCandidateIDs.removeAll { $0 == id }
                 }
@@ -1827,8 +2101,10 @@ extension ExplorerModel {
         } ?? root
         return (selected, lastScanAllowedProtectedFolder)
     }
-    var scanScheduleBlockReason: String? {
-        if busy || isScanning { return "A scan, cleanup or package command is running." }
+    var scanScheduleBlockReason: String? { storageOperationBlockReason(scheduled: true) }
+
+    func storageOperationBlockReason(scheduled: Bool, allowingDiscovery: Bool = false) -> String? {
+        if (busy && !(allowingDiscovery && measuringCulprits)) || isScanning { return "A scan, cleanup or package command is running." }
         if !staged.isEmpty || showCleanup || !incompleteCleanup.isEmpty { return "Your cleanup selections are waiting for review." }
         if macTools?.isBusy == true { return "Mac Controls is busy." }
         if moves.busy || moves.plan != nil || moves.isPresented { return "A file move or review is open." }
@@ -1839,7 +2115,7 @@ extension ExplorerModel {
         if folderExplanation != nil { return "A folder explanation is open." }
         if agentAccess.waitingReviewCount > 0 || !agentAccess.pairings.isEmpty { return "An agent request is waiting for review." }
         if NSApplication.shared.modalWindow != nil || NSApplication.shared.windows.contains(where: { $0.attachedSheet != nil }) { return "A dialog or review sheet is open." }
-        if DaddyCompletionNotices.hasVisibleAppWindow,
+        if scheduled, DaddyCompletionNotices.hasVisibleAppWindow,
            [.duplicates, .projects, .appData, .cleanup, .developer, .applications, .snapshots, .agents].contains(workspace) { return "You are reviewing storage results." }
         return nil
     }

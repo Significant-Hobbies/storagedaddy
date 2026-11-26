@@ -86,6 +86,7 @@ public struct AgentTool: Sendable {
         }
         return [
             tool("status", "Start here. Read permission, current scan, running work and agent request outcomes."),
+            tool("plan_space_target", "Measure the startup disk against a target percentage used. Return review candidates from the current scan and a session-bound plan ID. With a plan ID, remeasure progress against the original reading.", "read", ["targetUsedPercent": .object(["type": .string("integer"), "minimum": .integer(1), "maximum": .integer(100)]), "planID": string], ["targetUsedPercent"]),
             tool("read_skill", "Read cleanup or growth procedures before recommending changes.", "read", ["name": .object(["type": .string("string"), "enum": .array([.string("free-up-space"), .string("investigate-growth")])])], ["name"]),
             tool("scan_summary", "Current scan totals and largest scanned entries; allocation is attributed bytes, not guaranteed reclaimed space.", "read", ["limit": limit]),
             tool("list_folder", "List children of a directory in the current scan.", "read", ["nodeID": integer, "limit": limit, "offset": integer], ["nodeID"]),
@@ -101,8 +102,8 @@ public struct AgentTool: Sendable {
             tool("cancel_scan", "Cancel a scan started by this agent session.", "scan"),
             tool("show", "Navigate to an existing StorageDaddy section or scanned folder.", "navigate", ["section": string, "nodeID": integer]),
             tool("reveal_path", "Reveal an existing scan node in Finder; never opens file contents.", "navigate", ["nodeID": integer], ["nodeID"]),
-            tool("move_to_trash", "Request up to 20 scanned items for native review. This tool NEVER removes, moves or approves anything.", "request_trash", ["nodeIDs": ids, "reason": string], ["nodeIDs", "reason"]),
-            tool("delete_permanently", "Request permanent deletion for native review. This tool NEVER deletes or approves anything.", "request_permanent", ["nodeIDs": ids, "reason": string], ["nodeIDs", "reason"])
+            tool("move_to_trash", "Request up to 20 scanned items for native review. This tool NEVER removes, moves or approves anything.", "request_trash", ["nodeIDs": ids, "reason": string, "planID": string], ["nodeIDs", "reason"]),
+            tool("delete_permanently", "Request permanent deletion for native review. This tool NEVER deletes or approves anything.", "request_permanent", ["nodeIDs": ids, "reason": string, "planID": string], ["nodeIDs", "reason"])
         ]
     }()
 }
@@ -174,7 +175,7 @@ public enum AgentSecurity {
 
 public enum AgentProcedures {
     public static let cleanup = """
-    Start with storagedaddy_status, ask how much space is needed, and obtain a fresh scan of an approved root. Review largest folders and developer artifacts. Read cleanup suggestions and duplicates; retain at least one verified duplicate. Cache commands are guidance, never automatic actions. Attributed allocation is not guaranteed reclaim: APFS clones, hard links, snapshots, purgeable space and open files can retain storage. Request only a small, explained set of scanned items. The owner must review and approve every removal in StorageDaddy. Prefer Trash; explain recovery and re-download/rebuild costs. Never request roots, standard home folders, sensitive data, or excluded paths. Verify free space after cleanup with a fresh scan.
+    Start with storagedaddy_status. For a general or fixed-byte request, establish the space needed and scan an approved root. For a percentage goal, use storagedaddy_plan_space_target with targetUsedPercent. If it needs a scan, scan an approved project folder and make a new plan. Measure the selected node IDs together with storagedaddy_measure_removal before proposing cleanup. Pass planID with any removal request. After native confirmation call storagedaddy_plan_space_target with the same planID and percentage for the observed change. Review largest folders and developer artifacts. Read cleanup suggestions and duplicates; retain at least one verified duplicate. Cache commands are guidance, never automatic actions. Attributed allocation is not guaranteed reclaim: APFS clones, hard links, snapshots, purgeable space and open files can retain storage. Request only a small, explained set of scanned items. The owner must review and approve every removal in StorageDaddy. Prefer Trash; explain recovery and re-download/rebuild costs. Never request roots, standard home folders, sensitive data, or excluded paths. Verify free space after cleanup with a fresh scan.
     """
     public static let growth = """
     Start with storagedaddy_status and storagedaddy_scan_history. Compare two saved scans of the same root with storagedaddy_changes, respecting incomplete-scan evidence. Explain dates and whether a diff is full-index or compact top-level history. Investigate the largest positive changes using a fresh scan and developer artifacts. Keep changes in attributed allocation separate from actual volume free space; APFS clones, hard links and snapshots can change the relationship. Do not remove items while investigating. If cleanup is requested, follow the free-up-space procedure and use the native review queue.

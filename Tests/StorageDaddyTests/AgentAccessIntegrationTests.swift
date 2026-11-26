@@ -25,13 +25,22 @@ struct AgentAccessIntegrationTests {
         let scan = try await DiskScanner.scan(root: root)
         let nodeID = try #require(scan.nodes.first(where: { $0.name == "sample.bin" })?.id)
         let explorer = ExplorerModel(); explorer.scan = scan
-        let port = UInt16.random(in: 53000...54999)
-        let agents = AgentAccessModel(explorer: explorer, directory: agentDirectory, httpPort: port)
+        func openFixtureListener() throws -> (AgentAccessModel, UInt16) {
+            for _ in 0..<5 {
+                let port = UInt16.random(in: 25000...31999)
+                let agents = AgentAccessModel(explorer: explorer, directory: agentDirectory, httpPort: port)
+                #expect(!agents.enabled)
+                #expect(!agents.listening)
+                agents.setEnabled(true)
+                if agents.listening { return (agents, port) }
+                if agents.error?.hasPrefix("Port \(port) is unavailable.") != true {
+                    throw AgentSecurity.failure(agents.error ?? "Fixture listener failed")
+                }
+            }
+            throw AgentSecurity.failure("All attempted fixture ports were unavailable")
+        }
+        let (agents, port) = try openFixtureListener()
         explorer.agentAccess = agents
-        #expect(!agents.enabled)
-        #expect(!agents.listening)
-        agents.setEnabled(true)
-        #expect(agents.listening, "\(agents.error ?? "No listener error")")
         let token = try AgentSecurity.randomToken()
         let paired = await agents.handle(.init(operation: "pair", payload: .object(["client": .string("Fixture agent"), "tokenHash": .string(AgentSecurity.hash(token)), "permissions": .array(AgentRole.admin.permissions.sorted().map(AgentJSON.string))])))
         #expect(paired["state"].string == "pending")
@@ -42,6 +51,15 @@ struct AgentAccessIntegrationTests {
     private func call(_ name: String, arguments: AgentJSON = .object([:]), fixture f: Fixture) async -> AgentJSON {
         await f.agents.handle(.init(operation: "rpc", token: f.token, payload: .object(["jsonrpc": .string("2.0"), "id": .integer(1), "method": .string("tools/call"), "params": .object(["name": .string("storagedaddy_" + name), "arguments": arguments])]))
         )
+    }
+
+    // The in-process server needs Swift executor time to answer this blocking client.
+    private func socketRequest(_ request: AgentBridgeRequest, path: String) async throws -> AgentJSON {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(with: Result { try AgentSocketClient.request(request, path: path) })
+            }
+        }
     }
 
     private func httpToken(_ f: Fixture, approvedName: String = "HTTP fixture") async throws -> String {
@@ -70,6 +88,74 @@ struct AgentAccessIntegrationTests {
         form.queryItems = ["grant_type": "authorization_code", "client_id": client, "code": code, "redirect_uri": "http://127.0.0.1:56321/callback", "resource": base + "/mcp", "code_verifier": verifier].map { URLQueryItem(name: $0.key, value: $0.value) }
         let data = try await fetch("/token", method: "POST", body: Data(form.percentEncodedQuery!.utf8), type: "application/x-www-form-urlencoded")
         return try #require(JSONDecoder().decode(AgentJSON.self, from: data)["access_token"].string)
+    }
+
+    @Test func chatSpaceTargetPinsReviewedChoicesAndRemeasuresTheDisk() async throws {
+        let f = try await fixture()
+        defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
+        let modules = f.root.appendingPathComponent("node_modules")
+        try FileManager.default.createDirectory(at: modules, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: f.root.appendingPathComponent("package.json"))
+        try Data(repeating: 7, count: 65536).write(to: modules.appendingPathComponent("index.js"))
+        let scan = try await DiskScanner.scan(root: f.root)
+        f.explorer.scan = scan
+        let node = try #require(scan.nodes.first { $0.name == "node_modules" })
+        f.explorer.developerGroups = [DeveloperGroup(category: .nodeModules, allocatedBytes: node.allocatedBytes,
+            logicalBytes: node.logicalBytes, fileCount: 1, rootIDs: [node.id])]
+        let target: AgentJSON = .object(["targetUsedPercent": .integer(1)])
+        func rpc(_ name: String, _ arguments: AgentJSON) async -> AgentJSON {
+            await call(name, arguments: arguments, fixture: f)
+        }
+        let response = await rpc("plan_space_target", target)
+        func payload(_ response: AgentJSON) throws -> AgentJSON {
+            let value = try #require(response["result"]["content"].array?.first?["text"].string)
+            return try JSONDecoder().decode(AgentJSON.self, from: Data(value.utf8))
+        }
+        let plan = try payload(response)
+        let id = try #require(plan["planID"].string)
+        #expect(plan["choices"].array?.first?["nodeID"].int == node.id)
+        #expect(plan["observedFreeBytesChange"].int == 0)
+        let wrongTarget = await rpc("plan_space_target", .object(["targetUsedPercent": .integer(80), "planID": .string(id)]))
+        #expect(wrongTarget["result"]["isError"].bool == true)
+        let args: AgentJSON = .object(["nodeIDs": .array([.integer(node.id)]), "reason": .string("Reinstall from manifest"), "planID": .string(id)])
+        let request = await rpc("move_to_trash", args)
+        #expect(request["result"]["isError"].bool == false)
+        #expect(FileManager.default.fileExists(atPath: modules.path))
+        f.agents.review(try #require(f.agents.reviews.first).id)
+        try await waitForReview(f)
+        let restarted = AgentAccessModel(explorer: ExplorerModel(), directory: f.agentDirectory, httpPort: f.port)
+        #expect(restarted.reviews.first?.outcome.contains("Interrupted by restart") == true)
+        let selection = try #require(f.explorer.nativeCleanupSelection())
+        let recovery = f.directory.appendingPathComponent("fixture-trash")
+        f.explorer.performNativeCleanup(selection, moveToTrash: { url in
+            try FileManager.default.moveItem(at: url, to: recovery)
+            return recovery
+        })
+        try await waitForReview(f)
+        #expect(FileManager.default.fileExists(atPath: recovery.appendingPathComponent("index.js").path))
+        #expect(!FileManager.default.fileExists(atPath: modules.path))
+        f.explorer.scan = try await DiskScanner.scan(root: f.root)
+        let stale = await rpc("move_to_trash", args)
+        #expect(stale["result"]["isError"].bool == true)
+        #expect(f.agents.reviews.count == 1)
+        let measured = try payload(await rpc("plan_space_target", .object([
+            "targetUsedPercent": .integer(1), "planID": .string(id)])))
+        #expect(measured["requests"].array?.first?["outcome"].string == "Moved to Trash")
+        let before = try #require(plan["baselineFreeBytes"].int)
+        let after = try #require(measured["freeBytes"].int)
+        #expect(measured["observedFreeBytesChange"].int == after - before)
+    }
+
+    @Test func diskTargetUsesExactBytesAndExplainsMissingScan() throws {
+        let model = ExplorerModel()
+        let capacity = try #require(StartupCapacity(total: 101, available: 20))
+        let plan = AgentSpacePlan(percent: 80, baseline: capacity, explorer: model)
+        #expect(plan.proposal["additionalFreeBytesNeeded"].int == 1)
+        #expect(plan.proposal["guidance"].string?.contains("Scan an approved") == true)
+        let after = plan.reading(try #require(StartupCapacity(total: 101, available: 21)))
+        #expect(after["targetReached"].bool == true)
+        #expect(after["observedFreeBytesChange"].int == 1)
+        #expect(after["measurementNote"].string?.contains("Trash") == true)
     }
 
     @Test func showCleanupOpensRegularReviewFromDeveloperCleanup() async throws {
@@ -106,10 +192,7 @@ struct AgentAccessIntegrationTests {
     }
 
     private func waitForReview(_ f: Fixture) async throws {
-        for _ in 0..<500 {
-            if !f.explorer.busy { return }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await f.explorer.waitForCurrentStorageOperation()
         #expect(!f.explorer.busy)
     }
 
@@ -313,16 +396,18 @@ struct AgentAccessIntegrationTests {
         let f = try await fixture(role: .explorer)
         defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
         let socketPath = f.agents.socketPath, token = f.token
-        let session = try await Task.detached {
-            try AgentSocketClient.request(.init(operation: "session", token: token), path: socketPath)
-        }.value
+        let session = try await socketRequest(.init(operation: "session", token: token), path: socketPath)
         #expect(session["state"].string == "approved")
         let oauthToken = try await httpToken(f)
         var request = URLRequest(url: URL(string: "http://127.0.0.1:\(f.port)/mcp")!)
         request.httpMethod = "POST"
         request.setValue("Bearer " + oauthToken, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(AgentJSON.object(["jsonrpc": .string("2.0"), "id": .integer(2), "method": .string("tools/call"), "params": .object(["name": .string("storagedaddy_list_folder"), "arguments": .object(["nodeID": .integer(0)])])]))
+        let listFolder = AgentJSON.object(["jsonrpc": .string("2.0"), "id": .integer(2), "method": .string("tools/call"), "params": .object(["name": .string("storagedaddy_list_folder"), "arguments": .object(["nodeID": .integer(0)])])])
+        let socketResult = try await socketRequest(.init(operation: "rpc", token: token, payload: listFolder), path: socketPath)
+        #expect(socketResult["result"]["isError"].bool == false)
+        #expect(socketResult.text.contains("sample.bin"))
+        request.httpBody = try JSONEncoder().encode(listFolder)
         let (data, response) = try await URLSession.shared.data(for: request)
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         let rpc = try JSONDecoder().decode(AgentJSON.self, from: data)

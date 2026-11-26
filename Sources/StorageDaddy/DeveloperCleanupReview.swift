@@ -16,6 +16,8 @@ struct DeveloperCleanupReview: Sendable {
         let canDeletePermanently: Bool
         let device: UInt64
         let inode: UInt64
+        var recoveryPath: String? = nil
+        var verifiedPackages = 0
     }
 
     struct SelectionKey: Hashable {
@@ -34,15 +36,84 @@ struct DeveloperCleanupReview: Sendable {
     struct Scope: Identifiable, Sendable {
         fileprivate let url: URL
         fileprivate let plan: DeveloperCleanupPlan?
+        let worktree: FleetManagedCheckout.Preview?
+        let cache: SpaceTargetCache?
+        let generated: GeneratedCacheCandidate?
         let error: String?
         var path: String { url.standardizedFileURL.path }
         var id: String { path }
 
-        init(url: URL, plan: DeveloperCleanupPlan? = nil, error: String? = nil) {
+        init(url: URL, plan: DeveloperCleanupPlan? = nil, cache: SpaceTargetCache? = nil, generated: GeneratedCacheCandidate? = nil, worktree: FleetManagedCheckout.Preview? = nil, error: String? = nil) {
             self.url = url
             self.plan = plan
+            self.cache = cache
+            self.generated = generated
+            self.worktree = worktree
             self.error = error
         }
+    }
+
+    func reclaimable(on device: UInt64?, caches: [SpaceTargetCache] = [], exclusions: [String] = []) -> Self {
+        var locations = scopes
+        var ready = items.filter {
+            $0.device == device && $0.device != 0 && $0.keptReason == nil && $0.canDeletePermanently && $0.allocatedBytes > 0
+        }
+        let readyIDs = Set(ready.map(\.id))
+        var withheld = items.filter { !readyIDs.contains($0.id) }.map { item in
+            let reason = item.keptReason ?? (item.device != device || device == 0 ?
+                "Outside the verified startup disk." : item.allocatedBytes == 0 ?
+                "No measured allocation." : "Requires a separate Trash review.")
+            return Withheld(item: item, reason: reason)
+        }
+        for cache in caches where cache.device == device && device != 0 {
+            let policy = FolderExclusions(paths: [cache.measured.path])
+            guard !ready.contains(where: { policy.blocksCleanup(URL(fileURLWithPath: $0.path)) }) else { continue }
+            let id = Item.ID(scope: locations.count, node: 0)
+            locations.append(Scope(url: cache.directory, cache: cache))
+            let reason = cache.lockReason
+            let item = Item(id: id, path: cache.measured.path, allocatedBytes: cache.bytes, keptReason: reason,
+                            canDeletePermanently: true, device: cache.device, inode: cache.inode)
+            if let reason { withheld.append(Withheld(item: item, reason: reason)) }
+            else { ready.append(item) }
+        }
+        return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes }, withheld: withheld,
+                    exclusions: exclusions, startupDevice: device)
+    }
+
+    func addingGenerated(_ candidates: [GeneratedCacheCandidate]) -> Self {
+        var locations = scopes
+        var ready = items
+        for cache in candidates where cache.device == startupDevice && cache.device != 0 && cache.allocatedBytes > 0 {
+            let path = FolderExclusions(paths: [cache.url.path])
+            guard !ready.contains(where: { path.blocksCleanup(URL(fileURLWithPath: $0.path)) }),
+                  !withheld.contains(where: { path.blocksCleanup(URL(fileURLWithPath: $0.item.path)) }) else { continue }
+            let id = Item.ID(scope: locations.count, node: 0)
+            locations.append(Scope(url: cache.url, generated: cache))
+            ready.append(Item(id: id, path: cache.url.path, allocatedBytes: cache.allocatedBytes, keptReason: nil,
+                              canDeletePermanently: true, device: cache.device, inode: cache.inode))
+        }
+        return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes },
+                    withheld: withheld, exclusions: exclusions, checkedWorktrees: checkedWorktrees,
+                    projectsMeasured: projectsMeasured, managedInventory: managedInventory, startupDevice: startupDevice)
+    }
+
+    func addingWorktrees(_ worktrees: [FleetManagedCheckout.Preview]) -> Self {
+        var ready = items
+        var locations = scopes
+        for preview in worktrees where preview.eligible {
+            let candidate = preview.candidate
+            guard candidate.device == startupDevice, candidate.allocatedBytes > 0 else { continue }
+            let parent = FolderExclusions(paths: [candidate.url.path])
+            // A checkout and the dependencies inside it represent the same bytes.
+            ready.removeAll { parent.contains($0.path) }
+            let id = Item.ID(scope: locations.count, node: 0)
+            locations.append(Scope(url: candidate.url, worktree: preview))
+            ready.append(Item(id: id, path: candidate.url.path, allocatedBytes: candidate.allocatedBytes,
+                              keptReason: nil, canDeletePermanently: true, device: candidate.device, inode: candidate.inode))
+        }
+        return Self(scopes: locations, items: ready.sorted { $0.allocatedBytes > $1.allocatedBytes }, withheld: withheld,
+                    exclusions: exclusions, checkedWorktrees: Dictionary(uniqueKeysWithValues: worktrees.map { ($0.candidate.url.path, $0) }), projectsMeasured: projectsMeasured, managedInventory: managedInventory, startupDevice: startupDevice)
+
     }
 
     struct Outcome: Sendable {
@@ -55,6 +126,25 @@ struct DeveloperCleanupReview: Sendable {
     let id = UUID()
     let scopes: [Scope]
     let items: [Item]
+    struct Withheld: Identifiable, Sendable {
+        let item: Item
+        let reason: String
+        var id: Item.ID { item.id }
+    }
+    var withheld: [Withheld] = []
+    var exclusions: [String] = []
+    var checkedWorktrees: [String: FleetManagedCheckout.Preview] = [:]
+    var projectsMeasured = false
+    var managedInventory: [GitWorktreeCandidate] = []
+    var startupDevice: UInt64?
+    var idleWorktrees: [GitWorktreeCandidate] {
+        let rows: [GitWorktreeCandidate] = scopes.compactMap(\.plan).flatMap(\.idleWorktrees)
+        var paths = Set<String>()
+        return (managedInventory + rows).filter { paths.insert($0.url.path).inserted && (startupDevice == nil || $0.device == startupDevice) }.sorted { first, second in
+            if first.allocatedBytes == second.allocatedBytes { return first.url.path < second.url.path }
+            return first.allocatedBytes > second.allocatedBytes
+        }
+    }
     var skipped: Int { scopes.reduce(0) { $0 + ($1.plan?.skipped ?? 0) } }
 
     private struct FolderIdentity: Hashable {
@@ -71,7 +161,8 @@ struct DeveloperCleanupReview: Sendable {
 
     /// Each plan owns its original scan and validates only items from that scan.
     /// Treat overlapping inputs as an invalid scope so no artifact is selected twice.
-    static func prepare(roots: [URL], excludedFolders: [String], promptAvoidance: [String]) async throws -> Self {
+    static func prepare(roots: [URL], excludedFolders: [String], promptAvoidance: [String], quickCleanup: Bool = false,
+                        home: String = FileManager.default.homeDirectoryForCurrentUser.path) async throws -> Self {
         let canonical = roots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
         let identities = canonical.map(FolderIdentity.init)
         for (index, root) in canonical.enumerated() {
@@ -95,7 +186,8 @@ struct DeveloperCleanupReview: Sendable {
             }
         }
         var scopes: [Scope] = []
-        for root in roots {
+        let linked = quickCleanup ? try GitWorktreeManager.additionalProjectRoots(for: roots, exclusions: excludedFolders, promptAvoidance: promptAvoidance) : []
+        for root in roots + linked {
             try Task.checkCancellation()
             let path = root.standardizedFileURL.path
             let access = root.startAccessingSecurityScopedResource()
@@ -103,16 +195,20 @@ struct DeveloperCleanupReview: Sendable {
             let avoidance = promptAvoidance.filter { path != $0 && !path.hasPrefix($0 + "/") }
             do {
                 let plan = try await DeveloperCleanupPlan.prepare(root: root, excluding: excludedFolders,
-                                                                   promptAvoidanceFolders: avoidance)
+                                                                   promptAvoidanceFolders: avoidance, home: home, quickCleanup: quickCleanup)
                 scopes.append(Scope(url: root, plan: plan, error: nil))
             } catch is CancellationError { throw CancellationError() }
             catch { scopes.append(Scope(url: root, plan: nil, error: error.localizedDescription)) }
         }
+        return projectScopes(scopes)
+    }
+
+    static func projectScopes(_ scopes: [Scope]) -> Self {
         let items = scopes.enumerated().flatMap { scope, entry in
             (entry.plan?.items ?? []).map { artifact in
                 Item(id: .init(scope: scope, node: artifact.id), path: artifact.path, allocatedBytes: artifact.allocatedBytes,
                      keptReason: artifact.keptReason, canDeletePermanently: artifact.canDeletePermanently,
-                     device: artifact.device, inode: artifact.inode)
+                     device: artifact.device, inode: artifact.inode, recoveryPath: artifact.recoveryPath, verifiedPackages: artifact.verifiedPackages)
             }
         }.sorted {
             if ($0.keptReason == nil) != ($1.keptReason == nil) { return $0.keptReason == nil }
@@ -130,7 +226,45 @@ struct DeveloperCleanupReview: Sendable {
         var processed = 0
         for (index, scope) in scopes.enumerated() {
             if Task.isCancelled { outcome.cancelled = true; break }
-            guard let plan = scope.plan, let batch = selection[index] else { continue }
+            guard let batch = selection[index] else { continue }
+            if let generated = scope.generated, let id = batch.first {
+                guard permanently else { outcome.kept[id] = "This cache requires permanent cleanup."; continue }
+                progress(processed + 1, ids.count)
+                do {
+                    try await generated.clean(excludedFolders: exclusions)
+                    outcome.deleted.insert(id)
+                } catch is CancellationError {
+                    outcome.cancelled = true
+                    break
+                } catch { outcome.kept[id] = error.localizedDescription }
+                processed += 1
+                continue
+            }
+            if let preview = scope.worktree, let id = batch.first {
+                guard permanently else { outcome.kept[id] = "Worktree removal requires explicit permanent cleanup."; continue }
+                progress(processed + 1, ids.count)
+                do {
+                    try FleetManagedCheckout.remove(preview, exclusions: exclusions)
+                    outcome.deleted.insert(id)
+                } catch { outcome.kept[id] = error.localizedDescription }
+                processed += 1
+                continue
+            }
+            if let cache = scope.cache, let id = batch.first {
+                guard permanently else { outcome.kept[id] = "Package cache cleaning requires permanent deletion."; continue }
+                progress(processed + 1, ids.count)
+                do {
+                    try cache.clean()
+                    outcome.deleted.insert(id)
+                } catch is CancellationError {
+                    outcome.kept[id] = "Cleaner stopped. Some cached files may already have been removed. Scan again to measure."
+                    outcome.cancelled = true
+                    break
+                } catch { outcome.kept[id] = error.localizedDescription }
+                processed += 1
+                continue
+            }
+            guard let plan = scope.plan else { continue }
             let access = scope.url.startAccessingSecurityScopedResource()
             defer { if access { scope.url.stopAccessingSecurityScopedResource() } }
             let offset = processed

@@ -3,7 +3,7 @@ import Foundation
 
 /// Positive evidence of current use, including working directories and mapped
 /// files. Absence of an open handle is not proof that a folder is never needed.
-enum CleanupActiveUse {
+package enum CleanupActiveUse {
     struct OpenFiles: Sendable {
         fileprivate let coveredRoots: Set<String>
         fileprivate let users: [String: String]
@@ -18,6 +18,10 @@ enum CleanupActiveUse {
         var isFresh: Bool { capturedAt.duration(to: .now) < .seconds(2) }
 
         func user(of path: String) -> String? { users[CleanupGuidance.normalized(path)] }
+    }
+
+    package static func validateCacheIsIdle(_ url: URL) throws {
+        try validate(urls: [url])
     }
 
     static func captureOpenFiles(for paths: [String]) throws -> OpenFiles {
@@ -53,10 +57,14 @@ enum CleanupActiveUse {
         if !entries.isEmpty {
             // Only interpreted locally for process/path and CLI-name matches.
             // Arguments are never logged, persisted or displayed.
-            let processes = try probe(executable: "/bin/ps", arguments: ["-ww", "-U", String(getuid()), "-o", "pid=,command="],
-                                      maximumOutputBytes: 8 * 1024 * 1024)
+            let processes = try npxProcessSnapshot()
             try NpxCacheReview.validate(entries: entries, processOutput: processes)
         }
+    }
+
+    static func npxProcessSnapshot() throws -> String {
+        try probe(executable: "/bin/ps", arguments: ["-ww", "-U", String(getuid()), "-o", "pid=,command="],
+                                      maximumOutputBytes: 8 * 1024 * 1024)
     }
 
     static func metroProject(for cache: URL) -> URL? {

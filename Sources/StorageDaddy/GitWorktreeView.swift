@@ -7,6 +7,8 @@ import SwiftUI
 final class GitWorktreeReviewModel: ObservableObject {
     @Published var presented = false
     @Published private(set) var review: GitWorktreeReview?
+    @Published private(set) var managed: FleetManagedCheckout.Preview?
+    private var refreshOnClose = false
     @Published private(set) var working = false
     @Published private(set) var message: String?
     private let manager = GitWorktreeManager()
@@ -14,33 +16,50 @@ final class GitWorktreeReviewModel: ObservableObject {
     private weak var explorer: ExplorerModel?
 
     func inspect(_ candidate: GitWorktreeCandidate, explorer: ExplorerModel) {
-        guard !working, explorer.scanScheduleBlockReason == nil else { return }
+        guard !working else { return }
+        let interrupted = explorer.measuringCulprits
+        guard explorer.storageOperationBlockReason(scheduled: false, allowingDiscovery: true) == nil else { return }
+        if interrupted { explorer.freezeCleanupReview() }
         self.explorer = explorer; explorer.busy = true
-        review = nil; message = nil; presented = true; working = true
+        review = nil; managed = nil; refreshOnClose = interrupted; message = nil; presented = true; working = true
         let exclusions = explorer.excludedFolders
         task = Task {
-            do { review = try await manager.inspect(candidate: candidate, excludedFolders: exclusions) }
+            do {
+                if FleetManagedCheckout.manages(candidate.url) {
+                    managed = try await Task.detached(priority: .userInitiated) {
+                        try FleetManagedCheckout.inspect(candidate, exclusions: exclusions)
+                    }.value
+                } else { review = try await manager.inspect(candidate: candidate, excludedFolders: exclusions) }
+            }
             catch { message = error.localizedDescription }
             working = false; task = nil
         }
     }
     func remove() {
-        guard !working, let review, review.canRemove, let explorer else { return }
+        guard !working, let explorer, review?.canRemove == true || managed?.eligible == true else { return }
         working = true
         let exclusions = explorer.excludedFolders
         task = Task {
             do {
-                try await manager.remove(reviewed: review, excludedFolders: exclusions)
-                self.review = nil
+                if let managed {
+                    try await Task.detached(priority: .userInitiated) { try FleetManagedCheckout.remove(managed, exclusions: exclusions) }.value
+                } else if let review { try await manager.remove(reviewed: review, excludedFolders: exclusions) }
+                refreshOnClose = true
+                self.review = nil; self.managed = nil
                 message = "Worktree removed. Its branch remains in the repository. Rescan for current totals."
                 explorer.progress = message!
-            } catch { self.review = nil; message = error.localizedDescription }
+            } catch { self.review = nil; self.managed = nil; message = error.localizedDescription }
             working = false; task = nil
         }
     }
     func close() {
         guard !working else { return }
-        presented = false; review = nil; explorer?.busy = false; explorer = nil
+        presented = false; review = nil; managed = nil; explorer?.busy = false
+        if refreshOnClose, let explorer, let home = explorer.culpritSearchHome {
+            explorer.dashboard.refresh()
+            explorer.openSpaceTarget(explorer.spaceTarget, home: home, preservingSelection: true)
+        }
+        explorer = nil
     }
 }
 
@@ -70,7 +89,7 @@ struct GitWorktreeView: View {
                             Text(candidate.url.path).lineLimit(2).truncationMode(.middle).textSelection(.enabled)
                             Spacer()
                             Text(DiskFormat.bytes(candidate.allocatedBytes)).monospacedDigit()
-                            Button("Review") { reviewModel.inspect(candidate, explorer: m) }.disabled(m.scanScheduleBlockReason != nil)
+                            Button("Review") { reviewModel.inspect(candidate, explorer: m) }.disabled(m.storageOperationBlockReason(scheduled: false) != nil)
                         }.font(.callout)
                     }
                 }.padding(14).storagePanel()
@@ -101,7 +120,7 @@ struct GitWorktreeView: View {
     }
 }
 
-private struct GitWorktreeReviewSheet: View {
+struct GitWorktreeReviewSheet: View {
     @ObservedObject var model: GitWorktreeReviewModel
     @State private var acknowledged = false
     @State private var confirming = false
@@ -109,6 +128,32 @@ private struct GitWorktreeReviewSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Review Git worktree").font(.title2.weight(.semibold))
             if model.working { ProgressView("Checking Git and current files…") }
+            if let managed = model.managed {
+                Text(managed.candidate.url.path).font(.callout).textSelection(.enabled)
+                Text("Retired Fleet workspace" + (managed.candidate.allocatedBytes > 0 ? " · " + DiskFormat.bytes(managed.candidate.allocatedBytes) : ""))
+                if managed.eligible {
+                    Text("Fleet verified merged history and checked for leases, changes and unrecognized ignored files.")
+                    Toggle("I reviewed this checkout and its generated files", isOn: $acknowledged)
+                    Button("Remove Worktree…", role: .destructive) { confirming = true }.disabled(!acknowledged || model.working)
+                } else {
+                    Text(managed.status).foregroundStyle(Tints.yellow)
+                    ForEach(Array(managed.blockers.dropFirst()), id: \.self) { reason in
+                        Text(reason.replacingOccurrences(of: "-", with: " ")).font(.caption)
+                    }
+                    if !managed.ignoredPaths.isEmpty {
+                        DisclosureGroup("Ignored paths kept (\(managed.ignoredPaths.count))") {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(managed.ignoredPaths, id: \.self) { Text($0).textSelection(.enabled) }
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                            }.frame(maxHeight: 150).font(.caption)
+                        }
+                    }
+                    Button("Show checkout in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([managed.candidate.url])
+                    }
+                }
+            }
             if let review = model.review {
                 Text(review.candidate.url.path).font(.callout).textSelection(.enabled)
                 LabeledContent("Repository", value: review.commonDirectory.path)
@@ -130,7 +175,7 @@ private struct GitWorktreeReviewSheet: View {
             .background(AppColors.canvas).foregroundStyle(AppColors.ink).buttonStyle(SMMacButtonStyle(.secondary))
             .interactiveDismissDisabled(true)
             .confirmationDialog("Permanently remove this Git worktree?", isPresented: $confirming, titleVisibility: .visible) {
-                Button("Remove with Git", role: .destructive, action: model.remove)
+                Button("Remove Worktree", role: .destructive, action: model.remove)
             } message: { Text("Git status, commit reachability, active use and the exact reviewed files are checked again. No force removal is used.") }
     }
 }

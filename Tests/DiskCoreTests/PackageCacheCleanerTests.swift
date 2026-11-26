@@ -7,7 +7,7 @@ final class PackageCacheCleanerTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let executable = root.appendingPathComponent("pnpm")
-        try Data("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PWD/arguments\"\nprintf '%s\\n' \"$PWD/store\"\n".utf8).write(to: executable)
+        try Data("#!/bin/sh\ntest \"$1 $2\" = 'store path' || exit 3\nprintf '%s\\n' \"$PWD/store\"\n".utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
         let store = try PackageCacheTool.pnpm.cacheDirectory(executable: executable, home: root)
         XCTAssertEqual(store.lastPathComponent, "store")
@@ -16,11 +16,11 @@ final class PackageCacheCleanerTests: XCTestCase {
         let expected = try FileManager.default.attributesOfItem(atPath: root.path)[.systemFileNumber] as? NSNumber
         XCTAssertNotNil(actual)
         XCTAssertEqual(actual, expected)
-        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("arguments"), encoding: .utf8), "store\npath\n")
+
     }
 
     func testExactNativeCommandsAndHomebrewClassification() async throws {
-        XCTAssertEqual(PackageCacheTool.allCases.map(\.command), ["yarn cache clean", "uv cache clean", "npm cache clean --force", "brew cleanup -s", "pip3 cache purge", "pnpm store prune"])
+        XCTAssertEqual(PackageCacheTool.allCases.map(\.command), ["yarn cache clean", "uv cache clean", "npm cache clean --force", "brew cleanup -s", "pip3 cache purge", "pnpm store prune", "go clean -cache", "lume prune"])
         XCTAssertTrue(CleanupGuidance.isSuggestedCache(category: .packageCaches, path: "/Users/fixture/Library/Caches/Homebrew", home: "/Users/fixture"))
         XCTAssertFalse(CleanupGuidance.canDeletePermanently(path: "/Users/fixture/Library/Caches/Homebrew", home: "/Users/fixture"))
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -32,6 +32,22 @@ final class PackageCacheCleanerTests: XCTestCase {
         let group = try XCTUnwrap(DeveloperInsights.analyze(scan).first { $0.category == .packageCaches })
         XCTAssertEqual(group.fileCount, 1)
         XCTAssertEqual(group.rootIDs.map { scan.nodes[$0].name }, ["Homebrew"])
+    }
+
+    func testIncompletePipeFromInheritedWriterCannotApproveEmptyOutput() {
+        XCTAssertThrowsError(try PackageToolCommand.run(executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "(sleep 2; printf delayed) &"], directory: FileManager.default.temporaryDirectory,
+            requireCompleteOutput: true))
+    }
+
+    func testCommandRunnerUsesOnlyExplicitEnvironmentAndEnforcesDeadline() throws {
+        let directory = FileManager.default.temporaryDirectory
+        let environment = try PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/env"),
+            arguments: [], directory: directory, requireCompleteOutput: true,
+            environmentOverride: ["STORAGE_FIXTURE": "isolated"])
+        XCTAssertEqual(environment.output, "STORAGE_FIXTURE=isolated\n")
+        XCTAssertThrowsError(try PackageToolCommand.run(executable: URL(fileURLWithPath: "/bin/sleep"),
+            arguments: ["5"], directory: directory, timeout: 0.05))
     }
 
     func testCommandRunnerDrainsAndReportsNonzeroExitWithoutShellInterpretation() throws {

@@ -6,6 +6,79 @@ import DiskCore
 
 @MainActor @Suite(.serialized)
 struct DiskHoundParityRenderingTests {
+    @Test(.timeLimit(.minutes(2)))
+    func twoClickTargetDeletesOnlyReviewedStartupDiskDependencies() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("space-target-\(UUID())")
+        defer { try? fm.removeItem(at: home) }
+        let projects = home.appendingPathComponent("Projects")
+        try fm.createDirectory(at: home.appendingPathComponent("Desktop"), withIntermediateDirectories: true)
+        for (name, size) in [("Larger", 65536), ("Smaller", 4096)] {
+            let project = projects.appendingPathComponent(name)
+            let dependencies = project.appendingPathComponent("node_modules")
+            try fm.createDirectory(at: dependencies, withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: project.appendingPathComponent("package.json"))
+            try Data(repeating: 42, count: size).write(to: dependencies.appendingPathComponent("index.js"))
+        }
+        let buildFiles = [
+            "Website/package.json", "Website/.next/build-manifest.json", "Website/.next/cache/webpack/entry",
+            "Website/.next/server/app.js", "Native/Package.swift", "Native/.build/workspace-state.json",
+            "Native/.build/out/Intermediates.noindex/compiled.o", "Native/.build/checkouts/Library/source.swift",
+            "Unverified/package.json", "Unverified/.next/cache/personal-file"
+        ]
+        for path in buildFiles {
+            let file = projects.appendingPathComponent(path)
+            try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(repeating: 42, count: 8192).write(to: file)
+        }
+        let npx = home.resolvingSymlinksInPath().appendingPathComponent(".npm/_npx/1234567890abcdef")
+        let cachedPackage = npx.appendingPathComponent("node_modules/sd-unused-fixture")
+        try fm.createDirectory(at: cachedPackage, withIntermediateDirectories: true)
+        try Data(#"{"dependencies":{"sd-unused-fixture":"1.0.0"}}"#.utf8).write(to: npx.appendingPathComponent("package.json"))
+        try Data("{}".utf8).write(to: cachedPackage.appendingPathComponent("package.json"))
+        let main = projects.appendingPathComponent("Main")
+        let checkout = projects.appendingPathComponent("Linked")
+        try fm.createDirectory(at: main, withIntermediateDirectories: true)
+        for args in [["init", "-q"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "--allow-empty", "-qm", "fixture"], ["worktree", "add", "--detach", checkout.path]] {
+            let result = try PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/git"), arguments: args, directory: main)
+            try #require(result.status == 0)
+        }
+        let model = ExplorerModel(developerCleanupPreferences: nil)
+        let target = try #require(StartupCapacity(total: 100_001, available: 50_000))
+        #expect(target.usedPercent == 50)
+        model.openSpaceTarget(target, home: home.resolvingSymlinksInPath())
+        await model.waitForCurrentStorageOperation()
+        let plan = try #require(model.developerCleanupPlan)
+        #expect(model.showsDeveloperCleanupReview)
+        #expect(model.developerCleanupFolders.isEmpty)
+        #expect(plan.scopes.count == 2)
+        #expect(plan.items.count == 5)
+        #expect(plan.idleWorktrees.map(\.url.lastPathComponent) == ["Linked"])
+        #expect(plan.reclaimable(on: nil).items.isEmpty)
+        let item = try #require(plan.items.first)
+        #expect(item.path.contains("/Larger/"))
+        #expect(model.developerCleanupSelectedIDs == Set(plan.items.map(\.id)))
+        if ProcessInfo.processInfo.environment["STORAGEDADDY_DEVELOPER_CLEANUP_EVIDENCE"] == "1" {
+            for width in [880, 1100, 1440] {
+                try capture(AnyView(ExplorerView(runsLaunchActions: false).environmentObject(model)),
+                            name: "space-target-\(width)", width: width)
+            }
+        }
+        model.confirmDeveloperCleanup(planID: plan.id, ids: model.developerCleanupSelectedIDs, permanently: true)
+        await model.waitForCurrentStorageOperation()
+        #expect(model.developerCleanupOutcome?.deleted == Set(plan.items.map(\.id)))
+        #expect(!fm.fileExists(atPath: cachedPackage.path))
+        #expect(fm.fileExists(atPath: npx.appendingPathComponent("package.json").path))
+        #expect(!fm.fileExists(atPath: item.path))
+        for path in buildFiles {
+            let cleaned = path.hasSuffix("/entry") || path.hasSuffix("/compiled.o")
+            #expect(fm.fileExists(atPath: projects.appendingPathComponent(path).path) == !cleaned)
+        }
+        #expect(fm.fileExists(atPath: projects.appendingPathComponent("Larger/package.json").path))
+        #expect(!fm.fileExists(atPath: projects.appendingPathComponent("Smaller/node_modules/index.js").path))
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["STORAGEDADDY_DEVELOPER_CLEANUP_EVIDENCE"] == "1"),
           .timeLimit(.minutes(2)))
     func developerCleanupShowsOneReviewAndConfirmsSelectedFolders() async throws {

@@ -44,6 +44,29 @@ final class ParallelScannerTests: XCTestCase {
         XCTAssertLessThanOrEqual(final.locations.count, 8)
     }
 
+    func testSimultaneousScansMakeProgressWithoutBlockingSwiftTasks() async throws {
+        let fixture = try ParallelFixture()
+        let root = fixture.root
+        let reference = try await DiskScanner.scan(root: root, backend: .foundation)
+        try await withThrowingTaskGroup(of: ScanResult.self) { group in
+            for _ in 0..<8 {
+                group.addTask {
+                    try await DiskScanner.scan(root: root, parallelism: 2) { progress in
+                        if progress.entries == 1 {
+                            XCTAssertFalse(withUnsafeCurrentTask { $0 != nil }, "Scanner waits must run outside Swift tasks")
+                        }
+                    }
+                }
+            }
+            var finished = 0
+            for try await result in group {
+                finished += 1
+                XCTAssertEqual(orderedSignature(result), orderedSignature(reference))
+            }
+            XCTAssertEqual(finished, 8)
+        }
+    }
+
     func testCancellationStopsParallelTraversal() async throws {
         let fixture = try ParallelFixture(extraFilesPerDirectory: 80)
         let holder = ScanTaskHolder()

@@ -18,21 +18,32 @@ public enum DiskScanner {
 
     static func scan(
         root: URL, backend: ScanBackend = .parallel, parallelism: Int = 0, excludedFolders: [String],
-        promptAvoidanceFolders: [String] = [], developerArtifactHome: String?,
+        promptAvoidanceFolders: [String] = [], developerArtifactHome: String?, quickCleanup: Bool = false,
         progress: (@Sendable (ScanProgress) -> Void)? = nil
     ) async throws -> ScanResult {
-        // Resolve ancestor aliases (for example /var -> /private/var), preserving
-        // a symbolic-link leaf as a link rather than traversing its destination.
         let cancellation = ScanCancellation()
-        let worker = Task.detached(priority: .userInitiated) {
-            let canonical = root.path == "/" ? root : root.deletingLastPathComponent().resolvingSymlinksInPath().appendingPathComponent(root.lastPathComponent)
-            var scanner = Scanner(root: canonical, backend: backend, parallelism: parallelism,
-                                  exclusions: FolderExclusions(paths: excludedFolders),
-                                  promptAvoidance: FolderExclusions(paths: promptAvoidanceFolders, resolveAliases: false),
-                                  developerArtifactHome: developerArtifactHome, cancellation: cancellation, progress: progress)
-            return try scanner.run()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                // The coordinator waits on its directory readers. Keep that wait
+                // off the cooperative executor so simultaneous scans can all advance.
+                let coordinator = Thread {
+                    continuation.resume(with: Result {
+                        // Preserve a symbolic-link leaf while resolving ancestor aliases.
+                        let canonical = root.path == "/" ? root : root.deletingLastPathComponent().resolvingSymlinksInPath().appendingPathComponent(root.lastPathComponent)
+                        var scanner = Scanner(root: canonical, backend: backend, parallelism: parallelism,
+                                              exclusions: FolderExclusions(paths: excludedFolders),
+                                              promptAvoidance: FolderExclusions(paths: promptAvoidanceFolders, resolveAliases: false),
+                                              developerArtifactHome: developerArtifactHome, quickCleanup: quickCleanup, cancellation: cancellation, progress: progress)
+                        return try scanner.run()
+                    })
+                }
+                coordinator.name = "StorageDaddy.scan"
+                coordinator.qualityOfService = .userInitiated
+                coordinator.start()
+            }
+        } onCancel: {
+            cancellation.cancel()
         }
-        return try await withTaskCancellationHandler { try await worker.value } onCancel: { cancellation.cancel(); worker.cancel() }
     }
 
     static func automaticParallelism(rootPath: String, rootDevice: UInt64, parentDevice: UInt64?, processorCount: Int) -> Int {
@@ -55,6 +66,7 @@ private struct Scanner {
     private let promptAvoidance: FolderExclusions
     private let parallelism: Int
     private let developerArtifactHome: String?
+    private let quickCleanup: Bool
     private let cancellation: ScanCancellation
     private var sharedAllocations: [(id: Int, bytes: Int64, identity: AllocationIdentity)] = []
     private var fileAllocationDetails: [FileAllocationDetail] = []
@@ -79,7 +91,7 @@ private struct Scanner {
     private var livePendingBytes: Int64 = 0
 
     init(root: URL, backend: ScanBackend, parallelism: Int, exclusions: FolderExclusions,
-         promptAvoidance: FolderExclusions, developerArtifactHome: String?,
+         promptAvoidance: FolderExclusions, developerArtifactHome: String?, quickCleanup: Bool,
          cancellation: ScanCancellation, progress: (@Sendable (ScanProgress) -> Void)?) {
         self.exclusions = exclusions
         self.promptAvoidance = promptAvoidance
@@ -88,6 +100,7 @@ private struct Scanner {
         self.backend = backend
         self.parallelism = max(0, min(64, parallelism))
         self.developerArtifactHome = developerArtifactHome
+        self.quickCleanup = quickCleanup
         self.cancellation = cancellation
         self.progress = progress
         self.diskReadStart = ProcessMemory.diskReadBytes()
@@ -96,7 +109,7 @@ private struct Scanner {
     mutating func run() throws -> ScanResult {
         let rootPath = self.rootPath
         let started = Date()
-        try Task.checkCancellation()
+        try cancellation.check()
         guard !exclusions.contains(rootPath), !promptAvoidance.contains(rootPath), !isSensitivePath(root) else {
             let reason = exclusions.contains(rootPath) ? "excluded by folder settings" :
                 promptAvoidance.contains(rootPath) ? "skipped to avoid a macOS permission prompt" : "excluded by sensitive path policy"
@@ -194,16 +207,31 @@ private struct Scanner {
             for (entryIndex, entry) in entries.enumerated() {
                 if entryIndex & 255 == 0 { try cancellation.check() }
                 var insideArtifact = directory.insideDeveloperArtifact
-                if let home = developerArtifactHome, !insideArtifact {
+                let linkedMarker = quickCleanup && entry.name == ".git" && !entry.isDirectory && !entry.isSymlink
+                if let home = developerArtifactHome, !insideArtifact, !linkedMarker {
                     guard entry.isDirectory, !entry.isSymlink else { continue }
                     // Agent metadata also lives here. Descend only into the checkout container.
                     guard !isClaudeDirectory || entry.name == "worktrees" else { continue }
-                    if CleanupGuidance.isFocusedDeveloperName(entry.name) {
+                    if quickCleanup {
+                        let path = childPath(directory.path, entry.name)
+                        if directory.path.hasSuffix("/.next") {
+                            guard entry.name == "cache" else { continue }
+                        } else if directory.path.hasSuffix("/.build") {
+                            guard entry.name == "out" else { continue }
+                        } else if directory.path.hasSuffix("/.build/out") {
+                            guard entry.name == "Intermediates.noindex" else { continue }
+                        }
+                        insideArtifact = entry.name == "node_modules" && CleanupGuidance.isProjectDependencies(path: path)
+                            || CleanupGuidance.isQuickBuildCache(path: path)
+                        if !insideArtifact && [".build", ".next"].contains(entry.name) {
+                            guard CleanupGuidance.isRegenerableFolder(path: path, home: home) else { continue }
+                        }
+                    } else if CleanupGuidance.isFocusedDeveloperName(entry.name) {
                         insideArtifact = CleanupGuidance.isRegenerableFolder(path: childPath(directory.path, entry.name), home: home)
                     }
                     if !insideArtifact {
                         guard !CleanupGuidance.isDependencyContainerName(entry.name) else { continue }
-                        guard entry.name == ".worktrees" || entry.name == ".claude" || !entry.name.hasPrefix(".") else { continue }
+                        guard (quickCleanup && [".next", ".build"].contains(entry.name)) || entry.name == ".worktrees" || entry.name == ".claude" || !entry.name.hasPrefix(".") else { continue }
                         guard !entry.name.hasSuffix(".app"), !entry.name.hasSuffix(".framework"), !entry.name.hasSuffix(".xpc") else { continue }
                     }
                 }
@@ -376,12 +404,12 @@ private struct Scanner {
 
     private mutating func aggregateDirectories() throws {
         for id in nodes.indices.reversed() {
-            if id & 255 == 0 { try Task.checkCancellation() }
+            if id & 255 == 0 { try cancellation.check() }
             guard nodes[id].isDirectory else { continue }
             var logicalBytes: Int64 = 0
             var allocatedBytes: Int64 = 0
             for (index, child) in nodes[id].children.enumerated() {
-                if index & 255 == 0 { try Task.checkCancellation() }
+                if index & 255 == 0 { try cancellation.check() }
                 logicalBytes = saturatingAdd(logicalBytes, nodes[child].logicalBytes)
                 allocatedBytes = saturatingAdd(allocatedBytes, nodes[child].allocatedBytes)
                 if nodes[child].isScanIncomplete == true { nodes[id].isScanIncomplete = true }
@@ -966,7 +994,7 @@ private func saturatingAdd(_ lhs: Int64, _ rhs: Int64) -> Int64 {
     return overflow ? Int64.max : value
 }
 
-func isSensitivePath(_ url: URL) -> Bool {
+package func isSensitivePath(_ url: URL) -> Bool {
     let standardized = url.standardizedFileURL
     let canonical = standardized.resolvingSymlinksInPath().standardizedFileURL
     return [standardized, canonical].contains { candidate in
@@ -974,7 +1002,7 @@ func isSensitivePath(_ url: URL) -> Bool {
     }
 }
 
-func isSensitiveComponent(_ name: String) -> Bool {
+package func isSensitiveComponent(_ name: String) -> Bool {
     // Most entries cannot match any sensitive prefix. Avoid allocating a
     // lowercased copy of every ordinary filename on multi-million-entry scans.
     if let first = name.utf8.first, first < 128,

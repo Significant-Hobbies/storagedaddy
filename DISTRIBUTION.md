@@ -1,4 +1,4 @@
-storagedaddy 0.1.4 — Beta
+storagedaddy — Beta
 =======================
 
 Apple silicon Mac · macOS 14 Sonoma or later
@@ -12,7 +12,9 @@ Drag storagedaddy to Applications, eject this disk image, then open the app
 from Applications. Enable Full Disk Access when onboarding points you to
 System Settings if you want a Mac-wide scan. A folder scan is also available.
 
-Start with Scan a Disk for the complete storage picture. Quick Cache Scan checks only the current user's cache folder; a folder scan limits the result to one chosen location.
+Click Find storage culprits to rank measured items in accessible locations. Review the checked rebuildable items and click the labeled cleanup button. Large personal files have individual Move to Trash actions. Stopped virtual machines have a separate deletion review.
+
+Choose Scan a Disk for a broader storage scan. Quick Cache Scan checks only the current user's cache folder; a folder scan limits the result to one chosen location.
 Storage opens your scan results. Explore shows scanned files; Developer Insights
 groups recognized tools and projects. Review Cleanup lists your choices.
 Save a snapshot from completed results to revisit it in History.
@@ -26,9 +28,7 @@ Cleanup shows regeneration guidance on each item in one review list.
 
 Your files stay under your control
 ---------------------------------
-Scans do not delete files. Cleanup uses Trash only after confirmation.
-Trash still uses space until you empty it yourself. Review all candidates:
-caches and build outputs may be needed by active tools or projects.
+Scanning only measures files. The cleanup button identifies permanent deletion before you act. Review the names and locations of checked items. Items moved to Trash can be restored and continue using disk space until you empty Trash.
 
 AI Sessions → Archive saves supported older Claude/Codex conversations to
 Desktop or another chosen folder. This is a lossy export of prompts, replies

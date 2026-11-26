@@ -20,9 +20,9 @@ final class AISessionsModel: ObservableObject {
     @Published var loading = false
     @Published var errorMessage: String?
     private var loadGeneration = 0
-    private let discover: @Sendable () throws -> AISessionInventoryReport
+    private let discover: @Sendable () async throws -> AISessionInventoryReport
 
-    init(discover: @escaping @Sendable () throws -> AISessionInventoryReport = { try AISessionInventory.discover() }) {
+    init(discover: @escaping @Sendable () async throws -> AISessionInventoryReport = { try AISessionInventory.discover() }) {
         self.discover = discover
     }
 
@@ -38,7 +38,7 @@ final class AISessionsModel: ObservableObject {
         }
         let discover = self.discover
         let worker = Task.detached(priority: .utility) {
-            try discover()
+            try await discover()
         }
         do {
             let result = try await withTaskCancellationHandler {

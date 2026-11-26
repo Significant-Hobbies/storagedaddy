@@ -108,7 +108,31 @@ public enum CleanupGuidance {
             && isRegenerableFolder(path: path)
     }
 
-    /// Only Node dependency trees and bounded download caches may bypass Trash.
+    static func isQuickBuildCache(path: String) -> Bool {
+        let suffix: String
+        let manifest: String
+        let marker: String
+        if path.hasSuffix("/.metro-cache") {
+            return isRegenerableFolder(path: path)
+        } else if path.hasSuffix("/.next/cache") {
+            suffix = "/.next/cache"
+            manifest = "package.json"
+            marker = ".next/build-manifest.json"
+        } else if path.hasSuffix("/.build/out/Intermediates.noindex") {
+            suffix = "/.build/out/Intermediates.noindex"
+            manifest = "Package.swift"
+            marker = ".build/workspace-state.json"
+        } else { return false }
+        guard !isInstalledRuntime(path: path) else { return false }
+        let project = URL(fileURLWithPath: String(path.dropLast(suffix.count)))
+        return [manifest, marker].allSatisfy {
+            var metadata = stat()
+            return lstat(project.appendingPathComponent($0).path, &metadata) == 0 && metadata.st_mode & S_IFMT == S_IFREG
+        }
+    }
+
+    /// Default developer cleanup permits Node dependency trees and bounded download caches.
+    /// The startup-disk review separately validates known build caches and managed worktrees.
     /// Installed runtimes, manifests and other data keep their recovery path.
     public static func canDeletePermanently(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
         guard !isInstalledRuntime(path: path) else { return false }
@@ -123,6 +147,7 @@ public enum CleanupGuidance {
     /// dependencies use folder-level checks; other candidates retain deeper checks.
     public static func isRegenerableFolder(path: String, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
         guard !isInstalledRuntime(path: path) else { return false }
+        if normalized(path).hasPrefix(normalized(home) + "/Library/Application Support/StorageDaddy/Cleanup Recovery/") { return false }
         if normalized(path) == normalized(home) + "/.npm/_cacache"
             || isSuggestedCache(category: .packageCaches, path: path, home: home)
             || isSuggestedCache(category: .modelCaches, path: path, home: home) { return true }

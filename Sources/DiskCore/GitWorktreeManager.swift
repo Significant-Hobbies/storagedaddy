@@ -6,8 +6,8 @@ public struct GitWorktreeCandidate: Identifiable, Sendable {
     public var id: String { url.path }
     public let url: URL
     public let allocatedBytes: Int64
-    let device: UInt64
-    let inode: UInt64
+    package let device: UInt64
+    package let inode: UInt64
 }
 
 public struct GitWorktreeReview: Identifiable, Sendable {
@@ -105,6 +105,104 @@ public actor GitWorktreeManager {
         return result.sorted { $0.url.path < $1.url.path }
     }
 
+    /// The focused project scan only retains regular .git pointer files. Ask
+    /// Git to distinguish a registered linked checkout from a submodule.
+    static func linkedCandidates(in scan: ScanResult, excluding artifactIDs: Set<Int>,
+                                 exclusions: FolderExclusions) throws -> [GitWorktreeCandidate] {
+        var candidates: [GitWorktreeCandidate] = []
+        for marker in scan.nodes where marker.name == ".git" && !marker.isDirectory && !marker.isSymlink {
+            try Task.checkCancellation()
+            guard let id = marker.parent else { continue }
+            var parent: Int? = id
+            while let ancestor = parent, !artifactIDs.contains(ancestor) { parent = scan.nodes[ancestor].parent }
+            guard parent == nil else { continue }
+            let url = scan.url(for: id)
+            guard !exclusions.blocksCleanup(url),
+                  let paths = readGit(at: url, arguments: ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"])?
+                    .split(separator: "\n"), paths.count == 2,
+                  URL(fileURLWithPath: String(paths[0])).deletingLastPathComponent().path == String(paths[1]) + "/worktrees"
+            else { continue }
+            let root = scan.nodes[id]
+            candidates.append(.init(url: url, allocatedBytes: 0, device: root.device, inode: root.inode))
+        }
+        return candidates
+    }
+
+    static func registeredLinks(at checkout: URL) -> Set<String>? {
+        guard let response = readGit(at: checkout, arguments: ["worktree", "list", "--porcelain", "-z"]),
+              let rows = try? parseList(response) else { return nil }
+        return Set(rows.filter { !$0.main && !$0.bare && $0.locked == nil && $0.prunable == nil }.map { systemAliases($0.path) })
+    }
+
+    /// Quick cleanup follows Git registrations from a selected repository. Never
+    /// enumerate the temporary directory or scan an unrelated sibling checkout.
+    package static func additionalProjectRoots(for roots: [URL], exclusions: [String], promptAvoidance: [String],
+                                               temporaryRoots: [URL] = [FileManager.default.temporaryDirectory, URL(fileURLWithPath: "/private/tmp")]) throws -> [URL] {
+        let covered = FolderExclusions(paths: roots.map(\.path))
+        let excluded = FolderExclusions(paths: exclusions + promptAvoidance)
+        let temp = temporaryRoots.compactMap { try? canonical($0) }
+        var additional: [URL] = []
+        for selected in roots {
+            try Task.checkCancellation()
+            guard let repo = try? canonical(selected) else { continue }
+            var marker = stat()
+            guard lstat(repo.appendingPathComponent(".git").path, &marker) == 0,
+                  marker.st_mode & S_IFMT == S_IFDIR || marker.st_mode & S_IFMT == S_IFREG,
+                  let common = try? gitPath(at: repo, option: "--git-common-dir"),
+                  let links = registeredLinks(at: repo) else { continue }
+            for path in links.sorted() {
+                try Task.checkCancellation()
+                let checkout = URL(fileURLWithPath: path)
+                guard !covered.blocksCleanup(checkout), !excluded.blocksCleanup(checkout), !isSensitivePath(checkout),
+                      let physical = try? canonical(checkout), physical.path == checkout.path,
+                      !additional.contains(where: { $0.path == path || path.hasPrefix($0.path + "/") || $0.path.hasPrefix(path + "/") })
+                else { continue }
+                // Siblings must live beside the already-selected repo. For temporary
+                // checkouts, every component below the system temp root must belong
+                // to this user. World-writable /tmp itself is never a scan root.
+                let boundary = temp.first { path.hasPrefix($0.path + "/") }
+                let adjacent = checkout.deletingLastPathComponent().path == repo.deletingLastPathComponent().path
+                guard adjacent || boundary != nil else { continue }
+                var directory = checkout
+                let stop = boundary ?? repo.deletingLastPathComponent()
+                var owned = true
+                while directory.path != stop.path {
+                    var info = stat()
+                    guard lstat(directory.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR,
+                          info.st_uid == getuid(), info.st_mode & 0o022 == 0 else { owned = false; break }
+                    directory.deleteLastPathComponent()
+                }
+                guard owned, lstat(checkout.appendingPathComponent(".git").path, &marker) == 0,
+                      marker.st_uid == getuid(), marker.st_mode & S_IFMT == S_IFREG,
+                      let admin = try? gitPath(at: checkout, option: "--git-dir"),
+                      admin.deletingLastPathComponent().path == common.appendingPathComponent("worktrees").path,
+                      let verifiedCommon = try? gitPath(at: checkout, option: "--git-common-dir"),
+                      verifiedCommon.path == common.path,
+                      let top = try? gitPath(at: checkout, option: "--show-toplevel"), top.path == path else { continue }
+                additional.append(checkout)
+            }
+        }
+        return additional
+    }
+
+    package static func measure(_ candidates: [GitWorktreeCandidate]) throws -> [GitWorktreeCandidate] {
+        guard !candidates.isEmpty else { return [] }
+        let locations = candidates.map { $0.url.path }
+        let result = try? PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/du"),
+            arguments: ["-skx"] + locations, directory: FileManager.default.temporaryDirectory,
+            timeout: 45, requireCompleteOutput: true, mergeStandardError: false)
+        try Task.checkCancellation()
+        guard let result, result.status == 0 else { return candidates }
+        var sizes: [String: Int64] = [:]
+        for line in result.output.split(separator: "\n") {
+            let fields = line.split(separator: "\t", maxSplits: 1)
+            if fields.count == 2, let kib = Int64(fields[0]), kib >= 0, kib <= Int64.max / 1024 {
+                sizes[String(fields[1])] = kib * 1024
+            }
+        }
+        return candidates.map { .init(url: $0.url, allocatedBytes: sizes[$0.url.path] ?? 0, device: $0.device, inode: $0.inode) }
+    }
+
     public func inspect(candidate: GitWorktreeCandidate, excludedFolders: [String] = []) async throws -> GitWorktreeReview {
         try Task.checkCancellation()
         let url = try Self.canonical(candidate.url)
@@ -175,6 +273,7 @@ public actor GitWorktreeManager {
     }
 
     public func remove(reviewed: GitWorktreeReview, excludedFolders: [String] = []) async throws {
+        guard !FleetManagedCheckout.manages(reviewed.candidate.url) else { throw GitWorktreeError.unsafe("Use the Fleet retirement review to preserve workspace leases and receipts.") }
         guard !removing else { throw GitWorktreeError.unsafe("another worktree removal is in progress") }
         guard reviewed.canRemove, reviewed.tree != nil else { throw GitWorktreeError.unsafe(reviewed.removalBlockers.joined(separator: " ")) }
         removing = true; defer { removing = false }
@@ -266,7 +365,7 @@ public actor GitWorktreeManager {
         guard physical == systemAliases(path) else { throw GitWorktreeError.unsafe("the path traverses a symbolic link") }
         return URL(fileURLWithPath: physical)
     }
-    private static func systemAliases(_ path: String) -> String {
+    static func systemAliases(_ path: String) -> String {
         [("/var", "/private/var"), ("/tmp", "/private/tmp")].reduce(path) { value, alias in
             value == alias.0 || value.hasPrefix(alias.0 + "/") ? alias.1 + value.dropFirst(alias.0.count) : value
         }

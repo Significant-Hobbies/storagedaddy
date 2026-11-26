@@ -119,11 +119,14 @@ struct DashboardView: View {
         .buttonStyle(SMMacButtonStyle(.secondary))
         .background(DashboardSamplingObserver(dashboard: dashboard).frame(width: 0, height: 0))
         .task {
-            dashboard.loadIfNeeded()
+            dashboard.refresh()
             trashInventory.refresh(excludedFolders: m.excludedFolders)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { trashInventory.refresh(excludedFolders: m.excludedFolders) }
+            if phase == .active {
+                dashboard.refresh()
+                trashInventory.refresh(excludedFolders: m.excludedFolders)
+            }
         }
         .onChange(of: m.excludedFolders) { _, _ in trashInventory.refresh(excludedFolders: m.excludedFolders) }
         .onDisappear { trashInventory.cancel() }
@@ -141,8 +144,14 @@ struct DashboardView: View {
             HStack(spacing: 16) {
                 DoodleArt(topic: .overview).frame(width: 72, height: 72)
                 VStack(alignment: .trailing, spacing: 8) {
-                    Button("Find Developer Files", action: m.openDeveloperCleanup)
+                    Button("Find storage culprits") { m.openSpaceTarget(dashboard.report.flatMap(StartupCapacity.init(report:))) }
                         .buttonStyle(SMMacButtonStyle(.primary))
+                        .disabled(!m.canStartDeveloperCleanup)
+                        .help("Measure developer files, caches and known large items. Review the biggest items first.")
+                    if let capacity = dashboard.report.flatMap(StartupCapacity.init(report:)) {
+                        Text("\(DiskFormat.bytes(capacity.available)) available")
+                            .font(.caption).foregroundStyle(Tints.secondaryText)
+                    }
                     HStack(spacing: 10) {
                         Button("Refresh", action: dashboard.refresh).disabled(dashboard.loading || m.busy)
                         if let report = dashboard.report {
@@ -157,8 +166,7 @@ struct DashboardView: View {
     }
 
     private func capacityPanel(_ report: SystemStorageReport) -> some View {
-        let capacity = report.startupAccounting.flatMap { StartupCapacity(total: $0.total, available: $0.available) }
-            ?? StartupCapacity(volumes: report.volumes)
+        let capacity = StartupCapacity(report: report)
         let startup = report.volumes.first(where: \.isStartupData)
             ?? report.volumes.first(where: { $0.mountPoint == "/" })
         return VStack(alignment: .leading, spacing: 18) {

@@ -40,9 +40,18 @@ struct AgentReviewRequest: Codable, Identifiable {
     var device: UInt64
     var inode: UInt64
     var scanStarted: Date
+    var planID: UUID?
     var requestedAt = Date()
     var outcome = "Waiting for native review"
     var pending = true
+
+    mutating func reconcileAfterRestart() {
+        let interrupted = ["Checking native Cleanup preflight.", "Staged for native confirmation",
+                           "Sent to native Cleanup preflight. Nothing removed; verify staging and choose the cleanup action there."]
+        if !pending && interrupted.contains(outcome) {
+            outcome = "Interrupted by restart. Inspect the item and request a fresh review."
+        }
+    }
 }
 
 struct AgentAuditEntry: Codable, Identifiable {
@@ -79,6 +88,7 @@ private struct AgentPolicy: Codable {
     private var oauthRegistrations: [AgentOAuth.Registration] = []
     private let directory: URL
     private let httpPort: UInt16
+    private var spacePlans: [UUID: AgentSpacePlan] = [:]
     private var scanOwner: (sessionID: UUID, version: UUID)?
     private var pendingStaging: [Int: UUID] = [:]
     private var policyHealthy = true
@@ -101,14 +111,17 @@ private struct AgentPolicy: Codable {
                 let policy = try AgentSecurity.load(AgentPolicy.self, from: file)
                 guard policy.sessions.count <= 100, policy.reviews.count <= 700, policy.audit.count <= 200, policy.approvedRoots.count <= 32,
                       policy.sessions.allSatisfy({ AgentSecurity.validHash($0.tokenHash) }) else { throw AgentSecurity.failure("Agent policy exceeds its limits.") }
-                sessions = policy.sessions; reviews = policy.reviews; audit = policy.audit; approvedRoots = policy.approvedRoots; oauthRegistrations = Array((policy.oauthRegistrations ?? []).prefix(100))
+                sessions = policy.sessions
+                reviews = policy.reviews
+                for index in reviews.indices { reviews[index].reconcileAfterRestart() }
+                audit = policy.audit; approvedRoots = policy.approvedRoots; oauthRegistrations = Array((policy.oauthRegistrations ?? []).prefix(100))
             } catch { self.error = "Saved agent access could not be read. Access remains off. \(error.localizedDescription)"; policyHealthy = false }
         }
         // Always starts off. Restoring the app never starts an implicit listener.
     }
 
     func setEnabled(_ value: Bool) {
-        if !value { enabled = false; listening = false; server.stop(); httpServer.stop(); oauth = nil; pairings = []; return }
+        if !value { spacePlans.removeAll(); enabled = false; listening = false; server.stop(); httpServer.stop(); oauth = nil; pairings = []; return }
         guard policyHealthy else { return }
         do {
             try server.start(path: socketPath) { [weak self] request in
@@ -164,6 +177,7 @@ private struct AgentPolicy: Codable {
     }
     func revoke(_ id: UUID) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        spacePlans.removeValue(forKey: id)
         sessions[index].revokedAt = Date()
         for i in reviews.indices where reviews[i].sessionID == id && reviews[i].pending {
             reviews[i].pending = false; reviews[i].outcome = "Refused: session revoked"
@@ -227,6 +241,9 @@ private struct AgentPolicy: Codable {
         // Native cleanup rechecks preflight, request grants and permanent eligibility.
         // RPC only queues requests and never removes files.
         pendingStaging[node.id] = request.id
+        reviews[i].pending = false
+        reviews[i].outcome = "Checking native Cleanup preflight."
+        save()
         m.stage(node.id, authorization: { [weak self] in
             guard let self else { return false }
             return self.pendingStaging[node.id] == request.id && self.policyHealthy &&
@@ -235,29 +252,48 @@ private struct AgentPolicy: Codable {
         }, didStage: { [weak self] in
             self?.pendingStaging.removeValue(forKey: node.id)
             self?.stagedRequests[node.id] = request.id
+            self?.setOutcome("Staged for native confirmation", requestID: request.id)
         }, didFinish: { [weak self] in
-            if self?.pendingStaging[node.id] == request.id { self?.pendingStaging.removeValue(forKey: node.id) }
+            if self?.pendingStaging[node.id] == request.id {
+                self?.pendingStaging.removeValue(forKey: node.id)
+                self?.setOutcome("Native preflight ended without staging", requestID: request.id)
+            }
         })
         m.openQuickCleanup()
-        reviews[i].pending = false
-        reviews[i].outcome = "Sent to native Cleanup preflight. Nothing removed; verify staging and choose the cleanup action there."
-        save()
     }
 
     private func overlapsNativeStaging(_ nodeID: Int, in model: ExplorerModel) -> Bool {
         model.hasAncestor(nodeID, in: model.staged) || model.staged.contains { model.hasAncestor($0, in: [nodeID]) }
     }
 
+    func recordCleanupOutcome(nodeID: Int, outcome: String) {
+        guard let request = stagedRequests.removeValue(forKey: nodeID) else { return }
+        setOutcome(outcome, requestID: request)
+    }
+
+    private func setOutcome(_ outcome: String, requestID: UUID) {
+        guard let index = reviews.firstIndex(where: { $0.id == requestID }) else { return }
+        reviews[index].outcome = outcome
+        save()
+    }
+
     func unstageRequest(_ nodeID: Int) {
-        pendingStaging.removeValue(forKey: nodeID)
-        stagedRequests.removeValue(forKey: nodeID)
+        let pending = pendingStaging.removeValue(forKey: nodeID)
+        let staged = stagedRequests.removeValue(forKey: nodeID)
+        if let request = pending ?? staged { setOutcome("Removed from native review without cleanup", requestID: request) }
     }
 
     func clearStagedRequests() {
-        let ownedIDs = Array(stagedRequests.keys)
+        let requestIDs = Set(pendingStaging.values).union(stagedRequests.values)
+        guard !requestIDs.isEmpty else { return }
+        let nodeIDs = Array(stagedRequests.keys)
         pendingStaging.removeAll()
         stagedRequests.removeAll()
-        for id in ownedIDs { explorer?.unstage(id) }
+        for i in reviews.indices where requestIDs.contains(reviews[i].id) {
+            reviews[i].outcome = "Removed from native review without cleanup"
+        }
+        for nodeID in nodeIDs { explorer?.unstage(nodeID) }
+        save()
     }
 
     func allowsPermanentCleanup(of nodeID: Int) -> Bool {
@@ -281,7 +317,7 @@ private struct AgentPolicy: Codable {
             }
         }
         for (nodeID, requestID) in stagedRequests {
-            guard m.staged.contains(nodeID) else { stagedRequests.removeValue(forKey: nodeID); continue }
+            guard m.staged.contains(nodeID) else { unstageRequest(nodeID); continue }
             guard let request = reviews.first(where: { $0.id == requestID }) else { m.unstage(nodeID); stagedRequests.removeValue(forKey: nodeID); valid = false; continue }
             let permitted = policyHealthy && sessions.contains { $0.id == request.sessionID && $0.permissions.contains(request.permanent ? "request_permanent" : "request_trash") }
             let matches = m.scan.map { scan in scan.nodes.indices.contains(nodeID) && scan.nodes[nodeID].device == request.device && scan.nodes[nodeID].inode == request.inode && scan.url(for: nodeID).path == request.path } ?? false
@@ -346,6 +382,30 @@ private struct AgentPolicy: Codable {
                             "drivesMeasuredAt": .string(measuredAt.ISO8601Format()), "drives": .array(drives.map { .object(["id": .string($0.id), "name": .string($0.name), "freeBytes": .integer($0.freeBytes), "capacityBytes": .integer($0.totalBytes)]) }),
                             "scanFreeBytes": m.volumeFree.map(AgentJSON.integer) ?? .null, "approvedScanRoots": .array(approvedRoots.map(AgentJSON.string)),
                             "requests": try .encode(reviews.filter { $0.sessionID == sessionID }), "procedures": .array([.string("skill://storagedaddy/free-up-space"), .string("skill://storagedaddy/investigate-growth")])])
+        }
+        if name == "storagedaddy_plan_space_target" {
+            guard let percent = a["targetUsedPercent"].int, (1...100).contains(percent) else {
+                throw AgentSecurity.failure("Choose a whole percentage from 1 through 100.")
+            }
+            let prior = spacePlans[sessionID]
+            if args["planID"] != nil, prior == nil || prior?.id.uuidString != a["planID"].string || prior?.percent != percent {
+                throw AgentSecurity.failure("This plan expired or its target changed. Request a new plan.")
+            }
+            let capacity = await Task.detached(priority: .utility) { StartupCapacity.measure() }.value
+            guard let capacity, enabled, sessions.contains(where: { $0.id == sessionID && $0.revokedAt == nil && $0.permissions.contains(tool.permission) }) else {
+                throw AgentSecurity.failure("Startup capacity or agent access is unavailable.")
+            }
+            if args["planID"] != nil, let prior {
+                guard spacePlans[sessionID]?.id == prior.id, capacity.total == prior.baseline.total else {
+                    throw AgentSecurity.failure("The plan or disk capacity changed. Request a new plan.")
+                }
+                var result = prior.reading(capacity).object ?? [:]
+                result["requests"] = try .encode(reviews.filter { $0.sessionID == sessionID && $0.planID == prior.id })
+                return .object(result)
+            }
+            let plan = AgentSpacePlan(percent: percent, baseline: capacity, explorer: m)
+            spacePlans[sessionID] = plan
+            return plan.proposal
         }
         if name == "storagedaddy_read_skill", let skill = a["name"].string, let text = AgentMCP.skill(skill) { return .object(["procedure": .string(text)]) }
         if name == "storagedaddy_scan_history" {
@@ -425,6 +485,13 @@ private struct AgentPolicy: Codable {
             guard let ids = a["nodeIDs"].array, !ids.isEmpty, ids.count <= 20, ids.allSatisfy({ $0.int != nil }),
                   let reason = a["reason"].string, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, reason.count <= 1000,
                   waitingReviewCount + ids.count <= 500 else { throw AgentSecurity.failure("Provide 1–20 scan node IDs and a brief reason, or review the waiting queue first.") }
+            if args["planID"] != nil {
+                guard let plan = spacePlans[sessionID], plan.id.uuidString == a["planID"].string,
+                      !m.isScanning, !m.exclusionResultsStale, !m.scanIsHistorical, plan.scanIdentity == m.filenameSearchIdentity,
+                      Set(ids.compactMap(\.int)).isSubset(of: plan.nodeIDs) else {
+                    throw AgentSecurity.failure("These choices are outside the reviewed plan or the scan changed. Request a new plan.")
+                }
+            }
             var proposed: [AgentReviewRequest] = []
             for id in Set(ids.compactMap(\.int)).sorted() {
                 guard scan.nodes.indices.contains(id), scan.nodes[id].parent != nil else { throw AgentSecurity.failure("Scan roots and unknown nodes cannot be requested.") }
@@ -437,7 +504,7 @@ private struct AgentPolicy: Codable {
                       !FolderExclusions(paths: m.excludedFolders).blocksCleanup(URL(fileURLWithPath: canonical)) else {
                     appendAudit(session: session.name, action: name + " · Protected location refused", blocked: true); save(); throw AgentSecurity.failure("A protected or excluded path was refused. Nothing was removed.")
                 }
-                let request = AgentReviewRequest(sessionID: sessionID, agent: session.name, reason: reason, permanent: name.hasSuffix("delete_permanently"), path: path, device: node.device, inode: node.inode, scanStarted: scan.started)
+                let request = AgentReviewRequest(sessionID: sessionID, agent: session.name, reason: reason, permanent: name.hasSuffix("delete_permanently"), path: path, device: node.device, inode: node.inode, scanStarted: scan.started, planID: a["planID"].string.flatMap(UUID.init(uuidString:)))
                 proposed.append(request)
             }
             reviews.append(contentsOf: proposed)
