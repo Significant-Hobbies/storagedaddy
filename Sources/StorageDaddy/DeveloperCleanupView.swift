@@ -242,7 +242,7 @@ struct DeveloperCleanupView: View {
                             Text("No cleanup candidates or large files found in the checked locations.")
                                 .foregroundStyle(Tints.secondaryText).padding(.vertical)
                         }
-                        if !model.busy && (ranked.isEmpty || plan == nil || model.developerCleanupError != nil || fileOutcome != nil) {
+                        if !model.busy {
                             repeatSearch
                         }
                         DisclosureGroup("Scan details and other locations", isExpanded: $searchDetails) {

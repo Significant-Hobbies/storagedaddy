@@ -828,7 +828,8 @@ struct FileTypeStats: Sendable {
     @Published private(set) var spaceTargetResult: StartupCapacity?
     private var permanentBeforeTarget = true
 
-    func openSpaceTarget(_ capacity: StartupCapacity?, home: URL = FileManager.default.homeDirectoryForCurrentUser, preservingSelection: Bool = false) {
+    func openSpaceTarget(_ capacity: StartupCapacity?, home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                         preservingSelection: Bool = false, retainingUnaffectedPlan: Bool = false) {
         guard canStartDeveloperCleanup else { return }
         if !preservingSelection { quickReviewSelection = nil; culpritSearchID = UUID() }
         if !isFindingStorageCulprits { permanentBeforeTarget = developerCleanupDeletesPermanently }
@@ -859,9 +860,9 @@ struct FileTypeStats: Sendable {
                FileManager.default.fileExists(atPath: location.path),
                !FolderExclusions(paths: roots.map(\.path)).blocksCleanup(location) { roots.append(location) }
         }
-        if !preservingSelection { developerCleanupPlan = nil }
+        if !retainingUnaffectedPlan { developerCleanupPlan = nil }
         developerCleanupOutcome = nil
-        findDeveloperCleanup(in: roots, retainingReviewOnFailure: preservingSelection, cacheHome: home)
+        findDeveloperCleanup(in: roots, retainingReviewOnFailure: retainingUnaffectedPlan, cacheHome: home)
     }
 
     private func exitSpaceTarget() {
@@ -896,7 +897,7 @@ struct FileTypeStats: Sendable {
             busy = false
             largeFileCheck = nil
             if resumeDiscovery, !check.isCancelled, workspace == .cleanup, let home = culpritSearchHome {
-                openSpaceTarget(spaceTarget, home: home, preservingSelection: true)
+                openSpaceTarget(spaceTarget, home: home, preservingSelection: true, retainingUnaffectedPlan: true)
             }
         }
         do {
