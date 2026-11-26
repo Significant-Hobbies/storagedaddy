@@ -403,7 +403,11 @@ struct AgentAccessIntegrationTests {
         request.httpMethod = "POST"
         request.setValue("Bearer " + oauthToken, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(AgentJSON.object(["jsonrpc": .string("2.0"), "id": .integer(2), "method": .string("tools/call"), "params": .object(["name": .string("storagedaddy_list_folder"), "arguments": .object(["nodeID": .integer(0)])])]))
+        let listFolder = AgentJSON.object(["jsonrpc": .string("2.0"), "id": .integer(2), "method": .string("tools/call"), "params": .object(["name": .string("storagedaddy_list_folder"), "arguments": .object(["nodeID": .integer(0)])])])
+        let socketResult = try await socketRequest(.init(operation: "rpc", token: token, payload: listFolder), path: socketPath)
+        #expect(socketResult["result"]["isError"].bool == false)
+        #expect(socketResult.text.contains("sample.bin"))
+        request.httpBody = try JSONEncoder().encode(listFolder)
         let (data, response) = try await URLSession.shared.data(for: request)
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         let rpc = try JSONDecoder().decode(AgentJSON.self, from: data)

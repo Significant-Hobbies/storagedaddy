@@ -34,6 +34,22 @@ final class PackageCacheCleanerTests: XCTestCase {
         XCTAssertEqual(group.rootIDs.map { scan.nodes[$0].name }, ["Homebrew"])
     }
 
+    func testIncompletePipeFromInheritedWriterCannotApproveEmptyOutput() {
+        XCTAssertThrowsError(try PackageToolCommand.run(executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "(sleep 2; printf delayed) &"], directory: FileManager.default.temporaryDirectory,
+            requireCompleteOutput: true))
+    }
+
+    func testCommandRunnerUsesOnlyExplicitEnvironmentAndEnforcesDeadline() throws {
+        let directory = FileManager.default.temporaryDirectory
+        let environment = try PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/env"),
+            arguments: [], directory: directory, requireCompleteOutput: true,
+            environmentOverride: ["STORAGE_FIXTURE": "isolated"])
+        XCTAssertEqual(environment.output, "STORAGE_FIXTURE=isolated\n")
+        XCTAssertThrowsError(try PackageToolCommand.run(executable: URL(fileURLWithPath: "/bin/sleep"),
+            arguments: ["5"], directory: directory, timeout: 0.05))
+    }
+
     func testCommandRunnerDrainsAndReportsNonzeroExitWithoutShellInterpretation() throws {
         let output = try PackageToolCommand.run(executable: URL(fileURLWithPath: "/usr/bin/printf"), arguments: ["%s", "$(touch should-not-exist); literal"], directory: FileManager.default.temporaryDirectory)
         XCTAssertEqual(output.status, 0)

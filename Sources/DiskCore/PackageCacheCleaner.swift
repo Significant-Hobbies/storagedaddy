@@ -167,12 +167,21 @@ public enum PackageToolCommand {
         var data = Data(), buffer = [UInt8](repeating: 0, count: 16_384)
         var stoppedAt: Date?, cancelled = false, truncated = false
         while true {
+            // Only a read *after* exit can establish that the child has no
+            // remaining output. It may make its final write after an EAGAIN.
+            let exited = !process.isRunning
             let count = read(fd, &buffer, buffer.count)
+            if count < 0 && errno == EINTR { continue }
             if count > 0 {
                 let retained = min(count, max(0, maximumOutputBytes - data.count))
                 if retained < count { truncated = true }
                 data.append(contentsOf: buffer.prefix(retained))
-            } else if !process.isRunning { break }
+            } else if exited {
+                // No EOF means a pipe error or an inherited writer. Neither
+                // provides complete evidence for a cleanup decision.
+                if count < 0 { truncated = true }
+                break
+            }
             if Task.isCancelled || Date() > deadline {
                 cancelled = true
                 if stoppedAt == nil { process.terminate(); stoppedAt = Date() }

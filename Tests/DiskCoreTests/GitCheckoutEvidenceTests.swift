@@ -21,6 +21,18 @@ final class GitCheckoutEvidenceTests: XCTestCase {
         let clean = GitCheckoutProbe.collect(at: URL(fileURLWithPath: "/fixture")) { _, args in args.first == "rev-list" ? "0\n" : "" }
         XCTAssertEqual(clean.changedEntries, 0); XCTAssertEqual(clean.unpushedCommits, 0); XCTAssertEqual(clean.stashes, 0)
     }
+    func testRealGitEvidencePreservesOutputAndRejectsOversizedResults() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        XCTAssertNotNil(GitCheckoutProbe.runLocal(at: directory, arguments: ["init", "-q"]))
+        let file = directory.appendingPathComponent("tracked.swift")
+        try Data().write(to: file)
+        XCTAssertNotNil(GitCheckoutProbe.runLocal(at: directory, arguments: ["add", "tracked.swift"]))
+        XCTAssertEqual(GitCheckoutProbe.runLocal(at: directory, arguments: ["ls-files", "-z"]), "tracked.swift\0")
+        let value = String(repeating: "x", count: 65_536)
+        XCTAssertNil(GitCheckoutProbe.runLocal(at: directory, arguments: ["-c", "test.value=" + value, "config", "--get", "test.value"]))
+    }
     func testLocalProbeOfNonRepositoryFailsClosed() {
         let result = GitCheckoutProbe.collect(at: FileManager.default.temporaryDirectory)
         XCTAssertNil(result.changedEntries); XCTAssertNil(result.unpushedCommits); XCTAssertNil(result.stashes)
