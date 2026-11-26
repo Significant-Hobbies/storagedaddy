@@ -103,14 +103,10 @@ struct AgentAccessIntegrationTests {
         f.explorer.developerGroups = [DeveloperGroup(category: .nodeModules, allocatedBytes: node.allocatedBytes,
             logicalBytes: node.logicalBytes, fileCount: 1, rootIDs: [node.id])]
         let target: AgentJSON = .object(["targetUsedPercent": .integer(1)])
-        let socket = f.agents.socketPath, token = f.token
-        func rpc(_ name: String, _ arguments: AgentJSON) async throws -> AgentJSON {
-            let message = AgentBridgeRequest(operation: "rpc", token: token, payload: .object([
-                "jsonrpc": .string("2.0"), "id": .integer(1), "method": .string("tools/call"),
-                "params": .object(["name": .string("storagedaddy_" + name), "arguments": arguments])]))
-            return try await socketRequest(message, path: socket)
+        func rpc(_ name: String, _ arguments: AgentJSON) async -> AgentJSON {
+            await call(name, arguments: arguments, fixture: f)
         }
-        let response = try await rpc("plan_space_target", target)
+        let response = await rpc("plan_space_target", target)
         func payload(_ response: AgentJSON) throws -> AgentJSON {
             let value = try #require(response["result"]["content"].array?.first?["text"].string)
             return try JSONDecoder().decode(AgentJSON.self, from: Data(value.utf8))
@@ -119,10 +115,10 @@ struct AgentAccessIntegrationTests {
         let id = try #require(plan["planID"].string)
         #expect(plan["choices"].array?.first?["nodeID"].int == node.id)
         #expect(plan["observedFreeBytesChange"].int == 0)
-        let wrongTarget = try await rpc("plan_space_target", .object(["targetUsedPercent": .integer(80), "planID": .string(id)]))
+        let wrongTarget = await rpc("plan_space_target", .object(["targetUsedPercent": .integer(80), "planID": .string(id)]))
         #expect(wrongTarget["result"]["isError"].bool == true)
         let args: AgentJSON = .object(["nodeIDs": .array([.integer(node.id)]), "reason": .string("Reinstall from manifest"), "planID": .string(id)])
-        let request = try await rpc("move_to_trash", args)
+        let request = await rpc("move_to_trash", args)
         #expect(request["result"]["isError"].bool == false)
         #expect(FileManager.default.fileExists(atPath: modules.path))
         f.agents.review(try #require(f.agents.reviews.first).id)
@@ -139,7 +135,7 @@ struct AgentAccessIntegrationTests {
         #expect(FileManager.default.fileExists(atPath: recovery.appendingPathComponent("index.js").path))
         #expect(!FileManager.default.fileExists(atPath: modules.path))
         f.explorer.scan = try await DiskScanner.scan(root: f.root)
-        let stale = try await rpc("move_to_trash", args)
+        let stale = await rpc("move_to_trash", args)
         #expect(stale["result"]["isError"].bool == true)
         #expect(f.agents.reviews.count == 1)
         let measured = try payload(await rpc("plan_space_target", .object([

@@ -136,7 +136,8 @@ public enum PackageToolCommand {
     /// after the display bound; a verbose manager cannot deadlock the pipe.
     public static func run(executable: URL, arguments: [String], directory: URL, timeout: TimeInterval = 300,
                            maximumOutputBytes: Int = 262_144, requireCompleteOutput: Bool = false, mergeStandardError: Bool = true,
-                           locale: String? = nil, goBuildCache: URL? = nil, nodeToolPath: Bool = false) throws -> PackageToolCommandResult {
+                           locale: String? = nil, goBuildCache: URL? = nil, nodeToolPath: Bool = false,
+                           environmentOverride: [String: String]? = nil) throws -> PackageToolCommandResult {
         try Task.checkCancellation()
         let process = Process(), pipe = Pipe()
         process.executableURL = executable
@@ -158,7 +159,7 @@ public enum PackageToolCommand {
         }
         if let goBuildCache { environment["GOCACHE"] = goBuildCache.path }
         if let locale { environment["LC_ALL"] = locale }
-        process.environment = environment
+        process.environment = environmentOverride ?? environment
         try process.run()
         let fd = pipe.fileHandleForReading.fileDescriptor
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
