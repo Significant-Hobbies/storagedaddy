@@ -301,9 +301,18 @@ struct FileTypeStats: Sendable {
 
     @Published private(set) var exclusionResultsStale = false
 
+    var currentExcludedFolders: [String] { exclusionPreferences.stringArray(forKey: "excludedFolders") ?? [] }
+
+    private var exclusionsNeedRefresh = false
+
     func refreshExcludedFolders() {
-        let current = exclusionPreferences.stringArray(forKey: "excludedFolders") ?? []
+        let current = currentExcludedFolders
         guard current != excludedFolders else { return }
+        guard !busy || discoveryID != nil else {
+            exclusionsNeedRefresh = true
+            return
+        }
+        let resumeHome = discoveryID != nil && workspace == .cleanup ? culpritSearchHome : nil
         if discoveryID != nil {
             task?.cancel()
             discoveryID = nil
@@ -311,6 +320,9 @@ struct FileTypeStats: Sendable {
             busy = false
         }
         excludedFolders = current
+        if let resumeHome, canStartDeveloperCleanup {
+            openSpaceTarget(spaceTarget, home: resumeHome, preservingSelection: true)
+        }
     }
 
     func addExcludedFolders(_ urls: [URL]) {
@@ -379,7 +391,14 @@ struct FileTypeStats: Sendable {
     @Published var volumeCapacity: Int64?
     @Published var liveProgress: ScanProgress?
     @Published var liveStorageCapacity: StartupCapacity?
-    @Published var busy = false
+    @Published var busy = false {
+        didSet {
+            if !busy && exclusionsNeedRefresh {
+                exclusionsNeedRefresh = false
+                refreshExcludedFolders()
+            }
+        }
+    }
     @Published private(set) var lastScanSummary = "No scan yet"
     @Published var progress = "Choose what to scan to begin" { didSet { runtime.scanStatus = progress } }
     @Published var folderExplanation: FolderExplanationState?
@@ -928,7 +947,7 @@ struct FileTypeStats: Sendable {
             guard !check.isCancelled else { throw CancellationError() }
             try Task.checkCancellation()
             guard workspace == .cleanup, isFindingStorageCulprits else { throw CocoaError(.userCancelled) }
-            guard !FolderExclusions(paths: excludedFolders).blocksCleanup(entry.url) else {
+            guard !FolderExclusions(paths: currentExcludedFolders).blocksCleanup(entry.url) else {
                 throw CleanupPreflightError.excludedFolder(entry.url.path)
             }
             try CleanupSafety.validate(url: entry.url, expected: file.node, root: file.root)
@@ -941,7 +960,10 @@ struct FileTypeStats: Sendable {
         }
     }
 
+    private(set) var manualCleanupNavigationID = UUID()
+
     func openDeveloperCleanup() {
+        manualCleanupNavigationID = UUID()
         exitSpaceTarget()
         let entering = workspace != .cleanup || !showingDeveloperCleanup
         workspace = .cleanup
@@ -951,6 +973,7 @@ struct FileTypeStats: Sendable {
     }
 
     func openQuickCleanup() {
+        manualCleanupNavigationID = UUID()
         exitSpaceTarget()
         showingDeveloperCleanup = false
         showWelcome = false
@@ -1984,7 +2007,7 @@ struct FileTypeStats: Sendable {
                     guard scanVersion == version, filenameSearchIdentity == scanIdentity, cleanupAuthorizationIsCurrent(authorization, remaining: remaining) else { throw CancellationError() }
                     try DuplicateSurvivorProtection.validateSurvivors(scan: scan, selections: duplicates, staged: Set(ids))
                     let url = scan.url(for: id)
-                    if FolderExclusions(paths: excludedFolders).blocksCleanup(url) {
+                    if FolderExclusions(paths: currentExcludedFolders).blocksCleanup(url) {
                         throw CleanupPreflightError.excludedFolder(url.path)
                     }
                     try CleanupSafety.validate(url: url, expected: scan.nodes[id], root: URL(fileURLWithPath: scan.rootPath),
@@ -2006,7 +2029,7 @@ struct FileTypeStats: Sendable {
                                 guard self.agentAccess.allowsPermanentCleanup(of: id) else {
                                     throw CocoaError(.fileWriteNoPermission)
                                 }
-                                if FolderExclusions(paths: self.excludedFolders).blocksCleanup(url) {
+                                if FolderExclusions(paths: self.currentExcludedFolders).blocksCleanup(url) {
                                     throw CleanupPreflightError.excludedFolder(url.path)
                                 }
                                 try DuplicateSurvivorProtection.validateSurvivors(scan: scan, selections: duplicates, staged: Set(ids))

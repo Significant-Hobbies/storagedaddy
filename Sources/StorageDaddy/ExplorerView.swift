@@ -114,6 +114,9 @@ struct ExplorerView: View {
         .onChange(of: m.progress) { _, progress in m.runtime.scanStatus = progress }
         .onChange(of: m.storageInspectorRequest) { _, _ in inspector = true }
         .onChange(of: m.busy) { _, busy in if busy && !StorageStartupCheck.enabled { accessIntroductionSeen = true } }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            m.refreshExcludedFolders()
+        }
         .onAppear {
             guard runsLaunchActions else { return }
             NSApplication.shared.setActivationPolicy(.regular)

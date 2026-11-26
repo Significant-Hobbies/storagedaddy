@@ -47,6 +47,18 @@ import Testing
     #expect(session.cleanupCandidates.isEmpty)
     #expect(session.cleanupMeasuredBytes == nil)
     #expect(session.model.excludedFolders == ["/fixture/protected", "/fixture/new-exclusion"])
+    session.model.openQuickCleanup()
+    session.followNativeRoute("cleanup")
+    session.activate("cleanup")
+    session.resumeDeferredDiscovery()
+    #expect(!session.model.isFindingStorageCulprits)
+    session.model.busy = true
+    source.set(["/fixture/later"], forKey: "excludedFolders")
+    session.model.refreshExcludedFolders()
+    #expect(session.model.currentExcludedFolders == ["/fixture/later"])
+    #expect(session.model.excludedFolders.contains("/fixture/protected"))
+    session.model.busy = false
+    #expect(session.model.excludedFolders == ["/fixture/later"])
     #expect(!session.model.agentAccess.enabled)
     #expect(!session.model.agentAccess.listening)
     #expect(!session.model.busy)

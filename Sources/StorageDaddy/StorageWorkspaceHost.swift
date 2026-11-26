@@ -77,14 +77,35 @@ public final class StorageWorkspaceSession: ObservableObject {
     public func showWidget() { model.runtime.showWidget() }
 
     fileprivate var requestedWorkspace: Workspace?
+    private var routeFromNativeNavigation: String?
+    private var deferredDiscoveryID: UUID?
+
+    func followNativeRoute(_ route: String) {
+        deferredDiscoveryID = nil
+        requestedWorkspace = model.workspace
+        routeFromNativeNavigation = route
+    }
+
+    func resumeDeferredDiscovery() {
+        let deferred = deferredDiscoveryID
+        deferredDiscoveryID = nil
+        if deferred == model.manualCleanupNavigationID && model.workspace == .cleanup { findSpaceToClean() }
+    }
 
     func activate(_ route: String) {
         model.refreshExcludedFolders()
+        let echo = routeFromNativeNavigation == route && model.workspace == requestedWorkspace
+        routeFromNativeNavigation = nil
+        deferredDiscoveryID = nil
+        guard !echo else { return }
         model.showWelcome = false
         switch route {
         case "cleanup", "find-space-to-clean":
             model.workspace = .cleanup
-            if !model.isFindingStorageCulprits || model.developerCleanupPlan == nil { findSpaceToClean() }
+            if !model.isFindingStorageCulprits || model.developerCleanupPlan == nil {
+                deferredDiscoveryID = model.busy && !model.isFindingStorageCulprits ? model.manualCleanupNavigationID : nil
+                findSpaceToClean()
+            }
         case "quick-cleanup": model.openQuickCleanup()
         case "worktrees", "git-worktrees", "developer", "developer-insights": model.workspace = .developer
         case "explore", "disk-explorer-file-search": model.openStorage(.explore)
@@ -145,7 +166,6 @@ public struct StorageWorkspaceView: View {
     private let route: String
     private let onNavigate: (String) -> Void
     @ObservedObject private var model: ExplorerModel
-    @Environment(\.scenePhase) private var scenePhase
 
     public init(session: StorageWorkspaceSession, route: String, onNavigate: @escaping (String) -> Void = { _ in }) {
         self.session = session
@@ -165,11 +185,8 @@ public struct StorageWorkspaceView: View {
         }
         .environmentObject(session.model)
         .onChange(of: route, initial: true) { _, next in session.activate(next) }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { model.refreshExcludedFolders() } }
         .onChange(of: model.busy) { _, busy in
-            if !busy && route == "cleanup" && model.workspace == .cleanup && !model.isFindingStorageCulprits {
-                session.findSpaceToClean()
-            }
+            if !busy { session.resumeDeferredDiscovery() }
         }
         .onChange(of: model.workspace) { _, workspace in
             guard route != "settings", session.requestedWorkspace != workspace else { return }
@@ -191,6 +208,7 @@ public struct StorageWorkspaceView: View {
             case .agents: "agent-access"
             case .acknowledgments: "acknowledgments"
             }
+            session.followNativeRoute(key)
             onNavigate(key)
         }
     }

@@ -22,7 +22,7 @@ final class GitWorktreeReviewModel: ObservableObject {
         if interrupted { explorer.freezeCleanupReview() }
         self.explorer = explorer; explorer.busy = true
         review = nil; managed = nil; refreshOnClose = interrupted; message = nil; presented = true; working = true
-        let exclusions = explorer.excludedFolders
+        let exclusions = explorer.currentExcludedFolders
         task = Task {
             do {
                 if FleetManagedCheckout.manages(candidate.url) {
@@ -38,7 +38,7 @@ final class GitWorktreeReviewModel: ObservableObject {
     func remove() {
         guard !working, let explorer, review?.canRemove == true || managed?.eligible == true else { return }
         working = true
-        let exclusions = explorer.excludedFolders
+        let exclusions = explorer.currentExcludedFolders
         task = Task {
             do {
                 if let managed {
