@@ -17,7 +17,7 @@ final class GitWorktreeReviewModel: ObservableObject {
 
     func inspect(_ candidate: GitWorktreeCandidate, explorer: ExplorerModel) {
         guard !working else { return }
-        let interrupted = explorer.searchingForMoreCleanup
+        let interrupted = explorer.measuringCulprits
         guard explorer.storageOperationBlockReason(scheduled: false, allowingDiscovery: true) == nil else { return }
         if interrupted { explorer.freezeCleanupReview() }
         self.explorer = explorer; explorer.busy = true

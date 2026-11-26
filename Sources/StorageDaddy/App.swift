@@ -874,6 +874,8 @@ struct FileTypeStats: Sendable {
         showingDeveloperCleanup = false
     }
 
+    private var largeFileCheck: Task<Void, Error>?
+
     func trashLargeFile(_ entry: LargeStorageEntry, moveToTrash: (URL) throws -> URL? = { url in
         var destination: NSURL?
         try FileManager.default.trashItem(at: url, resultingItemURL: &destination)
@@ -886,9 +888,12 @@ struct FileTypeStats: Sendable {
         freezeCleanupReview()
         busy = true
         progress = "Checking " + entry.title
-        defer { busy = false }
+        let check = Task.detached(priority: .userInitiated) { try CleanupActiveUse.validateCacheIsIdle(entry.url) }
+        largeFileCheck = check
+        defer { busy = false; largeFileCheck = nil }
         do {
-            try await Task.detached(priority: .userInitiated) { try CleanupActiveUse.validateCacheIsIdle(entry.url) }.value
+            try await withTaskCancellationHandler { try await check.value } onCancel: { check.cancel() }
+            guard !check.isCancelled else { throw CancellationError() }
             try Task.checkCancellation()
             guard workspace == .cleanup, isFindingStorageCulprits else { throw CocoaError(.userCancelled) }
             guard !FolderExclusions(paths: excludedFolders).blocksCleanup(entry.url) else {
@@ -921,17 +926,18 @@ struct FileTypeStats: Sendable {
     }
 
     private var discoveryID: UUID?
+    var measuringCulprits: Bool { discoveryID != nil && isFindingStorageCulprits }
     @Published private(set) var searchingForMoreCleanup = false
 
     var canEditCleanupReview: Bool {
-        canStartDeveloperCleanup || (searchingForMoreCleanup && busy && !moves.busy && moves.plan == nil
+        canStartDeveloperCleanup || (measuringCulprits && busy && !moves.busy && moves.plan == nil
             && !snapshotBusy && !monitoring && macTools?.isBusy != true && !conversationArchive.busy && staged.isEmpty)
     }
 
     /// Freeze the visible review before acting on it. Late discovery cannot
     /// replace its item IDs, reset the selection or end a new cleanup operation.
     func freezeCleanupReview() {
-        guard searchingForMoreCleanup else { return }
+        guard measuringCulprits else { return }
         task?.cancel()
         discoveryID = nil
         searchingForMoreCleanup = false
@@ -1041,7 +1047,6 @@ struct FileTypeStats: Sendable {
         let quickPlanner = quickProjectPlanner
         let runID = UUID()
         discoveryID = runID
-        searchingForMoreCleanup = cacheHome != nil
         task = Task {
             defer {
                 if discoveryID == runID {
@@ -1439,6 +1444,7 @@ struct FileTypeStats: Sendable {
         if let rss = ProcessMemory.residentBytes() { scanPeakRSS = max(scanPeakRSS ?? 0, rss) }
     }
     func cancel() {
+        largeFileCheck?.cancel()
         cacheCommandTask?.cancel()
         savedScanTask?.cancel()
         task?.cancel()
@@ -2089,7 +2095,7 @@ extension ExplorerModel {
     var scanScheduleBlockReason: String? { storageOperationBlockReason(scheduled: true) }
 
     func storageOperationBlockReason(scheduled: Bool, allowingDiscovery: Bool = false) -> String? {
-        if (busy && !(allowingDiscovery && searchingForMoreCleanup)) || isScanning { return "A scan, cleanup or package command is running." }
+        if (busy && !(allowingDiscovery && measuringCulprits)) || isScanning { return "A scan, cleanup or package command is running." }
         if !staged.isEmpty || showCleanup || !incompleteCleanup.isEmpty { return "Your cleanup selections are waiting for review." }
         if macTools?.isBusy == true { return "Mac Controls is busy." }
         if moves.busy || moves.plan != nil || moves.isPresented { return "A file move or review is open." }

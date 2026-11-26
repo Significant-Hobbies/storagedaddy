@@ -313,7 +313,7 @@ struct DeveloperCleanupView: View {
     private func openLargeReview(usingCodex: Bool) {
         guard model.storageOperationBlockReason(scheduled: false, allowingDiscovery: true) == nil else { return }
         capacityAfterLargeReview = nil
-        resumeAfterLargeReview = model.searchingForMoreCleanup
+        resumeAfterLargeReview = model.measuringCulprits
         if resumeAfterLargeReview { model.freezeCleanupReview() }
         model.busy = true
         startWithCodex = usingCodex

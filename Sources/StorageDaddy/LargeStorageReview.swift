@@ -89,7 +89,7 @@ struct LargeStorageEntry: Identifiable, Sendable {
                 if index >= limitPerRoot { capped = true; break }
                 guard let url = element as? URL else { continue }
                 var info = stat()
-                guard !isSensitiveComponent(url.lastPathComponent), !policy.contains(url.path), lstat(url.path, &info) == 0, info.st_dev == disk.st_dev else {
+                guard !isSensitiveComponent(url.lastPathComponent), !policy.contains(url.standardizedFileURL.path), lstat(url.path, &info) == 0, info.st_dev == disk.st_dev else {
                     walker.skipDescendants(); continue
                 }
                 if info.st_mode & S_IFMT == S_IFDIR {

@@ -29,7 +29,7 @@ struct DeveloperCleanupReviewTests {
                                                   volume: home, minimumBytes: 4096).entries
         #expect(rows.map(\.title) == ["recording.mov", "installer.zip"])
         let first = try #require(rows.first)
-        let second = try #require(rows.last)
+        let second = try #require(rows.first { $0.url.lastPathComponent == archive.lastPathComponent })
         let model = ExplorerModel(developerCleanupPreferences: nil)
         model.openSpaceTarget(nil, home: home)
         await model.waitForCurrentStorageOperation()
