@@ -21,18 +21,29 @@ public enum DiskScanner {
         promptAvoidanceFolders: [String] = [], developerArtifactHome: String?, quickCleanup: Bool = false,
         progress: (@Sendable (ScanProgress) -> Void)? = nil
     ) async throws -> ScanResult {
-        // Resolve ancestor aliases (for example /var -> /private/var), preserving
-        // a symbolic-link leaf as a link rather than traversing its destination.
         let cancellation = ScanCancellation()
-        let worker = Task.detached(priority: .userInitiated) {
-            let canonical = root.path == "/" ? root : root.deletingLastPathComponent().resolvingSymlinksInPath().appendingPathComponent(root.lastPathComponent)
-            var scanner = Scanner(root: canonical, backend: backend, parallelism: parallelism,
-                                  exclusions: FolderExclusions(paths: excludedFolders),
-                                  promptAvoidance: FolderExclusions(paths: promptAvoidanceFolders, resolveAliases: false),
-                                  developerArtifactHome: developerArtifactHome, quickCleanup: quickCleanup, cancellation: cancellation, progress: progress)
-            return try scanner.run()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                // The coordinator waits on its directory readers. Keep that wait
+                // off the cooperative executor so simultaneous scans can all advance.
+                let coordinator = Thread {
+                    continuation.resume(with: Result {
+                        // Preserve a symbolic-link leaf while resolving ancestor aliases.
+                        let canonical = root.path == "/" ? root : root.deletingLastPathComponent().resolvingSymlinksInPath().appendingPathComponent(root.lastPathComponent)
+                        var scanner = Scanner(root: canonical, backend: backend, parallelism: parallelism,
+                                              exclusions: FolderExclusions(paths: excludedFolders),
+                                              promptAvoidance: FolderExclusions(paths: promptAvoidanceFolders, resolveAliases: false),
+                                              developerArtifactHome: developerArtifactHome, quickCleanup: quickCleanup, cancellation: cancellation, progress: progress)
+                        return try scanner.run()
+                    })
+                }
+                coordinator.name = "StorageDaddy.scan"
+                coordinator.qualityOfService = .userInitiated
+                coordinator.start()
+            }
+        } onCancel: {
+            cancellation.cancel()
         }
-        return try await withTaskCancellationHandler { try await worker.value } onCancel: { cancellation.cancel(); worker.cancel() }
     }
 
     static func automaticParallelism(rootPath: String, rootDevice: UInt64, parentDevice: UInt64?, processorCount: Int) -> Int {
@@ -98,7 +109,7 @@ private struct Scanner {
     mutating func run() throws -> ScanResult {
         let rootPath = self.rootPath
         let started = Date()
-        try Task.checkCancellation()
+        try cancellation.check()
         guard !exclusions.contains(rootPath), !promptAvoidance.contains(rootPath), !isSensitivePath(root) else {
             let reason = exclusions.contains(rootPath) ? "excluded by folder settings" :
                 promptAvoidance.contains(rootPath) ? "skipped to avoid a macOS permission prompt" : "excluded by sensitive path policy"
@@ -393,12 +404,12 @@ private struct Scanner {
 
     private mutating func aggregateDirectories() throws {
         for id in nodes.indices.reversed() {
-            if id & 255 == 0 { try Task.checkCancellation() }
+            if id & 255 == 0 { try cancellation.check() }
             guard nodes[id].isDirectory else { continue }
             var logicalBytes: Int64 = 0
             var allocatedBytes: Int64 = 0
             for (index, child) in nodes[id].children.enumerated() {
-                if index & 255 == 0 { try Task.checkCancellation() }
+                if index & 255 == 0 { try cancellation.check() }
                 logicalBytes = saturatingAdd(logicalBytes, nodes[child].logicalBytes)
                 allocatedBytes = saturatingAdd(allocatedBytes, nodes[child].allocatedBytes)
                 if nodes[child].isScanIncomplete == true { nodes[id].isScanIncomplete = true }
