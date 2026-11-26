@@ -5,11 +5,10 @@ import DiskCore
 
 private enum RefreshFailure: Error { case unavailable }
 
-private final class RefreshSequence<Value: Sendable>: @unchecked Sendable {
-    private let lock = NSLock()
+private actor RefreshSequence<Value: Sendable> {
     private var calls = 0
-    let started = DispatchSemaphore(value: 0)
-    let resume = DispatchSemaphore(value: 0)
+    private var firstLoad: CheckedContinuation<Void, Never>?
+    private var startObserver: CheckedContinuation<Void, Never>?
     let first: Value
     let second: Value
     let blockFirst: Bool
@@ -18,10 +17,16 @@ private final class RefreshSequence<Value: Sendable>: @unchecked Sendable {
         self.first = first; self.second = second; self.blockFirst = blockFirst
     }
 
-    func next() throws -> Value {
-        lock.lock(); calls += 1; let call = calls; lock.unlock()
-        if call == 1 {
-            if blockFirst { started.signal(); resume.wait() }
+    func next() async throws -> Value {
+        calls += 1
+        if calls == 1 {
+            if blockFirst {
+                await withCheckedContinuation { continuation in
+                    firstLoad = continuation
+                    startObserver?.resume()
+                    startObserver = nil
+                }
+            }
             return first
         }
         if blockFirst { return second }
@@ -29,12 +34,13 @@ private final class RefreshSequence<Value: Sendable>: @unchecked Sendable {
     }
 
     func waitUntilStarted() async {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global().async {
-                self.started.wait()
-                continuation.resume()
-            }
-        }
+        guard firstLoad == nil else { return }
+        await withCheckedContinuation { startObserver = $0 }
+    }
+
+    func resumeFirst() {
+        firstLoad?.resume()
+        firstLoad = nil
     }
 }
 
@@ -47,7 +53,7 @@ private final class RefreshSequence<Value: Sendable>: @unchecked Sendable {
     @Test @MainActor func sessionsRetainInventoryAndShowRefreshFailure() async throws {
         let expected = try sessions("retained")
         let sequence = RefreshSequence(first: expected, second: expected)
-        let model = AISessionsModel(discover: { try sequence.next() })
+        let model = AISessionsModel(discover: { try await sequence.next() })
         await model.load()
         await model.load()
         #expect(model.report == expected)
@@ -58,11 +64,11 @@ private final class RefreshSequence<Value: Sendable>: @unchecked Sendable {
     @Test @MainActor func supersededSessionsCannotOverwriteNewResult() async throws {
         let newer = try sessions("new")
         let sequence = RefreshSequence(first: try sessions("old"), second: newer, blockFirst: true)
-        let model = AISessionsModel(discover: { try sequence.next() })
+        let model = AISessionsModel(discover: { try await sequence.next() })
         let old = Task { await model.load() }
         await sequence.waitUntilStarted()
         await model.load()
-        sequence.resume.signal()
+        await sequence.resumeFirst()
         await old.value
         #expect(model.report == newer)
         #expect(model.errorMessage == nil)

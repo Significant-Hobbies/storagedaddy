@@ -391,7 +391,7 @@ private struct AgentPolicy: Codable {
             if args["planID"] != nil, prior == nil || prior?.id.uuidString != a["planID"].string || prior?.percent != percent {
                 throw AgentSecurity.failure("This plan expired or its target changed. Request a new plan.")
             }
-            let capacity = await Task.detached(priority: .utility) { StartupCapacity(report: SystemInventory.collect()) }.value
+            let capacity = await Task.detached(priority: .utility) { StartupCapacity.measure() }.value
             guard let capacity, enabled, sessions.contains(where: { $0.id == sessionID && $0.revokedAt == nil && $0.permissions.contains(tool.permission) }) else {
                 throw AgentSecurity.failure("Startup capacity or agent access is unavailable.")
             }

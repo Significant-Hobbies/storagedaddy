@@ -53,6 +53,15 @@ struct AgentAccessIntegrationTests {
         )
     }
 
+    // The in-process server needs Swift executor time to answer this blocking client.
+    private func socketRequest(_ request: AgentBridgeRequest, path: String) async throws -> AgentJSON {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(with: Result { try AgentSocketClient.request(request, path: path) })
+            }
+        }
+    }
+
     private func httpToken(_ f: Fixture, approvedName: String = "HTTP fixture") async throws -> String {
         let base = "http://127.0.0.1:\(f.port)"
         func fetch(_ target: String, method: String = "GET", body: Data? = nil, type: String? = nil) async throws -> Data {
@@ -99,7 +108,7 @@ struct AgentAccessIntegrationTests {
             let message = AgentBridgeRequest(operation: "rpc", token: token, payload: .object([
                 "jsonrpc": .string("2.0"), "id": .integer(1), "method": .string("tools/call"),
                 "params": .object(["name": .string("storagedaddy_" + name), "arguments": arguments])]))
-            return try await Task.detached { try AgentSocketClient.request(message, path: socket) }.value
+            return try await socketRequest(message, path: socket)
         }
         let response = try await rpc("plan_space_target", target)
         func payload(_ response: AgentJSON) throws -> AgentJSON {
@@ -391,9 +400,7 @@ struct AgentAccessIntegrationTests {
         let f = try await fixture(role: .explorer)
         defer { f.agents.setEnabled(false); try? FileManager.default.removeItem(at: f.directory) }
         let socketPath = f.agents.socketPath, token = f.token
-        let session = try await Task.detached {
-            try AgentSocketClient.request(.init(operation: "session", token: token), path: socketPath)
-        }.value
+        let session = try await socketRequest(.init(operation: "session", token: token), path: socketPath)
         #expect(session["state"].string == "approved")
         let oauthToken = try await httpToken(f)
         var request = URLRequest(url: URL(string: "http://127.0.0.1:\(f.port)/mcp")!)

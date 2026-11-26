@@ -151,9 +151,9 @@ struct ScanWelcomeView: View {
             if phase == .active { accessStatus = FullDiskAccessProbe.status() }
         }
         .task {
-            let volumes = await Task.detached(priority: .utility) { SystemInventory.mountedVolumes() }.value
+            let capacity = await Task.detached(priority: .utility) { StartupCapacity.measure() }.value
             guard !Task.isCancelled else { return }
-            startupCapacity = StartupCapacity(volumes: volumes)
+            startupCapacity = capacity
             capacityLoaded = true
         }
     }
@@ -263,7 +263,16 @@ struct StartupCapacity: Sendable {
         self.available = available
     }
 
-    init?(volumes: [MountedVolumeInfo]) {
+    static func measure() -> Self? {
+        guard let volume = SystemInventory.startupVolume() else { return nil }
+        return Self(volumes: [volume], accounting: StartupAPFSAccounting.collect(startup: volume))
+    }
+
+    init?(volumes: [MountedVolumeInfo], accounting: StartupAPFSAccounting? = nil) {
+        if let accounting, let capacity = Self(total: accounting.total, available: accounting.available) {
+            self = capacity
+            return
+        }
         guard let volume = volumes.first(where: \.isStartupData)
                 ?? volumes.first(where: { $0.mountPoint == "/" }),
               let total = volume.totalCapacity, total > 0,
@@ -273,11 +282,7 @@ struct StartupCapacity: Sendable {
     }
 
     init?(report: SystemStorageReport) {
-        if let pool = report.startupAccounting, let capacity = Self(total: pool.total, available: pool.available) {
-            self = capacity
-        } else {
-            self.init(volumes: report.volumes)
-        }
+        self.init(volumes: report.volumes, accounting: report.startupAccounting)
     }
 
     var used: Int64 { total - available }

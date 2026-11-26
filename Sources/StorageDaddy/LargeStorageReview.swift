@@ -267,9 +267,9 @@ struct LargeStorageReviewSheet: View {
             defer { removing = false }
             do {
                 let (before, after) = try await Task.detached(priority: .userInitiated) {
-                    let before = StartupCapacity(report: SystemInventory.collect())
+                    let before = StartupCapacity.measure()
                     try vm.remove(exclusions: exclusions)
-                    let after = StartupCapacity(report: SystemInventory.collect())
+                    let after = StartupCapacity.measure()
                     return (before, after)
                 }.value
                 let gain = before.flatMap { b in after.flatMap { a in b.total == a.total ? a.available - b.available : nil } }

@@ -1210,7 +1210,7 @@ struct FileTypeStats: Sendable {
             }
             if isFindingStorageCulprits {
                 capacityBeforeCleanup = await Task.detached(priority: .userInitiated) {
-                    StartupCapacity(report: SystemInventory.collect())
+                    StartupCapacity.measure()
                 }.value
             }
             let worker = Task.detached(priority: .userInitiated) {
@@ -1219,7 +1219,7 @@ struct FileTypeStats: Sendable {
             let outcome = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
             if isFindingStorageCulprits {
                 spaceTargetResult = await Task.detached(priority: .userInitiated) {
-                    StartupCapacity(report: SystemInventory.collect())
+                    StartupCapacity.measure()
                 }.value
             }
             developerCleanupOutcome = outcome

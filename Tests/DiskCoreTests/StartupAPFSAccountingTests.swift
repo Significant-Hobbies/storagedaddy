@@ -7,7 +7,9 @@ final class StartupAPFSAccountingTests: XCTestCase {
         guard let startup = SystemInventory.mountedVolumes().first(where: \.isStartupData), startup.fsType == "apfs" else {
             throw XCTSkip("No startup APFS Data volume on this test host")
         }
-        let value = try XCTUnwrap(StartupAPFSAccounting.collect(startup: startup))
+        let capacityVolume = try XCTUnwrap(SystemInventory.startupVolume())
+        XCTAssertEqual(capacityVolume.bsdName, startup.bsdName)
+        let value = try XCTUnwrap(StartupAPFSAccounting.collect(startup: capacityVolume))
         XCTAssertGreaterThan(value.total, 0)
         XCTAssertGreaterThanOrEqual(value.available, 0)
         XCTAssertEqual(value.dataDevice, startup.bsdName)

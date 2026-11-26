@@ -24,6 +24,14 @@ public enum SystemInventory {
     // MARK: - Volumes
 
     public static func mountedVolumes() -> [MountedVolumeInfo] {
+        volumes(startupOnly: false)
+    }
+
+    public static func startupVolume() -> MountedVolumeInfo? {
+        volumes(startupOnly: true).first
+    }
+
+    private static func volumes(startupOnly: Bool) -> [MountedVolumeInfo] {
         let keys: [URLResourceKey] = [
             .volumeNameKey,
             .volumeTotalCapacityKey,
@@ -36,13 +44,15 @@ public enum SystemInventory {
             .volumeIsReadOnlyKey,
             .volumeIsBrowsableKey
         ]
-        var urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: []) ?? []
+        var urls = startupOnly ? [] : (FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: []) ?? [])
         let session = DASessionCreate(kCFAllocatorDefault)
         let startupPath = "/System/Volumes/Data"
         // Foundation can omit the hidden Data mount even with no skip option.
         // It is required to identify the startup pool and physical Data usage.
         if FileManager.default.fileExists(atPath: startupPath) {
             urls.insert(URL(fileURLWithPath: startupPath, isDirectory: true), at: 0)
+        } else if startupOnly {
+            urls = [URL(fileURLWithPath: "/", isDirectory: true)]
         }
 
         var seen = Set<String>()
