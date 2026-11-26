@@ -5,10 +5,9 @@ import AppKit
 import DiskCore
 import SaaSMakerUI
 
-@main
-enum StorageDaddyMain {
+public enum StorageDaddyMain {
     @MainActor
-    static func main() {
+    public static func main() {
         if CommandLine.arguments.contains("--check-ui-resources") {
             guard StorageUIResources.loaded else {
                 FileHandle.standardError.write(Data("StorageDaddy UI resources missing or invalid\n".utf8))
@@ -1243,7 +1242,7 @@ struct FileTypeStats: Sendable {
     func scanUserCachesForCleanup() {
         scanUserCaches(destination: .cleanup)
     }
-    private func scanUserCaches(destination: Workspace) {
+    func scanUserCaches(destination: Workspace) {
         start(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches"), destination: destination)
     }
     func scanHomeFolder() {
@@ -1257,7 +1256,7 @@ struct FileTypeStats: Sendable {
     func requestAISessionsRefresh() { aiSessionsRefreshID = UUID() }
     func chooseFolder() { chooseFolder(destination: nil) }
     func chooseCleanupFolder() { chooseFolder(destination: .cleanup) }
-    private func chooseFolder(destination: Workspace?) {
+    func chooseFolder(destination: Workspace?) {
         let p = NSOpenPanel(); p.canChooseDirectories = true; p.canChooseFiles = false; p.allowsMultipleSelection = false; p.prompt = "Scan Folder"
         if p.runModal() == .OK, let url = p.url {
             let protected = AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())

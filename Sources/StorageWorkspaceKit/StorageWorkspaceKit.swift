@@ -1,0 +1,6 @@
+import StorageDaddy
+
+public typealias StorageWorkspaceSession = StorageDaddy.StorageWorkspaceSession
+public typealias StorageWorkspaceView = StorageDaddy.StorageWorkspaceView
+public typealias StorageWorkspaceCapacity = StorageDaddy.StorageWorkspaceCapacity
+public typealias StorageWorkspaceCandidate = StorageDaddy.StorageWorkspaceCandidate

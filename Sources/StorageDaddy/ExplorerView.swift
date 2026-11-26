@@ -8,18 +8,22 @@ import DiskCore
 struct ExplorerView: View {
     // Fixtures host the actual shell without app activation or scripted scans.
     var runsLaunchActions = true
+    let embedded: Bool
+    var worktreesOnly = false
     @EnvironmentObject var m: ExplorerModel
     @AppStorage("storageAccessIntroductionSeen") private var accessIntroductionSeen = false
     @State private var inspector = false
     @State private var choosingDisk = false
     @State private var toolsExpanded = false
-    init(runsLaunchActions: Bool = true, inspector: Bool = false) {
+    init(runsLaunchActions: Bool = true, inspector: Bool = false, embedded: Bool = false, worktreesOnly: Bool = false) {
+        self.embedded = embedded
+        self.worktreesOnly = worktreesOnly
         self.runsLaunchActions = runsLaunchActions
         _inspector = State(initialValue: inspector)
     }
     var body: some View {
         HStack(spacing: 0) {
-            sidebar
+            if !embedded { sidebar }
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     scopeBar
@@ -86,11 +90,10 @@ struct ExplorerView: View {
             }.background(AppColors.canvas)
         }
         .font(.custom(DaddyTheme.palette.sansFont, size: 14))
-        .smWorkspaceWindowChrome()
         .storageTheme(DaddyTheme.palette)
         .buttonStyle(SMMacButtonStyle(.secondary))
-        .toolbar(.hidden, for: .windowToolbar)
-        .sheet(isPresented: $choosingDisk) { DiskPickerView(isPresented: $choosingDisk).environmentObject(m).frame(width: 620, height: 560) }
+        .modifier(StorageWindowChrome(embedded: embedded, hideToolbar: true))
+        .sheet(isPresented: $choosingDisk) { DiskPickerView(isPresented: $choosingDisk, destination: scanDestination).environmentObject(m).frame(width: 620, height: 560) }
         .sheet(isPresented: $m.showAbout) {
             VStack(spacing: 16) {
                 if let icon = StorageDaddyAppDelegate.brandIcon {
@@ -281,14 +284,16 @@ struct ExplorerView: View {
             }
         }
     }
+    private var scanDestination: Workspace? { embedded && m.workspace.requiresScan ? m.workspace : nil }
+
     private var emptyState: some View {
         ScanWelcomeView(
             canFindCulprits: m.canStartDeveloperCleanup,
             findCulprits: { m.openSpaceTarget($0) },
             scanDisk: { choosingDisk = true },
-            scanFolder: m.chooseFolder,
-            scanHome: m.scanHomeFolder,
-            scanCaches: m.scanUserCaches
+            scanFolder: { m.chooseFolder(destination: scanDestination) },
+            scanHome: { m.start(FileManager.default.homeDirectoryForCurrentUser, destination: scanDestination ?? .explore) },
+            scanCaches: { m.scanUserCaches(destination: scanDestination ?? .explore) }
         )
     }
     @ViewBuilder private var content: some View {
@@ -324,7 +329,8 @@ struct ExplorerView: View {
                     onMove: { ids in m.moves.reviewCopies(ids: ids, scan: scan, excludedFolders: m.excludedFolders) })
                     .id("\(scan.started):\(scan.rootPath)")
             }
-        case .developer: DeveloperView()
+        case .developer:
+            if worktreesOnly { ScrollView { GitWorktreeView().padding(24) } } else { DeveloperView() }
         case .projects:
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -694,5 +700,16 @@ struct BrandMark: View {
     var body: some View {
         if let image = StorageArtwork.image("StorageDaddy", directory: artworkDirectory) { Image(nsImage: image).resizable().scaledToFit().accessibilityHidden(true) }
         else { Image(systemName: "externaldrive.fill").resizable().scaledToFit().foregroundStyle(Tints.mint).accessibilityHidden(true) }
+    }
+}
+
+
+struct StorageWindowChrome: ViewModifier {
+    let embedded: Bool
+    let hideToolbar: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if embedded { content }
+        else if hideToolbar { content.smWorkspaceWindowChrome().toolbar(.hidden, for: .windowToolbar) }
+        else { content.smWorkspaceWindowChrome() }
     }
 }
