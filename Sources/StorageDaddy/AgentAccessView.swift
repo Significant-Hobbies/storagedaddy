@@ -35,7 +35,7 @@ struct AgentAccessView: View {
                             Button(agents.extensionWorking ? "Preparing extension…" : "Add to Claude Desktop", action: agents.addToClaudeDesktop).disabled(agents.extensionWorking)
                             if let file = agents.extensionURL { Button("Show extension") { NSWorkspace.shared.activateFileViewerSelecting([file]) } }
                         }
-                        Text("Other MCP clients can launch the same helper with no arguments. Keychain keeps approved credentials; use --ephemeral for a connection that is never saved.").font(.caption).foregroundStyle(Tints.secondaryText)
+                        Text(agents.embedded ? "Use the helper and socket shown above in other MCP clients. Each connection needs approval in daddyrad." : "Other MCP clients can launch the same helper with no arguments. Keychain keeps approved credentials; use --ephemeral for a connection that is never saved.").font(.caption).foregroundStyle(Tints.secondaryText)
                         Text("HTTP clients sign in again after AI Agents is turned off or StorageDaddy restarts. The private stdio helper keeps its Keychain approval.").font(.caption).foregroundStyle(Tints.secondaryText)
                     }.padding(20).storagePanel()
                 }

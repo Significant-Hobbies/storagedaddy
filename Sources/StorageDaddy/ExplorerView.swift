@@ -56,7 +56,7 @@ struct ExplorerView: View {
                         }.padding(12).overlay(Rectangle().stroke(Tints.mint.opacity(0.25)))
                     }
                     if !m.busy, m.workspace == .explore, m.showWelcome || (!accessIntroductionSeen && m.scan == nil) { accessIntroduction }
-                    else if m.isScanning, m.workspace == .explore, m.storageSection == .explore, let live = m.liveProgress { LiveScanView(progress: live) }
+                    else if m.isScanning, (m.workspace == .explore && m.storageSection == .explore) || (embedded && m.workspace.requiresScan), let live = m.liveProgress { LiveScanView(progress: live) }
                     else if m.scan == nil, m.workspace.requiresScan || m.workspace == .explore { emptyState }
                     else { content }
                     Divider().overlay(Tints.secondaryText.opacity(0.18))
@@ -81,6 +81,7 @@ struct ExplorerView: View {
                                 .monospacedDigit().foregroundStyle(Tints.secondaryText)
                                 .help(processDiskReadRateHelp)
                         }
+                        if embedded, let scan = m.scan, scan.skipped > 0 { skippedDetails(scan) }
                         Text("On-device only").foregroundStyle(Tints.secondaryText)
                     }.font(.custom(DaddyTheme.palette.sansFont, size: 10)).lineLimit(1).padding(.horizontal, 24).frame(height: 30)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -90,9 +91,9 @@ struct ExplorerView: View {
             }.background(AppColors.canvas)
         }
         .font(.custom(DaddyTheme.palette.sansFont, size: 14))
+        .modifier(StorageWindowChrome(embedded: embedded, hideToolbar: true))
         .storageTheme(DaddyTheme.palette)
         .buttonStyle(SMMacButtonStyle(.secondary))
-        .modifier(StorageWindowChrome(embedded: embedded, hideToolbar: true))
         .sheet(isPresented: $choosingDisk) { DiskPickerView(isPresented: $choosingDisk, destination: scanDestination).environmentObject(m).frame(width: 620, height: 560) }
         .sheet(isPresented: $m.showAbout) {
             VStack(spacing: 16) {
@@ -208,10 +209,7 @@ struct ExplorerView: View {
                              ?? "\(DiskFormat.bytes(root.allocatedBytes)) on disk")
                             .font(.custom(DaddyTheme.palette.sansFont, size: 11)).foregroundStyle(Tints.secondaryText)
                         if scan.skipped > 0 {
-                            Button("\(scan.skipped.formatted()) skipped · Details") {
-                                m.message = [m.scanStorageAccounting?.measuredBreakdown, m.scanStorageAccounting?.explanation, scan.coverageExplanation]
-                                    .compactMap { $0 }.joined(separator: "\n\n")
-                            }.font(.caption).buttonStyle(.plain)
+                            skippedDetails(scan)
                         }
                     }.padding(.horizontal, 8)
                 }
@@ -243,6 +241,13 @@ struct ExplorerView: View {
             .accessibilityIdentifier("workspace-\(item.rawValue)")
             .accessibilityLabel(item == .cleanup && !m.staged.isEmpty ? "Quick Cleanup, \(m.staged.count) \(m.staged.count == 1 ? "item" : "items") waiting for cleanup review" : title ?? item.title)
             .help(item.requiresScan && m.scan == nil ? "Scan a disk or folder to see these results." : title ?? item.title)
+    }
+
+    private func skippedDetails(_ scan: ScanResult) -> some View {
+        Button("\(scan.skipped.formatted()) skipped · Details") {
+            m.message = [m.scanStorageAccounting?.measuredBreakdown, m.scanStorageAccounting?.explanation, scan.coverageExplanation]
+                .compactMap { $0 }.joined(separator: "\n\n")
+        }.font(.caption).buttonStyle(.plain)
     }
 
     private var scopeBar: some View {

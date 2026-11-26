@@ -10,25 +10,28 @@ public final class StorageWorkspaceSession: ObservableObject {
     @Published public private(set) var cleanupCandidates: [StorageWorkspaceCandidate] = []
     @Published public private(set) var cleanupProgress = ""
     @Published public private(set) var cleanupIsBusy = false
+    /// Measured candidates available now. Additional candidates can arrive while cleanupIsBusy is true.
     @Published public private(set) var cleanupMeasuredBytes: Int64?
     @Published public private(set) var observedFreeSpaceChange: Int64?
     private var observers = Set<AnyCancellable>()
     private var started = false
 
-    public init() {
-        // Protected paths and configured search roots must carry forward before any cleanup can run.
-        let defaults = UserDefaults.standard
-        if Bundle.main.bundleIdentifier != "local.fleet.storagedaddy",
-           let previous = defaults.persistentDomain(forName: "local.fleet.storagedaddy") {
-            for key in ["excludedFolders", "developerCleanupFolders", "developerCleanupFolder",
-                        "automaticallySaveScans", "scanWorkerCount", "binaryStorageUnits", "colorBlindMap"]
-                where defaults.object(forKey: key) == nil {
-                if let value = previous[key] { defaults.set(value, forKey: key) }
-            }
+    public convenience init() {
+        let standalone = UserDefaults(suiteName: "local.fleet.storagedaddy") ?? .standard
+        self.init(defaults: .standard, standalone: standalone)
+    }
+
+    init(defaults: UserDefaults, standalone: UserDefaults, agentDirectory: URL = AgentAccessModel.embeddedDirectory) {
+        // Both apps use the same protected-folder list, including changes made after migration.
+        for key in ["developerCleanupFolders", "developerCleanupFolder", "automaticallySaveScans",
+                    "scanWorkerCount", "binaryStorageUnits", "colorBlindMap"] where defaults.object(forKey: key) == nil {
+            if let previous = standalone.object(forKey: key) { defaults.set(previous, forKey: key) }
         }
-        model = ExplorerModel()
-        model.$progress.removeDuplicates().assign(to: &$cleanupProgress)
-        model.$busy.removeDuplicates().assign(to: &$cleanupIsBusy)
+        model = ExplorerModel(developerCleanupPreferences: defaults, exclusionPreferences: standalone, agentDirectory: agentDirectory)
+        model.$progress.combineLatest(model.$culpritSearchHome)
+            .map { $1 == nil ? "" : $0 }.removeDuplicates().assign(to: &$cleanupProgress)
+        model.$busy.combineLatest(model.$culpritSearchHome)
+            .map { $0 && $1 != nil }.removeDuplicates().assign(to: &$cleanupIsBusy)
         model.$developerCleanupPlan.combineLatest(model.$developerCleanupOutcome)
             .sink { [weak self] plan, outcome in
                 let candidates = StorageWorkspaceCandidate.ranked(in: plan, outcome: outcome)
@@ -65,19 +68,23 @@ public final class StorageWorkspaceSession: ObservableObject {
 
     /// Start native candidate discovery. Deletion always remains in the native review and confirmation workflow.
     public func findSpaceToClean() {
-        guard !model.isFindingStorageCulprits, model.canStartDeveloperCleanup else { return }
+        guard model.canStartDeveloperCleanup else { return }
+        if model.isFindingStorageCulprits && model.developerCleanupPlan != nil && model.developerCleanupOutcome == nil { return }
         model.openSpaceTarget(model.dashboard.report.flatMap(StartupCapacity.init(report:)))
     }
 
     public func chooseFolder() { model.chooseFolder() }
     public func showWidget() { model.runtime.showWidget() }
 
+    fileprivate var requestedWorkspace: Workspace?
+
     func activate(_ route: String) {
+        model.refreshExcludedFolders()
         model.showWelcome = false
         switch route {
         case "cleanup", "find-space-to-clean":
             model.workspace = .cleanup
-            if !model.isFindingStorageCulprits { findSpaceToClean() }
+            if !model.isFindingStorageCulprits || model.developerCleanupPlan == nil { findSpaceToClean() }
         case "quick-cleanup": model.openQuickCleanup()
         case "worktrees", "git-worktrees", "developer", "developer-insights": model.workspace = .developer
         case "explore", "disk-explorer-file-search": model.openStorage(.explore)
@@ -99,6 +106,7 @@ public final class StorageWorkspaceSession: ObservableObject {
         case "settings": break
         default: model.workspace = .dashboard
         }
+        requestedWorkspace = model.workspace
     }
 }
 
@@ -135,10 +143,15 @@ public struct StorageWorkspaceCapacity: Sendable {
 public struct StorageWorkspaceView: View {
     private let session: StorageWorkspaceSession
     private let route: String
+    private let onNavigate: (String) -> Void
+    @ObservedObject private var model: ExplorerModel
+    @Environment(\.scenePhase) private var scenePhase
 
-    public init(session: StorageWorkspaceSession, route: String) {
+    public init(session: StorageWorkspaceSession, route: String, onNavigate: @escaping (String) -> Void = { _ in }) {
         self.session = session
         self.route = route
+        self.onNavigate = onNavigate
+        _model = ObservedObject(wrappedValue: session.model)
     }
 
     public var body: some View {
@@ -152,5 +165,33 @@ public struct StorageWorkspaceView: View {
         }
         .environmentObject(session.model)
         .onChange(of: route, initial: true) { _, next in session.activate(next) }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { model.refreshExcludedFolders() } }
+        .onChange(of: model.busy) { _, busy in
+            if !busy && route == "cleanup" && model.workspace == .cleanup && !model.isFindingStorageCulprits {
+                session.findSpaceToClean()
+            }
+        }
+        .onChange(of: model.workspace) { _, workspace in
+            guard route != "settings", session.requestedWorkspace != workspace else { return }
+            let key: String = switch workspace {
+            case .dashboard: "dashboard"
+            case .cleanup: "cleanup"
+            case .developer: "developer"
+            case .explore: "explore"
+            case .findFiles: "files"
+            case .applications: "applications"
+            case .duplicates: "duplicates"
+            case .aiSessions: "ai-sessions"
+            case .snapshots: "history"
+            case .projects: "projects"
+            case .appData: "app-data"
+            case .macControls: "mac-controls"
+            case .processes: "processes"
+            case .driveMonitoring: "drive-monitoring"
+            case .agents: "agent-access"
+            case .acknowledgments: "acknowledgments"
+            }
+            onNavigate(key)
+        }
     }
 }

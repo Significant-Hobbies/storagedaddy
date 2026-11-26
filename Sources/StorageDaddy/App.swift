@@ -282,9 +282,10 @@ struct FileTypeStats: Sendable {
 }
 
 @MainActor final class ExplorerModel: ObservableObject {
-    @Published private(set) var excludedFolders: [String] = UserDefaults.standard.stringArray(forKey: "excludedFolders") ?? [] {
+    private let exclusionPreferences: UserDefaults
+    @Published private(set) var excludedFolders: [String] {
         didSet {
-            UserDefaults.standard.set(excludedFolders, forKey: "excludedFolders")
+            exclusionPreferences.set(excludedFolders, forKey: "excludedFolders")
             macTools?.setExcludedFolders(excludedFolders)
             if developerCleanupSelectionKeys != nil { developerCleanupSelectionKeys = [] }
             developerCleanupPlan = nil
@@ -300,13 +301,27 @@ struct FileTypeStats: Sendable {
 
     @Published private(set) var exclusionResultsStale = false
 
+    func refreshExcludedFolders() {
+        let current = exclusionPreferences.stringArray(forKey: "excludedFolders") ?? []
+        guard current != excludedFolders else { return }
+        if discoveryID != nil {
+            task?.cancel()
+            discoveryID = nil
+            searchingForMoreCleanup = false
+            busy = false
+        }
+        excludedFolders = current
+    }
+
     func addExcludedFolders(_ urls: [URL]) {
+        refreshExcludedFolders()
         guard macTools?.isBusy != true, !busy else { return }
         let paths = FolderExclusions(paths: excludedFolders + urls.map { $0.standardizedFileURL.path }).paths
         if paths != excludedFolders { excludedFolders = paths }
     }
 
     func removeExcludedFolder(_ path: String) {
+        refreshExcludedFolders()
         guard macTools?.isBusy != true, !busy else { return }
         excludedFolders.removeAll { $0 == path }
     }
@@ -379,7 +394,11 @@ struct FileTypeStats: Sendable {
         }
         return model
     }()
-    lazy var agentAccess = AgentAccessModel(explorer: self)
+    private let agentDirectory: URL?
+    lazy var agentAccess: AgentAccessModel = {
+        guard let agentDirectory else { return AgentAccessModel(explorer: self) }
+        return AgentAccessModel(explorer: self, directory: agentDirectory, httpPort: 51737)
+    }()
     lazy var scanSchedule = ScanScheduleModel(explorer: self)
     @Published var staged: Set<Int> = []
     @Published var deleteNodeCachesPermanently = true
@@ -795,6 +814,8 @@ struct FileTypeStats: Sendable {
 
     init(
         developerCleanupPreferences: UserDefaults? = .standard,
+        exclusionPreferences: UserDefaults = .standard,
+        agentDirectory: URL? = nil,
         developerCleanupPlanner: @escaping @Sendable ([URL], [String]) async throws -> DeveloperCleanupReview = { roots, exclusions in
             let promptAvoidance = AutomaticScanPrivacy.promptAvoidancePaths(accessStatus: FullDiskAccessProbe.status())
             return try await DeveloperCleanupReview.prepare(roots: roots, excludedFolders: exclusions, promptAvoidance: promptAvoidance)
@@ -805,6 +826,9 @@ struct FileTypeStats: Sendable {
                                                             quickCleanup: true, home: home.path)
         }
     ) {
+        self.agentDirectory = agentDirectory
+        self.exclusionPreferences = exclusionPreferences
+        excludedFolders = exclusionPreferences.stringArray(forKey: "excludedFolders") ?? []
         self.developerCleanupPreferences = developerCleanupPreferences
         self.developerCleanupPlanner = developerCleanupPlanner
         self.quickProjectPlanner = quickProjectPlanner
@@ -1042,6 +1066,7 @@ struct FileTypeStats: Sendable {
     }
 
     func findDeveloperCleanup(in roots: [URL], retainingReviewOnFailure: Bool = false, cacheHome: URL? = nil) {
+        refreshExcludedFolders()
         guard canStartDeveloperCleanup, !roots.isEmpty || cacheHome != nil else { return }
         if !retainingReviewOnFailure {
             developerCleanupPlan = nil
@@ -1191,6 +1216,7 @@ struct FileTypeStats: Sendable {
     }
 
     func confirmDeveloperCleanup(planID: UUID, ids: Set<DeveloperCleanupReview.Item.ID>, permanently: Bool) {
+        refreshExcludedFolders()
         guard let plan = editableDeveloperCleanupPlan(planID), !ids.isEmpty,
               ids.isSubset(of: developerCleanupSelectedIDs),
               permanently == developerCleanupDeletesPermanently else { return }
@@ -1886,6 +1912,7 @@ struct FileTypeStats: Sendable {
         try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
         return trashedURL as URL?
     }) {
+        refreshExcludedFolders()
         guard let scan, !busy, !moves.busy, macTools?.isBusy != true, !monitoring, !ids.isEmpty,
               cleanupAuthorizationIsCurrent(authorization, remaining: Set(ids)), permanent.isSubset(of: Set(ids)) else { return }
         let version = scanVersion

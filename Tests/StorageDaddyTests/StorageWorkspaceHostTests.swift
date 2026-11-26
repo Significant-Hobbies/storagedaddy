@@ -24,7 +24,17 @@ import Testing
 }
 
 @MainActor @Test func hostNavigatesNativeStorageWithoutStartingAgentAccessOrScans() {
-    let session = StorageWorkspaceSession()
+    let sourceName = "storage-source-" + UUID().uuidString, hostName = "storage-host-" + UUID().uuidString
+    let source = UserDefaults(suiteName: sourceName)!, host = UserDefaults(suiteName: hostName)!
+    defer {
+        source.removePersistentDomain(forName: sourceName)
+        host.removePersistentDomain(forName: hostName)
+    }
+    source.set(["/fixture/protected"], forKey: "excludedFolders")
+    let session = StorageWorkspaceSession(defaults: host, standalone: source,
+        agentDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    #expect(session.model.excludedFolders == ["/fixture/protected"])
+    source.set(["/fixture/protected", "/fixture/new-exclusion"], forKey: "excludedFolders")
     for (route, expected): (String, Workspace) in [
         ("disk-explorer-file-search", .explore), ("files", .findFiles),
         ("worktrees", .developer), ("duplicates", .duplicates), ("app-data", .appData),
@@ -36,6 +46,9 @@ import Testing
     }
     #expect(session.cleanupCandidates.isEmpty)
     #expect(session.cleanupMeasuredBytes == nil)
+    #expect(session.model.excludedFolders == ["/fixture/protected", "/fixture/new-exclusion"])
+    #expect(!session.model.agentAccess.enabled)
+    #expect(!session.model.agentAccess.listening)
     #expect(!session.model.busy)
     #expect(!session.model.isFindingStorageCulprits)
 }
